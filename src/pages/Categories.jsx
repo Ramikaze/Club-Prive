@@ -26,7 +26,7 @@ export default function Categories() {
   };
 
   return (
-    <div className="flex-col gap-6" style={{ display: 'flex' }}>
+    <div data-tour="categories-section" className="flex-col gap-6" style={{ display: 'flex' }}>
       <div className="flex justify-between items-center">
         <div>
           <h2 style={{ fontSize: '1.5rem', fontWeight: 700 }}>Catégories Comptables</h2>

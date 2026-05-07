@@ -282,7 +282,7 @@ export default function Expenses() {
         </div>
         
         <div className="flex items-center gap-2">
-          <button className="btn btn-primary" onClick={() => setShowAddModal(true)}><Plus size={18} /> Ajouter une dépense</button>
+          <button data-tour="add-expense-btn" className="btn btn-primary" onClick={() => setShowAddModal(true)}><Plus size={18} /> Ajouter une dépense</button>
           <button className="btn btn-outline" onClick={handleExport} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <FileDown size={16} /> Export Excel
           </button>

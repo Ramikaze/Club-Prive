@@ -1,8 +1,10 @@
+import { useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, BookOpen, Lock, LogOut, Tags, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { LayoutDashboard, BookOpen, Lock, LogOut, Tags, ArrowUpRight, ArrowDownRight, Play } from 'lucide-react';
 import { useStore } from '../../store/useStore';
+import DemoMode from '../ui/DemoMode.jsx';
 
-export function Sidebar() {
+export function Sidebar({ onLaunchDemo }) {
   const { logout } = useStore();
   const navigate = useNavigate();
 
@@ -26,7 +28,7 @@ export function Sidebar() {
         <h1 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Meiji Business Manager</h1>
         <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Gestion Financière</p>
       </div>
-      <nav style={{ flex: 1, padding: '1.5rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+      <nav data-tour="sidebar-nav" style={{ flex: 1, padding: '1.5rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
         {navItems.map(item => (
           <NavLink 
             key={item.path} 
@@ -43,8 +45,19 @@ export function Sidebar() {
             {item.name}
           </NavLink>
         ))}
+
+        {/* Demo Relaunch Button */}
+        <button
+          className="demo-relaunch-btn"
+          onClick={onLaunchDemo}
+          style={{ marginTop: '0.75rem' }}
+        >
+          <Play size={16} />
+          Relancer la démo
+        </button>
       </nav>
       <div
+        data-tour="logout-btn"
         onClick={handleLogout}
         style={{ padding: '1.5rem', borderTop: '1px solid rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', gap: '1rem', cursor: 'pointer', transition: 'background 0.2s', borderRadius: '0 0 0 0' }}
         onMouseEnter={e => e.currentTarget.style.background = 'rgba(239,68,68,0.1)'}
@@ -87,7 +100,7 @@ export function Topbar() {
       <div className="flex items-center gap-6">
         
         {/* Date Filter */}
-        <div className="flex items-center gap-2">
+        <div data-tour="date-filter" className="flex items-center gap-2">
           <span style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>Période :</span>
           <select 
             className="form-input" 
@@ -118,7 +131,7 @@ export function Topbar() {
         </div>
 
         {/* Entity Selector */}
-        <div className="flex items-center gap-2">
+        <div data-tour="entity-selector" className="flex items-center gap-2">
           <span style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>Société :</span>
           <select 
             className="form-input" 
@@ -137,15 +150,38 @@ export function Topbar() {
 }
 
 export default function AppShell() {
+  const [demoActive, setDemoActive] = useState(false);
+
+  // Auto-launch demo on first login
+  useEffect(() => {
+    const hasCompleted = localStorage.getItem('meiji-demo-completed');
+    if (!hasCompleted) {
+      // Small delay to let the page fully render
+      const timer = setTimeout(() => setDemoActive(true), 600);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
+  const handleLaunchDemo = () => {
+    setDemoActive(true);
+  };
+
+  const handleCloseDemo = () => {
+    setDemoActive(false);
+  };
+
   return (
     <div className="flex h-full" style={{ height: '100vh', overflow: 'hidden' }}>
-      <Sidebar />
+      <Sidebar onLaunchDemo={handleLaunchDemo} />
       <div className="flex-col w-full" style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         <Topbar />
         <main style={{ flex: 1, overflowY: 'auto', padding: '2rem' }}>
           <Outlet />
         </main>
       </div>
+
+      {/* Demo Mode Overlay */}
+      <DemoMode isActive={demoActive} onClose={handleCloseDemo} />
     </div>
   );
 }

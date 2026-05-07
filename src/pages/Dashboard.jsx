@@ -273,7 +273,7 @@ export default function Dashboard() {
         </div>
         
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2" style={{ backgroundColor: 'var(--bg-surface)', padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid var(--border)' }}>
+          <div data-tour="currency-switcher" className="flex items-center gap-2" style={{ backgroundColor: 'var(--bg-surface)', padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid var(--border)' }}>
             <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>DEVISE:</span>
             {['FCFA', 'EUR', 'USD'].map(curr => (
               <button 
@@ -298,7 +298,7 @@ export default function Dashboard() {
             </div>
           )}
 
-          <button onClick={handleExportGlobal} className="btn btn-outline" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600 }}>
+          <button data-tour="export-excel" onClick={handleExportGlobal} className="btn btn-outline" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600 }}>
             <FileDown size={16} />
             Export Excel
           </button>
@@ -307,7 +307,7 @@ export default function Dashboard() {
 
       {/* Side-by-Side Comparison if Global */}
       {currentEntity === 'global' ? (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+        <div data-tour="dashboard-kpis" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
           {/* PN Column */}
           <div className="card" style={{ borderTop: '4px solid #3b82f6' }}>
             <h3 style={{ fontSize: '1.125rem', fontWeight: 700, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -352,7 +352,7 @@ export default function Dashboard() {
         </div>
       ) : (
         /* Standard KPIs if Single Entity */
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem' }}>
+        <div data-tour="dashboard-kpis" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem' }}>
           <div className="card">
             <div className="flex justify-between items-center" style={{ marginBottom: '1rem' }}>
               <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>Chiffre d'Affaires</span>
@@ -383,7 +383,7 @@ export default function Dashboard() {
       {currentEntity === 'global' ? (
         <>
           {/* Global Treasury Total */}
-          <div className="flex items-center gap-2" style={{ marginTop: '1rem' }}>
+          <div data-tour="treasury" className="flex items-center gap-2" style={{ marginTop: '1rem' }}>
             <Activity size={20} color="var(--primary)" />
             <h3 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Trésorerie Globale</h3>
             <button onClick={() => setShowBalancesModal(true)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: '0.375rem', padding: '0.35rem 0.75rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>
@@ -458,7 +458,7 @@ export default function Dashboard() {
 
       {/* Charts */}
       {currentEntity === 'global' ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <div data-tour="dashboard-charts" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           <div className="card">
             <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1.5rem' }}>Comparaison recettes Brazza/Pointe-Noire</h3>
             <div style={{ width: '100%', height: 300 }}>
@@ -501,7 +501,7 @@ export default function Dashboard() {
           </div>
         </div>
       ) : (
-        <div className="card">
+        <div data-tour="dashboard-charts" className="card">
           <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1.5rem' }}>Analyse des Flux Dynamique</h3>
           <div style={{ width: '100%', height: 350 }}>
             {timelineData.length === 0 ? (

@@ -116,7 +116,7 @@ export default function GeneralLedger() {
           <button onClick={handleExport} className="btn btn-outline" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <FileDown size={16} /> Export Excel
           </button>
-          <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+          <button data-tour="new-entry-btn" className="btn btn-primary" onClick={() => setShowModal(true)}>
             <Plus size={18} /> Nouvelle Écriture
           </button>
         </div>

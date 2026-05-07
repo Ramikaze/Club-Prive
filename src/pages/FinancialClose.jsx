@@ -25,7 +25,7 @@ export default function FinancialClose() {
   };
 
   return (
-    <div className="flex-col gap-6" style={{ display: 'flex', maxWidth: '800px', margin: '0 auto' }}>
+    <div data-tour="financial-close" className="flex-col gap-6" style={{ display: 'flex', maxWidth: '800px', margin: '0 auto' }}>
       <div>
         <h2 style={{ fontSize: '1.5rem', fontWeight: 700 }}>Clôture Financière (Financial Close)</h2>
         <p style={{ color: 'var(--text-muted)' }}>Verrouillez vos périodes comptables pour garantir l'intégrité de vos rapports.</p>
