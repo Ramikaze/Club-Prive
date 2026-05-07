@@ -64,6 +64,18 @@ export const useStore = create(
       dateFilter: { type: 'all', value: '', start: '', end: '' }, // type: 'all', 'day', 'week', 'month', 'custom'
       setDateFilter: (filter) => set({ dateFilter: filter }),
 
+      // Authentication
+      isAuthenticated: false,
+      login: (password) => {
+        const VALID_PASSWORD = 'meiji2026';
+        if (password === VALID_PASSWORD) {
+          set({ isAuthenticated: true });
+          return true;
+        }
+        return false;
+      },
+      logout: () => set({ isAuthenticated: false }),
+
       // App State
       isLoading: false,
 
@@ -258,6 +270,7 @@ export const useStore = create(
         closedPeriods: state.closedPeriods,
         usdRate: state.usdRate,
         initialBalances: state.initialBalances,
+        isAuthenticated: state.isAuthenticated,
       }),
     }
   )

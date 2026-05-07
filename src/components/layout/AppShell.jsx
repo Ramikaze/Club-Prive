@@ -1,8 +1,16 @@
-import { Outlet, NavLink } from 'react-router-dom';
+import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, BookOpen, Lock, LogOut, Tags, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 
 export function Sidebar() {
+  const { logout } = useStore();
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
+
   const navItems = [
     { name: 'Dashboard Global', path: '/dashboard', icon: LayoutDashboard },
     { name: 'Recettes', path: '/incomes', icon: ArrowUpRight },
@@ -36,13 +44,19 @@ export function Sidebar() {
           </NavLink>
         ))}
       </nav>
-      <div style={{ padding: '1.5rem', borderTop: '1px solid rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-        <div style={{ width: 36, height: 36, borderRadius: '50%', backgroundColor: 'rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <LogOut size={18} />
+      <div
+        onClick={handleLogout}
+        style={{ padding: '1.5rem', borderTop: '1px solid rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', gap: '1rem', cursor: 'pointer', transition: 'background 0.2s', borderRadius: '0 0 0 0' }}
+        onMouseEnter={e => e.currentTarget.style.background = 'rgba(239,68,68,0.1)'}
+        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+        title="Se déconnecter"
+      >
+        <div style={{ width: 36, height: 36, borderRadius: '50%', backgroundColor: 'rgba(239,68,68,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <LogOut size={18} color="#f87171" />
         </div>
         <div>
-          <p style={{ fontSize: '0.875rem', fontWeight: 600 }}>Direction</p>
-          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Meiji Group</p>
+          <p style={{ fontSize: '0.875rem', fontWeight: 600, color: '#f8fafc' }}>Direction</p>
+          <p style={{ fontSize: '0.75rem', color: '#f87171' }}>Se déconnecter</p>
         </div>
       </div>
     </aside>
