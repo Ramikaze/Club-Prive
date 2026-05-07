@@ -47,7 +47,7 @@ export default function Categories() {
               ) : categories.map(cat => (
                 <tr key={cat.id}>
                   <td style={{ fontWeight: 500 }}><div className="flex items-center gap-2"><Tag size={16} color="var(--text-muted)" />{cat.name}</div></td>
-                  <td><span className={`badge ${cat.type === 'income' ? 'badge-success' : 'badge-danger'}`}>{cat.type === 'income' ? 'Recette (AR)' : 'Dépense (AP)'}</span></td>
+                  <td><span className={`badge ${cat.type === 'income' ? 'badge-success' : 'badge-danger'}`}>{cat.type === 'income' ? 'Recette' : 'Dépense'}</span></td>
                   <td style={{ textAlign: 'right' }}>
                     <button className="btn btn-outline" style={{ padding: '0.25rem 0.5rem', marginRight: '0.5rem' }} onClick={() => handleOpenModal(cat)}><Edit2 size={14} /></button>
                     <button className="btn btn-danger" style={{ padding: '0.25rem 0.5rem' }} onClick={() => handleDelete(cat.id)}><Trash2 size={14} /></button>
@@ -71,8 +71,8 @@ export default function Categories() {
               <div className="form-group">
                 <label className="form-label">Type</label>
                 <select className="form-input" value={formData.type} onChange={e => setFormData({...formData, type: e.target.value})}>
-                  <option value="income">Recette (Entrée d'argent)</option>
-                  <option value="expense">Dépense (Sortie d'argent)</option>
+                  <option value="income">Recette</option>
+                  <option value="expense">Dépense</option>
                 </select>
               </div>
               <div className="flex justify-between" style={{ marginTop: '2rem' }}>

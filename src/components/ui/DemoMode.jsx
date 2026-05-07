@@ -175,7 +175,7 @@ Toutes les données se recalculent automatiquement.`,
     body: `Gérez votre <strong>plan comptable simplifié</strong> :`,
     features: [
       'Créer / modifier / supprimer des catégories',
-      'Type : Recette (AR) ou Dépense (AP)',
+      'Type : Recette ou Dépense',
       'Utilisées dans tous les formulaires',
     ],
     position: 'bottom',

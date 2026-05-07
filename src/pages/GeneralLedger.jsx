@@ -210,8 +210,8 @@ export default function GeneralLedger() {
                 <div className="form-group">
                   <label className="form-label">Type</label>
                   <select className="form-input" value={formData.type} onChange={e => setFormData({...formData, type: e.target.value})}>
-                    <option value="income">Recette (AR)</option>
-                    <option value="expense">Dépense (AP)</option>
+                    <option value="income">Recette</option>
+                    <option value="expense">Dépense</option>
                   </select>
                 </div>
                 <div className="form-group">
