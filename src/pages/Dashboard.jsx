@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useStore, formatFCFA, formatEUR, formatUSD } from '../store/useStore';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from 'recharts';
-import { Building2, Wallet, ArrowUpRight, ArrowDownRight, Settings, X, Activity, Edit3 } from 'lucide-react';
+import { Building2, Wallet, ArrowUpRight, ArrowDownRight, Settings, X, Activity, Edit3, FileDown } from 'lucide-react';
+import { exportMultiSheetExcel, formatTransactionsForExport } from '../utils/exportExcel';
 
 // Account Detail Modal Component
 function AccountDetailsModal({ accountName, onClose }) {
@@ -201,6 +202,20 @@ export default function Dashboard() {
   const balancesPN = getCashBalances('pn');
   const balancesBrazza = getCashBalances('brazza');
 
+  const allTxs = useStore(state => state.transactions);
+
+  const handleExportGlobal = () => {
+    const today = new Date().toISOString().split('T')[0];
+    const incomes = formatTransactionsForExport(allTxs.filter(t => t.type === 'income'));
+    const expenses = formatTransactionsForExport(allTxs.filter(t => t.type === 'expense'));
+    const all = formatTransactionsForExport(allTxs);
+    exportMultiSheetExcel([
+      { data: all.length ? all : [{ 'Info': 'Aucune transaction' }], sheetName: 'Toutes les transactions' },
+      { data: incomes.length ? incomes : [{ 'Info': 'Aucune recette' }], sheetName: 'Recettes' },
+      { data: expenses.length ? expenses : [{ 'Info': 'Aucune dépense' }], sheetName: 'Dépenses' },
+    ], `Meiji-Export-${today}`);
+  };
+
   // Dynamically compute chart data from filtered transactions
   const filteredTxs = useStore(state => state.getFilteredTransactions(currentEntity));
   const chartDataMap = {};
@@ -282,6 +297,11 @@ export default function Dashboard() {
               <input type="number" className="form-input" style={{ width: '80px', padding: '0.25rem' }} value={usdRate} onChange={(e) => setUsdRate(Number(e.target.value))} />
             </div>
           )}
+
+          <button onClick={handleExportGlobal} className="btn btn-outline" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600 }}>
+            <FileDown size={16} />
+            Export Excel
+          </button>
         </div>
       </div>
 

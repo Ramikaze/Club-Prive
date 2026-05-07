@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useStore, formatFCFA, formatEUR, formatUSD } from '../store/useStore';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from 'recharts';
-import { ArrowUpRight, Activity, Building2, X, Plus, Trash2 } from 'lucide-react';
+import { ArrowUpRight, Activity, Building2, X, Plus, Trash2, FileDown } from 'lucide-react';
+import { exportToExcel, formatTransactionsForExport } from '../utils/exportExcel';
 
 function AddIncomeModal({ onClose, onSubmit, categories, isLoading }) {
   const [form, setForm] = useState({ date: new Date().toISOString().split('T')[0], entityId: 'pn', category: '', description: '' });
@@ -202,6 +203,16 @@ export default function Incomes() {
     setShowAddModal(false);
   };
 
+  const handleExport = () => {
+    const today = new Date().toISOString().split('T')[0];
+    const data = formatTransactionsForExport(txs);
+    exportToExcel(
+      data.length ? data : [{ 'Info': 'Aucune recette' }],
+      'Recettes',
+      `Meiji-Recettes-${today}`
+    );
+  };
+
   const formatAmount = (amount) => {
     if (currencyMode === 'EUR') return formatEUR(amount);
     if (currencyMode === 'USD') return formatUSD(amount, usdRate);
@@ -272,6 +283,9 @@ export default function Incomes() {
         
         <div className="flex items-center gap-2">
           <button className="btn btn-primary" onClick={() => setShowAddModal(true)}><Plus size={18} /> Ajouter une recette</button>
+          <button className="btn btn-outline" onClick={handleExport} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <FileDown size={16} /> Export Excel
+          </button>
           <div className="flex items-center gap-2" style={{ backgroundColor: 'var(--bg-surface)', padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid var(--border)' }}>
             <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>DEVISE:</span>
             {['FCFA', 'EUR', 'USD'].map(curr => (
