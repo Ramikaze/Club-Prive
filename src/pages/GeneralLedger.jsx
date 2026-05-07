@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useStore, formatFCFA, formatUSD } from '../store/useStore';
-import { Plus, Search, Filter, Loader2, Trash2 } from 'lucide-react';
+import { Plus, Search, Filter, Loader2, Trash2, FileDown } from 'lucide-react';
+import { exportToExcel, formatTransactionsForExport } from '../utils/exportExcel';
 
 export default function GeneralLedger() {
   const { getFilteredTransactions, addTransaction, deleteTransaction, deleteTransactions, currentEntity, isPeriodClosed, isLoading, usdRate, categories } = useStore();
@@ -27,6 +28,16 @@ export default function GeneralLedger() {
       await deleteTransactions(selectedIds);
       setSelectedIds([]);
     }
+  };
+
+  const handleExport = () => {
+    const today = new Date().toISOString().split('T')[0];
+    const data = formatTransactionsForExport(transactions);
+    exportToExcel(
+      data.length ? data : [{ 'Info': 'Aucune transaction' }],
+      'Grand Livre',
+      `Meiji-GrandLivre-${today}`
+    );
   };
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
@@ -102,6 +113,9 @@ export default function GeneralLedger() {
               <Trash2 size={18} style={{ marginRight: '0.5rem' }} /> Supprimer sélection ({selectedIds.length})
             </button>
           )}
+          <button onClick={handleExport} className="btn btn-outline" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <FileDown size={16} /> Export Excel
+          </button>
           <button className="btn btn-primary" onClick={() => setShowModal(true)}>
             <Plus size={18} /> Nouvelle Écriture
           </button>
