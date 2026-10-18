@@ -8,8 +8,14 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+dist
 dist-ssr
 *.local
+
+# Cloudflare: local state and local secrets
+.wrangler
+.dev.vars
+.dev.vars.*
 
 # Editor directories and files
 .vscode/*

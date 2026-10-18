@@ -1,472 +1,303 @@
+// Expenses and other money movements (/depenses). The manager records the expenses of the day;
+// administrators see any period, also record other receipts and transfers between treasury
+// accounts, and cancel an entry with a reason (never deleted).
 import { useState } from 'react';
-import { useStore, formatFCFA, formatEUR, formatUSD } from '../store/useStore';
-import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from 'recharts';
-import { ArrowDownRight, Activity, Building2, X, Plus, Trash2, FileDown } from 'lucide-react';
-import { exportToExcel, formatTransactionsForExport } from '../utils/exportExcel';
+import Icon from '../components/ui/Icon.jsx';
+import { Modal, openDialog, actionDialog } from '../components/ui/Modal.jsx';
+import { AccountTag, Chip, DemoChip, Empty, FormError, Loaded, Notice, PageHead, Segmented } from '../components/ui/ui.jsx';
+import PeriodPicker, { usePeriod } from '../components/ui/PeriodPicker.jsx';
+import { toast } from '../components/ui/toast.jsx';
+import { api, newKey, qs } from '../lib/api.js';
+import { money, parseMoney, dayLabel, bizToday, ACCOUNT_LABEL } from '../lib/format.js';
+import { useLoad, useSubmit, useBusy } from '../lib/hooks.js';
+import { useStore, useIsAdmin } from '../store/useStore.js';
+import { downloadExcel } from '../utils/exportExcel.js';
 
-function AddExpenseModal({ onClose, onSubmit, categories, isLoading }) {
-  const [form, setForm] = useState({ date: new Date().toISOString().split('T')[0], entityId: 'pn', category: '', description: '' });
-  const [amounts, setAmounts] = useState({ 'Espèces': '', 'Banque': '', 'MTN Momo': '', 'Airtel Money': '' });
-  const expenseCategories = categories.filter(c => c.type === 'expense');
-  const total = Object.values(amounts).reduce((s, v) => s + (Number(v) || 0), 0);
-  const handleSubmit = (e) => {
+const TITLES = { depense: 'Nouvelle dépense', recette: 'Entrée diverse', transfert: 'Transfert entre comptes' };
+const DONE = { depense: 'Dépense enregistrée.', recette: 'Entrée enregistrée.', transfert: 'Transfert enregistré.' };
+const KIND_FILTERS = [['', 'Tout'], ['depense', 'Dépenses'], ['recette', 'Entrées'], ['transfert', 'Transferts']];
+
+function EntryDialog({ close, kind, categories, onDone }) {
+  const methods = useStore((s) => s.settings.payment_methods);
+  const currency = useStore((s) => s.settings.currency.label);
+  const isAdmin = useIsAdmin();
+  const today = bizToday();
+  const [key] = useState(newKey);
+  const options = categories.filter((c) => c.kind === kind && c.active);
+  const [v, setV] = useState({
+    biz_date: today, category_id: options[0]?.id ?? '', amount: '', method: methods[0] ?? '',
+    to_method: methods.find((m) => m !== methods[0]) ?? '', account: '', label: '', reference: '',
+  });
+  const { busy, error, submit } = useSubmit();
+  const set = (k) => (e) => setV({ ...v, [k]: e.target.value });
+  const category = options.find((c) => String(c.id) === String(v.category_id));
+
+  const onSubmit = (e) => {
     e.preventDefault();
-    if (total <= 0) return;
-    const txs = Object.entries(amounts)
-      .filter(([, v]) => Number(v) > 0)
-      .map(([account, amount]) => ({ ...form, type: 'expense', account, amount: Number(amount) }));
-    onSubmit(txs);
-  };
-  const updateAmount = (account, value) => setAmounts(prev => ({ ...prev, [account]: value }));
-  const formatTotal = (v) => v.toLocaleString('fr-FR') + ' FCFA';
-  return (
-    <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '2rem' }}>
-      <div className="card" style={{ width: '100%', maxWidth: '550px' }}>
-        <div className="flex justify-between items-center" style={{ marginBottom: '1.5rem' }}>
-          <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--danger)' }}>Nouvelle Dépense</h3>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={24} color="var(--text-muted)" /></button>
-        </div>
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-            <div className="form-group"><label className="form-label">Date</label><input type="date" className="form-input" required value={form.date} onChange={e => setForm({...form, date: e.target.value})} /></div>
-            <div className="form-group"><label className="form-label">Entité</label><select className="form-input" value={form.entityId} onChange={e => setForm({...form, entityId: e.target.value})}><option value="pn">Meiji PN</option><option value="brazza">Meiji Brazza</option></select></div>
-          </div>
-          <div className="form-group"><label className="form-label">Catégorie</label><select className="form-input" required value={form.category} onChange={e => setForm({...form, category: e.target.value})}><option value="">Sélectionner...</option>{expenseCategories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}</select></div>
-
-          <div style={{ backgroundColor: 'var(--bg-app)', padding: '1rem', borderRadius: '0.5rem', border: '1px solid var(--border)' }}>
-            <label className="form-label" style={{ marginBottom: '0.75rem', display: 'block' }}>Ventilation par mode de paiement</label>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-              {['Espèces', 'Banque', 'MTN Momo', 'Airtel Money'].map(account => (
-                <div key={account} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>{account}</span>
-                  <input type="number" className="form-input" min="0" value={amounts[account]} onChange={e => updateAmount(account, e.target.value)} placeholder="0" style={{ padding: '0.5rem' }} />
-                </div>
-              ))}
-            </div>
-            <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontWeight: 600, fontSize: '0.875rem' }}>Total Dépense</span>
-              <span style={{ fontWeight: 700, fontSize: '1.125rem', color: total > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>{formatTotal(total)}</span>
-            </div>
-          </div>
-
-          <div className="form-group"><label className="form-label">Description</label><input type="text" className="form-input" value={form.description} onChange={e => setForm({...form, description: e.target.value})} placeholder="Approvisionnement marché" /></div>
-          <div className="flex justify-between" style={{ marginTop: '0.5rem' }}>
-            <button type="button" className="btn btn-outline" onClick={onClose}>Annuler</button>
-            <button type="submit" className="btn btn-primary" disabled={isLoading || total <= 0}>{isLoading ? 'Enregistrement...' : 'Enregistrer la dépense'}</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-function EntityDetailModal({ entityId, entityName, entityColor, txs, formatAmount, onClose }) {
-  // Group by category
-  const categoryMap = {};
-  txs.forEach(tx => {
-    categoryMap[tx.category] = (categoryMap[tx.category] || 0) + tx.amount;
-  });
-  const categories = Object.entries(categoryMap).sort((a, b) => b[1] - a[1]);
-  const total = txs.reduce((acc, tx) => acc + tx.amount, 0);
-
-  // Group by account (payment method)
-  const accountMap = {};
-  txs.forEach(tx => {
-    accountMap[tx.account] = (accountMap[tx.account] || 0) + tx.amount;
-  });
-  const accounts = Object.entries(accountMap).sort((a, b) => b[1] - a[1]);
-
-  return (
-    <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '2rem' }}>
-      <div className="card" style={{ width: '100%', maxWidth: '900px', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
-        <div className="flex justify-between items-center" style={{ marginBottom: '1.5rem' }}>
-          <h3 style={{ fontSize: '1.25rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <Building2 size={20} color={entityColor} /> Détail Dépenses — {entityName}
-          </h3>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={24} color="var(--text-muted)" /></button>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
-          <div style={{ backgroundColor: 'var(--bg-app)', padding: '1rem', borderRadius: '0.5rem', borderLeft: `4px solid ${entityColor}` }}>
-            <h4 style={{ fontWeight: 600, marginBottom: '0.75rem', color: entityColor }}>Par Catégorie</h4>
-            {categories.map(([cat, amount]) => (
-              <div key={cat} className="flex justify-between items-center" style={{ fontSize: '0.875rem', marginBottom: '0.4rem' }}>
-                <span style={{ color: 'var(--text-muted)' }}>{cat}</span>
-                <span style={{ fontWeight: 600, color: 'var(--danger)' }}>{formatAmount(amount)}</span>
-              </div>
-            ))}
-          </div>
-          <div style={{ backgroundColor: 'var(--bg-app)', padding: '1rem', borderRadius: '0.5rem', borderLeft: `4px solid ${entityColor}` }}>
-            <h4 style={{ fontWeight: 600, marginBottom: '0.75rem', color: entityColor }}>Par Mode de Paiement</h4>
-            {accounts.map(([acc, amount]) => (
-              <div key={acc} className="flex justify-between items-center" style={{ fontSize: '0.875rem', marginBottom: '0.4rem' }}>
-                <span style={{ color: 'var(--text-muted)' }}>{acc}</span>
-                <span style={{ fontWeight: 600, color: 'var(--danger)' }}>{formatAmount(amount)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div style={{ padding: '0.75rem 1rem', backgroundColor: 'var(--bg-app)', borderRadius: '0.5rem', marginBottom: '1rem' }}>
-          <span style={{ fontWeight: 700, fontSize: '1.125rem' }}>Total: <span style={{ color: 'var(--danger)' }}>{formatAmount(total)}</span></span>
-          <span style={{ color: 'var(--text-muted)', marginLeft: '1rem', fontSize: '0.875rem' }}>({txs.length} transactions)</span>
-        </div>
-
-        <div style={{ overflowY: 'auto', flex: 1 }} className="table-container">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Catégorie</th>
-                <th>Compte</th>
-                <th>Description</th>
-                <th>Montant</th>
-              </tr>
-            </thead>
-            <tbody>
-              {txs.map(tx => (
-                <tr key={tx.id}>
-                  <td>{tx.date}</td>
-                  <td>{tx.category}</td>
-                  <td><span style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem', backgroundColor: 'var(--bg-app)', borderRadius: '4px' }}>{tx.account}</span></td>
-                  <td>{tx.description}</td>
-                  <td style={{ fontWeight: 600, color: 'var(--danger)' }}>- {formatAmount(tx.amount)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const COLORS = ['#ef4444', '#f97316', '#f59e0b', '#eab308', '#84cc16', '#06b6d4', '#6366f1'];
-
-const CustomTooltip = ({ active, payload, label, formatAmount, currentEntity }) => {
-  if (active && payload && payload.length) {
-    if (currentEntity === 'global') {
-      const pn = payload.find(p => p.dataKey === 'PN_Expense')?.value || 0;
-      const brazza = payload.find(p => p.dataKey === 'Brazza_Expense')?.value || 0;
-      const total = pn + brazza;
-      return (
-        <div className="card" style={{ padding: '1rem', border: '1px solid var(--border)', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)', minWidth: '200px' }}>
-          <p style={{ fontWeight: 700, marginBottom: '0.5rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem' }}>{label}</p>
-          <p style={{ fontSize: '0.875rem', marginBottom: '0.25rem' }}>Meiji PN: <span style={{fontWeight: 600, color: '#ef4444'}}>{formatAmount(pn)}</span></p>
-          <p style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}>Meiji Brazza: <span style={{fontWeight: 600, color: '#f97316'}}>{formatAmount(brazza)}</span></p>
-          <p style={{ fontSize: '1rem', fontWeight: 700, marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border)' }}>Total: {formatAmount(total)}</p>
-        </div>
-      );
-    } else {
-      const expense = payload[0].value;
-      return (
-        <div className="card" style={{ padding: '1rem', border: '1px solid var(--border)', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)', minWidth: '200px' }}>
-          <p style={{ fontWeight: 700, marginBottom: '0.5rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem' }}>{label}</p>
-          <p style={{ fontSize: '1rem', fontWeight: 700 }}>Dépenses: <span style={{color: 'var(--danger)'}}>{formatAmount(expense)}</span></p>
-        </div>
-      );
-    }
-  }
-  return null;
-};
-
-export default function Expenses() {
-  const { currentEntity, getFilteredTransactions, addTransaction, deleteTransaction, deleteTransactions, categories, usdRate, dateFilter, isLoading } = useStore();
-  const [currencyMode, setCurrencyMode] = useState('FCFA');
-  const [selectedEntity, setSelectedEntity] = useState(null);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [selectedIds, setSelectedIds] = useState([]);
-
-  const txs = getFilteredTransactions(currentEntity).filter(tx => tx.type === 'expense');
-
-  const handleSelectAll = (e) => {
-    if (e.target.checked) {
-      setSelectedIds(txs.map(tx => tx.id));
-    } else {
-      setSelectedIds([]);
-    }
-  };
-
-  const handleSelectOne = (id) => {
-    setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
-  };
-
-  const handleBulkDelete = async () => {
-    if (window.confirm(`Voulez-vous vraiment supprimer les ${selectedIds.length} dépenses sélectionnées ?`)) {
-      await deleteTransactions(selectedIds);
-      setSelectedIds([]);
-    }
-  };
-
-  const handleAddExpense = async (entries) => {
-    for (const tx of entries) await addTransaction(tx);
-    setShowAddModal(false);
-  };
-
-  const handleExport = () => {
-    const today = new Date().toISOString().split('T')[0];
-    const data = formatTransactionsForExport(txs);
-    exportToExcel(
-      data.length ? data : [{ 'Info': 'Aucune dépense' }],
-      'Dépenses',
-      `Meiji-Dépenses-${today}`
-    );
-  };
-
-  const formatAmount = (amount) => {
-    if (currencyMode === 'EUR') return formatEUR(amount);
-    if (currencyMode === 'USD') return formatUSD(amount, usdRate);
-    return formatFCFA(amount);
-  };
-
-  // KPI
-  const totalExpense = txs.reduce((acc, tx) => acc + tx.amount, 0);
-
-  // Data for Timeline Chart
-  const chartDataMap = {};
-  
-  if (dateFilter.type === 'month' && dateFilter.value) {
-    const [year, month] = dateFilter.value.split('-');
-    const daysInMonth = new Date(year, month, 0).getDate();
-    for (let d = 1; d <= daysInMonth; d++) {
-      const dayStr = `${year}-${month}-${d.toString().padStart(2, '0')}`;
-      chartDataMap[dayStr] = { name: dayStr, Expense: 0, PN_Expense: 0, Brazza_Expense: 0 };
-    }
-  } else if (dateFilter.type === 'custom' && dateFilter.start && dateFilter.end) {
-    const start = new Date(dateFilter.start);
-    const end = new Date(dateFilter.end);
-    if (start <= end) {
-      const diffDays = Math.ceil(Math.abs(end - start) / (1000 * 60 * 60 * 24));
-      if (diffDays <= 60) {
-        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-          const dayStr = d.toISOString().split('T')[0];
-          chartDataMap[dayStr] = { name: dayStr, Expense: 0, PN_Expense: 0, Brazza_Expense: 0 };
-        }
+    submit(async () => {
+      const amount = parseMoney(v.amount);
+      if (!amount) throw new Error('Montant invalide : saisissez un nombre positif (exemple : 25 000).');
+      const body = { kind, amount, method: v.method, label: v.label, reference: v.reference };
+      if (isAdmin) body.biz_date = v.biz_date;
+      if (kind === 'transfert') {
+        if (v.to_method === v.method) throw new Error('Choisissez deux comptes différents.');
+        body.to_method = v.to_method;
+      } else {
+        if (!category) throw new Error('Choisissez une catégorie.');
+        body.category_id = category.id;
+        if (kind === 'depense') body.account = v.account || null;
       }
-    }
-  }
-
-  txs.forEach(tx => {
-    const key = tx.date;
-    if (!chartDataMap[key]) {
-      chartDataMap[key] = { name: key, Expense: 0, PN_Expense: 0, Brazza_Expense: 0 };
-    }
-    chartDataMap[key].Expense += tx.amount;
-    if (tx.entityId === 'pn') chartDataMap[key].PN_Expense += tx.amount;
-    if (tx.entityId === 'brazza') chartDataMap[key].Brazza_Expense += tx.amount;
-  });
-
-  const timelineData = Object.values(chartDataMap).sort((a, b) => a.name.localeCompare(b.name));
-
-  // Data for Pie Chart (by Category)
-  const categoryMap = {};
-  txs.forEach(tx => {
-    categoryMap[tx.category] = (categoryMap[tx.category] || 0) + tx.amount;
-  });
-  const categoryData = Object.entries(categoryMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
-
-  // Data for Entity Pie Chart (if Global)
-  const entityData = currentEntity === 'global' ? [
-    { name: 'Meiji PN', value: txs.filter(t => t.entityId === 'pn').reduce((acc, t) => acc + t.amount, 0), color: '#ef4444' },
-    { name: 'Meiji Brazza', value: txs.filter(t => t.entityId === 'brazza').reduce((acc, t) => acc + t.amount, 0), color: '#f97316' }
-  ] : [];
+      const entry = await api.post('/api/ledger/entries', body, key);
+      close();
+      toast(DONE[kind]);
+      onDone?.(entry);
+    });
+  };
 
   return (
-    <div className="flex-col gap-6" style={{ display: 'flex' }}>
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '0.25rem', color: 'var(--danger)' }}>
-            Analyse des Dépenses
-          </h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Vue détaillée des flux sortants pour la période sélectionnée.</p>
-        </div>
-        
-        <div className="flex items-center gap-2">
-          <button data-tour="add-expense-btn" className="btn btn-primary" onClick={() => setShowAddModal(true)}><Plus size={18} /> Ajouter une dépense</button>
-          <button className="btn btn-outline" onClick={handleExport} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <FileDown size={16} /> Export Excel
-          </button>
-          <div className="flex items-center gap-2" style={{ backgroundColor: 'var(--bg-surface)', padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid var(--border)' }}>
-            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>DEVISE:</span>
-            {['FCFA', 'EUR', 'USD'].map(curr => (
-              <button key={curr} onClick={() => setCurrencyMode(curr)} className="btn" style={{ padding: '0.25rem 0.5rem', backgroundColor: currencyMode === curr ? 'var(--primary)' : 'transparent', color: currencyMode === curr ? '#fff' : 'var(--text-main)' }}>{curr}</button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* KPIs */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '1.5rem' }}>
-        <div className="card" style={{ borderTop: '4px solid var(--danger)' }}>
-          <div className="flex justify-between items-center" style={{ marginBottom: '1rem' }}>
-            <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>Total Dépenses</span>
-            <div style={{ padding: '0.5rem', backgroundColor: 'var(--danger-bg)', color: 'var(--danger)', borderRadius: '0.5rem' }}><ArrowDownRight size={20} /></div>
-          </div>
-          <div style={{ fontSize: '2rem', fontWeight: 700, color: 'var(--danger)' }}>{formatAmount(totalExpense)}</div>
-        </div>
-
-        {currentEntity === 'global' && (
-          <>
-            <div className="card" onClick={() => setSelectedEntity('pn')} style={{ cursor: 'pointer', transition: 'transform 0.2s, border-color 0.2s', border: '1px solid transparent' }} onMouseEnter={e => e.currentTarget.style.borderColor = '#ef4444'} onMouseLeave={e => e.currentTarget.style.borderColor = 'transparent'}>
-               <div className="flex justify-between items-center" style={{ marginBottom: '1rem' }}>
-                <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>Part Meiji PN</span>
-                <div style={{ padding: '0.5rem', backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', borderRadius: '0.5rem' }}><Building2 size={20} /></div>
-              </div>
-              <div style={{ fontSize: '2rem', fontWeight: 700 }}>{formatAmount(entityData.find(e => e.name === 'Meiji PN')?.value || 0)}</div>
-              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>Cliquez pour voir le détail →</p>
-            </div>
-            <div className="card" onClick={() => setSelectedEntity('brazza')} style={{ cursor: 'pointer', transition: 'transform 0.2s, border-color 0.2s', border: '1px solid transparent' }} onMouseEnter={e => e.currentTarget.style.borderColor = '#f97316'} onMouseLeave={e => e.currentTarget.style.borderColor = 'transparent'}>
-               <div className="flex justify-between items-center" style={{ marginBottom: '1rem' }}>
-                <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>Part Meiji Brazza</span>
-                <div style={{ padding: '0.5rem', backgroundColor: 'rgba(249, 115, 22, 0.1)', color: '#f97316', borderRadius: '0.5rem' }}><Building2 size={20} /></div>
-              </div>
-              <div style={{ fontSize: '2rem', fontWeight: 700 }}>{formatAmount(entityData.find(e => e.name === 'Meiji Brazza')?.value || 0)}</div>
-              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>Cliquez pour voir le détail →</p>
-            </div>
-          </>
+    <Modal title={TITLES[kind]} onClose={close}>
+      <form className="form-grid" onSubmit={onSubmit} noValidate>
+        {isAdmin ? (
+          <label className="field"><span>Date de l’opération</span>
+            <input type="date" value={v.biz_date} max={today} required onChange={set('biz_date')} />
+            <span className="help">Une date située dans un mois clôturé est refusée.</span></label>
+        ) : (
+          <p className="subtle">Date : {dayLabel(today)} (dépenses du jour).</p>
         )}
-      </div>
-
-      {/* Charts Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: currentEntity === 'global' ? '1fr 1fr' : '1fr', gap: '1.5rem' }}>
-        
-        {/* Category Pie Chart */}
-        <div className="card">
-          <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <Activity size={18} color="var(--primary)" /> Répartition par Catégorie
-          </h3>
-          <div style={{ width: '100%', height: 300 }}>
-            {categoryData.length === 0 ? (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)' }}>Aucune donnée.</div>
-            ) : (
-              <ResponsiveContainer>
-                <PieChart>
-                  <Pie data={categoryData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={2} dataKey="value" nameKey="name" label={({name, percent}) => `${name} (${(percent * 100).toFixed(0)}%)`}>
-                    {categoryData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <RechartsTooltip formatter={(value) => formatAmount(value)} contentStyle={{ backgroundColor: 'var(--bg-app)', border: '1px solid var(--border)' }} />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        </div>
-
-        {/* Entity Pie Chart (Only for global) */}
-        {currentEntity === 'global' && (
-          <div className="card">
-            <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <Building2 size={18} color="var(--primary)" /> Répartition par Entité
-            </h3>
-            <div style={{ width: '100%', height: 300 }}>
-              {totalExpense === 0 ? (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)' }}>Aucune donnée.</div>
-              ) : (
-                <ResponsiveContainer>
-                  <PieChart>
-                    <Pie data={entityData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={2} dataKey="value" nameKey="name" label={({name, percent}) => `${name} (${(percent * 100).toFixed(0)}%)`}>
-                      {entityData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <RechartsTooltip formatter={(value) => formatAmount(value)} contentStyle={{ backgroundColor: 'var(--bg-app)', border: '1px solid var(--border)' }} />
-                    <Legend />
-                  </PieChart>
-                </ResponsiveContainer>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Timeline Bar Chart */}
-      <div className="card">
-        <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1.5rem' }}>Évolution Journalière des Dépenses</h3>
-        <div style={{ width: '100%', height: 350 }}>
-          {timelineData.length === 0 ? (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)' }}>Aucune donnée pour cette période.</div>
-          ) : (
-            <ResponsiveContainer>
-              <BarChart data={timelineData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 12}} />
-                <YAxis axisLine={false} tickLine={false} tickFormatter={(value) => value / 1000 + 'k'} />
-                <RechartsTooltip content={<CustomTooltip formatAmount={formatAmount} currentEntity={currentEntity} />} cursor={{fill: 'var(--bg-app)'}} />
-                <Legend />
-                {currentEntity === 'global' ? (
-                  <>
-                    <Bar dataKey="PN_Expense" name="Meiji PN" stackId="a" fill="#ef4444" />
-                    <Bar dataKey="Brazza_Expense" name="Meiji Brazza" stackId="a" fill="#f97316" radius={[4, 4, 0, 0]} />
-                  </>
-                ) : (
-                  <Bar dataKey="Expense" name="Dépenses" fill="var(--danger)" radius={[4, 4, 0, 0]} />
-                )}
-              </BarChart>
-            </ResponsiveContainer>
+        {kind !== 'transfert' && (options.length ? (
+          <label className="field"><span>Catégorie</span>
+            <select value={v.category_id} onChange={set('category_id')}>
+              {options.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select></label>
+        ) : (
+          <Notice kind="warn">Aucune catégorie active. Un administrateur peut en créer dans Paramètres, rubrique Catégories.</Notice>
+        ))}
+        <label className="field"><span>Montant ({currency})</span>
+          <input inputMode="decimal" autoComplete="off" placeholder="25 000" required value={v.amount} onChange={set('amount')} /></label>
+        <div className="form-row">
+          <label className="field"><span>{kind === 'depense' ? 'Payé depuis' : kind === 'recette' ? 'Reçu sur' : 'Depuis'}</span>
+            <select value={v.method} onChange={set('method')}>
+              {methods.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select></label>
+          {kind === 'transfert' && (
+            <label className="field"><span>Vers</span>
+              <select value={v.to_method} onChange={set('to_method')}>
+                {methods.filter((m) => m !== v.method).map((m) => <option key={m} value={m}>{m}</option>)}
+              </select></label>
+          )}
+          {kind === 'depense' && (
+            <label className="field"><span>Sous-compte concerné</span>
+              <select value={v.account} onChange={set('account')}>
+                <option value="">Frais généraux</option>
+                {Object.entries(ACCOUNT_LABEL).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+              </select></label>
           )}
         </div>
-      </div>
+        {kind === 'depense' && (
+          <p className="subtle">Affecter un achat de cigares ou de boissons à son sous-compte permet d’en suivre la marge.</p>
+        )}
+        <label className="field"><span>Libellé</span>
+          <input maxLength={120} placeholder={kind === 'transfert' ? 'Dépôt en banque' : (category?.name ?? '')} value={v.label} onChange={set('label')} />
+          <span className="help">Facultatif : {kind === 'transfert' ? 'les deux comptes sont indiqués par défaut.' : 'le nom de la catégorie est utilisé par défaut.'}</span></label>
+        <label className="field"><span>Référence</span>
+          <input maxLength={80} placeholder="N° de facture, de reçu ou de transaction" value={v.reference} onChange={set('reference')} /></label>
+        <FormError error={error} />
+        <div className="modal-actions">
+          <button type="button" className="btn" onClick={close}>Annuler</button>
+          <button type="submit" className="btn btn-primary" disabled={busy || (kind !== 'transfert' && !options.length)} aria-busy={busy}>Enregistrer</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
 
-      {/* Transactions Table */}
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <div className="flex justify-between items-center" style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border)' }}>
-          <div className="flex items-center" style={{ gap: '1rem' }}>
-            <h3 style={{ fontSize: '1rem', fontWeight: 600 }}>Liste des Dépenses ({txs.length})</h3>
-            {selectedIds.length > 0 && (
-              <button onClick={handleBulkDelete} className="btn" style={{ padding: '0.25rem 0.75rem', fontSize: '0.875rem', backgroundColor: 'var(--danger)', color: 'white' }}>
-                <Trash2 size={14} style={{ marginRight: '0.25rem' }} /> Supprimer sélection ({selectedIds.length})
-              </button>
+function byCategory(entries) {
+  const map = new Map();
+  for (const e of entries) {
+    if (e.status !== 'active' || e.kind !== 'depense') continue;
+    map.set(e.category_name, (map.get(e.category_name) ?? 0) + e.amount);
+  }
+  return [...map.entries()].sort((a, b) => b[1] - a[1]);
+}
+
+function byMethod(entries, methods) {
+  const rows = new Map(methods.map((m) => [m, { method: m, in: 0, out: 0 }]));
+  const row = (m) => {
+    if (!rows.has(m)) rows.set(m, { method: m, in: 0, out: 0 });
+    return rows.get(m);
+  };
+  for (const e of entries) {
+    if (e.status !== 'active') continue;
+    if (e.kind === 'depense') row(e.method).out += e.amount;
+    else if (e.kind === 'recette') row(e.method).in += e.amount;
+    else {
+      row(e.method).out += e.amount;
+      row(e.to_method).in += e.amount;
+    }
+  }
+  return [...rows.values()].filter((r) => r.in || r.out);
+}
+
+function EntryRow({ e, isAdmin, onCancel }) {
+  const muted = e.status !== 'active';
+  const tone = e.kind === 'depense' ? 'amount-out' : e.kind === 'recette' ? 'amount-in' : '';
+  return (
+    <tr className={muted ? 'is-muted' : ''}>
+      <td data-label="Date" className="nowrap">{dayLabel(e.biz_date, 'short')}</td>
+      <td data-label="Opération">
+        <div className="title">{e.label} <DemoChip on={e.is_demo} /></div>
+        <div className="subtle">
+          {e.kind_label}{e.category_name ? ` · ${e.category_name}` : ''}{e.reference ? ` · ${e.reference}` : ''}
+          {e.account && <> · <AccountTag account={e.account} /></>}
+        </div>
+        {muted && e.cancel_reason && <div className="subtle">Annulée par {e.cancelled_by_name} : {e.cancel_reason}</div>}
+      </td>
+      <td data-label="Compte" className="nowrap">{e.kind === 'transfert' ? `${e.method} → ${e.to_method}` : e.method}</td>
+      <td data-label="Montant" className={`num ${muted ? '' : tone}`}><span className={muted ? 'strike' : ''}>{money(e.amount)}</span></td>
+      <td data-label="Statut">
+        <span className="row">
+          <Chip group="entry" value={e.status} />
+          {e.period_closed && <span className="chip" title="Mois clôturé"><Icon name="lock" /> Clôturé</span>}
+        </span>
+      </td>
+      <td data-label="Saisi par">{e.created_by_name ?? '—'}</td>
+      <td className="actions">
+        {isAdmin && !muted && !e.period_closed && (
+          <button type="button" className="btn btn-sm btn-danger" onClick={() => onCancel(e)}>Annuler</button>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+export default function Expenses() {
+  const isAdmin = useIsAdmin();
+  const methods = useStore((s) => s.settings.payment_methods);
+  const period = usePeriod('month');
+  const kind = isAdmin ? (period.params.get('type') ?? '') : '';
+  const excel = useBusy();
+  const state = useLoad(async () => {
+    const [list, categories] = await Promise.all([
+      api.get(`/api/ledger/entries${qs({ from: period.from, to: period.to, kind })}`),
+      api.get('/api/ledger/categories'),
+    ]);
+    return { ...list, categories };
+  }, [period.from, period.to, kind]);
+
+  const open = (entryKind) => openDialog(EntryDialog, { kind: entryKind, categories: state.data?.categories ?? [], onDone: state.reload });
+  const cancel = (e) => actionDialog({
+    title: 'Annuler cette opération',
+    message: `${e.label} — ${money(e.amount)}, ${dayLabel(e.biz_date, 'short')}. L’opération reste visible, barrée, avec le motif.`,
+    reasonLabel: 'Motif de l’annulation',
+    confirmLabel: 'Annuler l’opération',
+    danger: true,
+    run: async ({ reason }) => {
+      await api.post(`/api/ledger/entries/${e.id}/cancel`, { reason });
+      toast('Opération annulée.');
+      state.reload();
+    },
+  });
+
+  return (
+    <>
+      <PageHead
+        title={isAdmin ? 'Dépenses et entrées' : 'Dépenses du jour'}
+        lead={isAdmin
+          ? 'Dépenses, entrées diverses et transferts entre caisses et comptes.'
+          : 'Achats et factures réglés aujourd’hui depuis la caisse ou un compte.'}
+        tour="expenses"
+        actions={(
+          <>
+            {isAdmin && (
+              <button type="button" className="btn" disabled={excel.busy} aria-busy={excel.busy}
+                onClick={() => excel.run(() => downloadExcel([{ kind: 'operations', params: { from: period.from, to: period.to } }]))}>
+                <Icon name="excel" /> Excel</button>
             )}
-          </div>
+            {isAdmin && <button type="button" className="btn" disabled={!state.data} onClick={() => open('transfert')}><Icon name="transfer" /> Transfert</button>}
+            {isAdmin && <button type="button" className="btn" disabled={!state.data} onClick={() => open('recette')}><Icon name="plus" /> Entrée diverse</button>}
+            <button type="button" className="btn btn-primary" disabled={!state.data} onClick={() => open('depense')}><Icon name="plus" /> Nouvelle dépense</button>
+          </>
+        )}
+      />
+      {isAdmin ? (
+        <div className="toolbar">
+          <PeriodPicker period={period} />
+          <Segmented label="Type d’opération" value={kind} options={KIND_FILTERS} onChange={(k) => period.setParam('type', k)} />
         </div>
-        <div className="table-container" style={{ maxHeight: '500px', overflowY: 'auto' }}>
-          <table className="data-table">
-            <thead><tr><th style={{ width: '40px', textAlign: 'center' }}><input type="checkbox" onChange={handleSelectAll} checked={txs.length > 0 && selectedIds.length === txs.length} /></th><th>Date</th><th>Entité</th><th>Catégorie</th><th>Mode de paiement</th><th>Description</th><th style={{ textAlign: 'right' }}>Montant</th><th style={{ textAlign: 'center', width: '50px' }}>Action</th></tr></thead>
-            <tbody>
-              {txs.length === 0 ? (
-                <tr><td colSpan="8" style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>Aucune dépense pour cette période.</td></tr>
-              ) : txs.sort((a, b) => b.date.localeCompare(a.date)).map(tx => (
-                <tr key={tx.id} style={selectedIds.includes(tx.id) ? { backgroundColor: 'var(--bg-app)' } : {}}>
-                  <td style={{ textAlign: 'center' }}><input type="checkbox" checked={selectedIds.includes(tx.id)} onChange={() => handleSelectOne(tx.id)} /></td>
-                  <td style={{ whiteSpace: 'nowrap' }}>{tx.date}</td>
-                  <td><span style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem', backgroundColor: tx.entityId === 'pn' ? 'rgba(59,130,246,0.1)' : 'rgba(139,92,246,0.1)', color: tx.entityId === 'pn' ? '#3b82f6' : '#8b5cf6', borderRadius: '4px', fontWeight: 600 }}>{tx.entityId === 'pn' ? 'PN' : 'Brazza'}</span></td>
-                  <td>{tx.category}</td>
-                  <td><span style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem', backgroundColor: 'var(--bg-app)', borderRadius: '4px' }}>{tx.account}</span></td>
-                  <td>{tx.description}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--danger)' }}>- {formatAmount(tx.amount)}</td>
-                  <td style={{ textAlign: 'center' }}>
-                    <button onClick={() => { if(window.confirm('Voulez-vous vraiment supprimer cette dépense ?')) deleteTransaction(tx.id); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0.25rem', color: 'var(--danger)' }} title="Supprimer">
-                      <Trash2 size={16} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      ) : (
+        <div className="toolbar">
+          <Notice>Vous voyez et saisissez les dépenses du jour ({dayLabel(bizToday())}). L’historique complet et les annulations sont réservés aux administrateurs.</Notice>
         </div>
-      </div>
-
-      {selectedEntity && (
-        <EntityDetailModal
-          entityId={selectedEntity}
-          entityName={selectedEntity === 'pn' ? 'Meiji PN' : 'Meiji Brazza'}
-          entityColor={selectedEntity === 'pn' ? '#ef4444' : '#f97316'}
-          txs={txs.filter(t => t.entityId === selectedEntity)}
-          formatAmount={formatAmount}
-          onClose={() => setSelectedEntity(null)}
-        />
       )}
-
-      {showAddModal && (
-        <AddExpenseModal
-          onClose={() => setShowAddModal(false)}
-          onSubmit={handleAddExpense}
-          categories={categories}
-          isLoading={isLoading}
-        />
-      )}
-    </div>
+      <Loaded state={state}>
+        {(data) => {
+          const cats = byCategory(data.entries);
+          const max = cats[0]?.[1] ?? 0;
+          const flows = byMethod(data.entries, methods);
+          const active = data.entries.filter((e) => e.status === 'active');
+          const total = (k) => active.filter((e) => e.kind === k).reduce((s, e) => s + e.amount, 0);
+          return (
+            <>
+              <div className="grid-2">
+                <div className="card">
+                  <div className="card-head"><h2>Dépenses par catégorie</h2><span className="subtle">{money(total('depense'))}</span></div>
+                  {cats.length ? (
+                    <div className="bars">
+                      {cats.map(([name, amount]) => (
+                        <div className="bar-row" key={name}>
+                          <div className="top"><span>{name}</span><span className="amount">{money(amount)}</span></div>
+                          <div className="bar-track"><div className="bar-fill" style={{ width: `${Math.max(2, (amount / max) * 100)}%` }} /></div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : <p className="subtle">Aucune dépense sur la période.</p>}
+                </div>
+                <div className="card">
+                  <div className="card-head"><h2>Par caisse et compte</h2></div>
+                  {flows.length ? (
+                    <div className="table-wrap">
+                      <table className="table">
+                        <thead><tr><th>Compte</th><th className="num">Sorties</th><th className="num">Entrées</th></tr></thead>
+                        <tbody>
+                          {flows.map((r) => (
+                            <tr key={r.method}><td>{r.method}</td><td className="num">{r.out ? money(r.out) : '—'}</td><td className="num">{r.in ? money(r.in) : '—'}</td></tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : <p className="subtle">Aucun mouvement sur la période.</p>}
+                  {total('recette') > 0 && <p className="subtle section-gap">Entrées diverses : {money(total('recette'))}.</p>}
+                </div>
+              </div>
+              <div className="card section-gap">
+                <div className="card-head">
+                  <h2>Opérations</h2>
+                  <span className="subtle">
+                    {data.from === data.to ? dayLabel(data.from) : `Du ${dayLabel(data.from, 'short')} au ${dayLabel(data.to, 'short')}`} · {data.entries.length} opération(s)
+                  </span>
+                </div>
+                {data.entries.length ? (
+                  <div className="table-wrap">
+                    <table className="table stack-sm">
+                      <thead>
+                        <tr><th>Date</th><th>Opération</th><th>Compte</th><th className="num">Montant</th><th>Statut</th><th>Saisi par</th><th /></tr>
+                      </thead>
+                      <tbody>
+                        {data.entries.map((e) => <EntryRow key={e.id} e={e} isAdmin={isAdmin} onCancel={cancel} />)}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <Empty icon="receipt">
+                    <p>Aucune opération sur cette période.</p>
+                    <button type="button" className="btn btn-primary" onClick={() => open('depense')}><Icon name="plus" /> Nouvelle dépense</button>
+                  </Empty>
+                )}
+              </div>
+            </>
+          );
+        }}
+      </Loaded>
+    </>
   );
 }

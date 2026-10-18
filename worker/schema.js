@@ -1,0 +1,414 @@
+// Database schema. Amounts are integers in hundredths of the currency unit (exact arithmetic).
+// Credits are minutes. Timestamps are ISO-8601 UTC strings; business days are 'YYYY-MM-DD'.
+// MIGRATIONS[n] brings the schema from version n to n + 1. Each statement runs on its own: the
+// Durable Object storage takes one statement per call and has no PRAGMA user_version.
+const V1 = [
+  `CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    login TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    name TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('admin', 'gerant')),
+    password_hash TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    last_login_at TEXT
+  )`,
+
+  `CREATE TABLE sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+  )`,
+
+  `CREATE TABLE settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by INTEGER REFERENCES users(id)
+  )`,
+
+  `CREATE TABLE plans (
+    id INTEGER PRIMARY KEY,
+    code TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    duration_months INTEGER NOT NULL CHECK (duration_months BETWEEN 1 AND 36),
+    included_minutes INTEGER NOT NULL CHECK (included_minutes >= 0),
+    price INTEGER CHECK (price IS NULL OR price >= 0),
+    price_validated INTEGER NOT NULL DEFAULT 0 CHECK (price_validated IN (0, 1)),
+    price_validated_by INTEGER REFERENCES users(id),
+    price_validated_at TEXT,
+    price_note TEXT,
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    updated_at TEXT,
+    updated_by INTEGER REFERENCES users(id)
+  )`,
+
+  `CREATE TABLE members (
+    id INTEGER PRIMARY KEY,
+    member_no TEXT NOT NULL UNIQUE,
+    first_name TEXT NOT NULL,
+    last_name TEXT NOT NULL,
+    phone TEXT NOT NULL,
+    email TEXT,
+    notes TEXT,
+    is_demo INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    updated_at TEXT,
+    updated_by INTEGER REFERENCES users(id)
+  )`,
+
+  `CREATE TABLE subscriptions (
+    id INTEGER PRIMARY KEY,
+    member_id INTEGER NOT NULL REFERENCES members(id),
+    plan_id INTEGER NOT NULL REFERENCES plans(id),
+    plan_name TEXT NOT NULL,
+    duration_months INTEGER NOT NULL,
+    start_date TEXT NOT NULL,
+    end_date TEXT NOT NULL,
+    included_minutes INTEGER NOT NULL CHECK (included_minutes >= 0),
+    allocation_mode TEXT NOT NULL CHECK (allocation_mode IN ('activation', 'mensuelle')),
+    price INTEGER,
+    price_validated INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'annulee')),
+    renewal_of INTEGER REFERENCES subscriptions(id),
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    cancelled_at TEXT,
+    cancelled_by INTEGER REFERENCES users(id),
+    cancel_reason TEXT,
+    CHECK (end_date >= start_date)
+  )`,
+  'CREATE INDEX subscriptions_member ON subscriptions(member_id, start_date)',
+
+  `CREATE TABLE cards (
+    id INTEGER PRIMARY KEY,
+    member_id INTEGER NOT NULL REFERENCES members(id),
+    kind TEXT NOT NULL CHECK (kind IN ('physique', 'virtuelle')),
+    code TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'desactivee')),
+    issued_at TEXT NOT NULL,
+    issued_by INTEGER REFERENCES users(id),
+    deactivated_at TEXT,
+    deactivated_by INTEGER REFERENCES users(id),
+    deactivation_reason TEXT
+  )`,
+  'CREATE INDEX cards_member ON cards(member_id)',
+
+  `CREATE TABLE reservations (
+    id INTEGER PRIMARY KEY,
+    member_id INTEGER NOT NULL REFERENCES members(id),
+    subscription_id INTEGER NOT NULL REFERENCES subscriptions(id),
+    biz_day TEXT NOT NULL,
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    duration_min INTEGER NOT NULL CHECK (duration_min > 0),
+    status TEXT NOT NULL CHECK (status IN ('reservee', 'en_cours', 'terminee', 'annulee')),
+    included_minutes INTEGER NOT NULL DEFAULT 0 CHECK (included_minutes >= 0),
+    paid_minutes INTEGER NOT NULL DEFAULT 0 CHECK (paid_minutes >= 0),
+    supplement_amount INTEGER NOT NULL DEFAULT 0 CHECK (supplement_amount >= 0),
+    tariff_hour INTEGER NOT NULL,
+    tariff_half INTEGER NOT NULL,
+    tariff_validated INTEGER NOT NULL,
+    off_hours INTEGER NOT NULL DEFAULT 0,
+    off_hours_authorized_by INTEGER REFERENCES users(id),
+    notes TEXT,
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    updated_at TEXT,
+    updated_by INTEGER REFERENCES users(id),
+    started_at TEXT,
+    started_by INTEGER REFERENCES users(id),
+    finished_at TEXT,
+    finished_by INTEGER REFERENCES users(id),
+    cancelled_at TEXT,
+    cancelled_by INTEGER REFERENCES users(id),
+    cancel_reason TEXT,
+    CHECK (end_ms > start_ms),
+    CHECK (included_minutes + paid_minutes = duration_min)
+  )`,
+  'CREATE INDEX reservations_time ON reservations(start_ms, end_ms)',
+  'CREATE INDEX reservations_day ON reservations(biz_day)',
+  'CREATE INDEX reservations_member ON reservations(member_id)',
+
+  // Single room: no two active occupations may overlap. Enforced by the database itself,
+  // in addition to the application check, so concurrent writers cannot double-book.
+  `CREATE TRIGGER reservations_no_overlap_insert BEFORE INSERT ON reservations
+  WHEN NEW.status <> 'annulee'
+  BEGIN
+    SELECT RAISE(ABORT, 'CHEVAUCHEMENT') WHERE EXISTS (
+      SELECT 1 FROM reservations r
+      WHERE r.status <> 'annulee' AND r.start_ms < NEW.end_ms AND NEW.start_ms < r.end_ms);
+  END`,
+
+  `CREATE TRIGGER reservations_no_overlap_update BEFORE UPDATE OF start_ms, end_ms, status ON reservations
+  WHEN NEW.status <> 'annulee'
+  BEGIN
+    SELECT RAISE(ABORT, 'CHEVAUCHEMENT') WHERE EXISTS (
+      SELECT 1 FROM reservations r
+      WHERE r.id <> NEW.id AND r.status <> 'annulee' AND r.start_ms < NEW.end_ms AND NEW.start_ms < r.end_ms);
+  END`,
+
+  // Credit ledger. available = granted - (engagement - liberation); consumed = consommation.
+  `CREATE TABLE credit_movements (
+    id INTEGER PRIMARY KEY,
+    subscription_id INTEGER NOT NULL REFERENCES subscriptions(id),
+    reservation_id INTEGER REFERENCES reservations(id),
+    kind TEXT NOT NULL CHECK (kind IN ('engagement', 'liberation', 'consommation', 'ajustement')),
+    minutes INTEGER NOT NULL CHECK (minutes <> 0),
+    reason TEXT,
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id)
+  )`,
+  'CREATE INDEX credit_movements_sub ON credit_movements(subscription_id)',
+  'CREATE INDEX credit_movements_res ON credit_movements(reservation_id)',
+
+  `CREATE TABLE products (
+    id INTEGER PRIMARY KEY,
+    category TEXT NOT NULL CHECK (category IN ('cigare', 'bouteille')),
+    name TEXT NOT NULL,
+    reference TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    description TEXT,
+    price INTEGER NOT NULL CHECK (price >= 0),
+    stock_qty INTEGER NOT NULL DEFAULT 0 CHECK (stock_qty >= 0),
+    low_stock_threshold INTEGER NOT NULL DEFAULT 3 CHECK (low_stock_threshold >= 0),
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    is_demo INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    updated_at TEXT,
+    updated_by INTEGER REFERENCES users(id)
+  )`,
+
+  // Financial lines. Each line belongs to exactly one sub-account.
+  `CREATE TABLE charges (
+    id INTEGER PRIMARY KEY,
+    account TEXT NOT NULL CHECK (account IN ('reservations', 'alcool', 'cigares')),
+    kind TEXT NOT NULL CHECK (kind IN ('temps_supplementaire', 'produit', 'abonnement')),
+    member_id INTEGER NOT NULL REFERENCES members(id),
+    reservation_id INTEGER REFERENCES reservations(id),
+    subscription_id INTEGER REFERENCES subscriptions(id),
+    product_id INTEGER REFERENCES products(id),
+    label TEXT NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
+    unit_price INTEGER NOT NULL CHECK (unit_price >= 0),
+    amount INTEGER NOT NULL CHECK (amount > 0),
+    status TEXT NOT NULL CHECK (status IN ('due', 'payee', 'annulee', 'remboursee')),
+    tariff_validated INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    cancelled_at TEXT,
+    cancelled_by INTEGER REFERENCES users(id),
+    cancel_reason TEXT,
+    CHECK (amount = quantity * unit_price)
+  )`,
+  'CREATE INDEX charges_reservation ON charges(reservation_id)',
+  'CREATE INDEX charges_member ON charges(member_id)',
+  'CREATE INDEX charges_created ON charges(created_at)',
+
+  `CREATE TABLE payments (
+    id INTEGER PRIMARY KEY,
+    member_id INTEGER NOT NULL REFERENCES members(id),
+    reservation_id INTEGER REFERENCES reservations(id),
+    amount INTEGER NOT NULL CHECK (amount > 0),
+    method TEXT NOT NULL,
+    reference TEXT,
+    paid_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id)
+  )`,
+  'CREATE INDEX payments_paid ON payments(paid_at)',
+
+  // A line is collected in full by exactly one payment (UNIQUE charge_id).
+  `CREATE TABLE payment_allocations (
+    id INTEGER PRIMARY KEY,
+    payment_id INTEGER NOT NULL REFERENCES payments(id),
+    charge_id INTEGER NOT NULL UNIQUE REFERENCES charges(id),
+    account TEXT NOT NULL CHECK (account IN ('reservations', 'alcool', 'cigares')),
+    amount INTEGER NOT NULL CHECK (amount > 0)
+  )`,
+
+  `CREATE TABLE refunds (
+    id INTEGER PRIMARY KEY,
+    charge_id INTEGER NOT NULL UNIQUE REFERENCES charges(id),
+    payment_id INTEGER NOT NULL REFERENCES payments(id),
+    account TEXT NOT NULL CHECK (account IN ('reservations', 'alcool', 'cigares')),
+    amount INTEGER NOT NULL CHECK (amount > 0),
+    method TEXT NOT NULL,
+    reference TEXT,
+    reason TEXT NOT NULL,
+    restocked INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id)
+  )`,
+
+  `CREATE TABLE stock_movements (
+    id INTEGER PRIMARY KEY,
+    product_id INTEGER NOT NULL REFERENCES products(id),
+    kind TEXT NOT NULL CHECK (kind IN ('stock_initial', 'entree', 'vente', 'annulation_vente', 'retour', 'ajustement')),
+    quantity INTEGER NOT NULL CHECK (quantity <> 0),
+    stock_after INTEGER NOT NULL CHECK (stock_after >= 0),
+    charge_id INTEGER REFERENCES charges(id),
+    reason TEXT,
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id)
+  )`,
+  'CREATE INDEX stock_movements_product ON stock_movements(product_id)',
+
+  // Expense and receipt categories for the manual entries below.
+  `CREATE TABLE categories (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('depense', 'recette')),
+    name TEXT NOT NULL COLLATE NOCASE,
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    UNIQUE (kind, name)
+  )`,
+
+  // Money that does not come from a member: expenses, other receipts, transfers between treasury
+  // accounts (a treasury account is a payment method). Never deleted: cancelled with a reason.
+  `CREATE TABLE ledger_entries (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('depense', 'recette', 'transfert')),
+    biz_date TEXT NOT NULL,
+    category_id INTEGER REFERENCES categories(id),
+    account TEXT CHECK (account IS NULL OR account IN ('reservations', 'alcool', 'cigares')),
+    method TEXT NOT NULL,
+    to_method TEXT,
+    amount INTEGER NOT NULL CHECK (amount > 0),
+    label TEXT NOT NULL,
+    reference TEXT,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'annulee')),
+    is_demo INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    cancelled_at TEXT,
+    cancelled_by INTEGER REFERENCES users(id),
+    cancel_reason TEXT,
+    CHECK ((kind = 'transfert') = (to_method IS NOT NULL)),
+    CHECK (kind = 'transfert' OR category_id IS NOT NULL),
+    CHECK (to_method IS NULL OR to_method <> method)
+  )`,
+  'CREATE INDEX ledger_entries_date ON ledger_entries(biz_date)',
+
+  // A closed month ('YYYY-MM') refuses any new or cancelled entry dated inside it.
+  // The summary keeps the figures as they stood at closing.
+  `CREATE TABLE closed_periods (
+    month TEXT PRIMARY KEY,
+    closed_at TEXT NOT NULL,
+    closed_by INTEGER REFERENCES users(id),
+    summary TEXT NOT NULL
+  )`,
+
+  // Replayed requests (same Idempotency-Key) return the stored response instead of acting twice.
+  `CREATE TABLE idempotency_keys (
+    key TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    request_hash TEXT NOT NULL,
+    status INTEGER NOT NULL,
+    response TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (key, user_id)
+  )`,
+
+  `CREATE TABLE audit_log (
+    id INTEGER PRIMARY KEY,
+    at TEXT NOT NULL,
+    user_id INTEGER REFERENCES users(id),
+    action TEXT NOT NULL,
+    entity TEXT,
+    entity_id INTEGER,
+    details TEXT
+  )`,
+  'CREATE INDEX audit_entity ON audit_log(entity, entity_id)',
+];
+
+const V2 = [
+  `CREATE TABLE humidors (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    location TEXT,
+    notes TEXT,
+    humidity_min REAL NOT NULL CHECK (humidity_min >= 0),
+    humidity_max REAL NOT NULL CHECK (humidity_max <= 100 AND humidity_max > humidity_min),
+    temperature_min REAL NOT NULL CHECK (temperature_min >= -20),
+    temperature_max REAL NOT NULL CHECK (temperature_max <= 60 AND temperature_max > temperature_min),
+    reading_interval_hours INTEGER NOT NULL CHECK (reading_interval_hours BETWEEN 1 AND 168),
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    updated_at TEXT
+  )`,
+  `CREATE TABLE humidor_readings (
+    id INTEGER PRIMARY KEY,
+    humidor_id INTEGER NOT NULL REFERENCES humidors(id),
+    humidity REAL NOT NULL CHECK (humidity BETWEEN 0 AND 100),
+    temperature REAL NOT NULL CHECK (temperature BETWEEN -20 AND 60),
+    notes TEXT,
+    measured_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    voided_at TEXT,
+    voided_by INTEGER REFERENCES users(id),
+    void_reason TEXT
+  )`,
+  'CREATE INDEX humidor_readings_latest ON humidor_readings(humidor_id, measured_at DESC, id DESC)',
+  `CREATE TABLE lockers (
+    id INTEGER PRIMARY KEY,
+    code TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    humidor_id INTEGER NOT NULL REFERENCES humidors(id),
+    notes TEXT,
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id)
+  )`,
+  `CREATE TABLE locker_assignments (
+    id INTEGER PRIMARY KEY,
+    locker_id INTEGER NOT NULL REFERENCES lockers(id),
+    member_id INTEGER NOT NULL REFERENCES members(id),
+    start_date TEXT NOT NULL,
+    end_date TEXT NOT NULL CHECK (end_date >= start_date),
+    notes TEXT,
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    released_at TEXT,
+    released_by INTEGER REFERENCES users(id),
+    release_reason TEXT
+  )`,
+  'CREATE UNIQUE INDEX locker_one_occupant ON locker_assignments(locker_id) WHERE released_at IS NULL',
+  'CREATE INDEX locker_member ON locker_assignments(member_id)',
+  `CREATE TABLE locker_items (
+    id INTEGER PRIMARY KEY,
+    assignment_id INTEGER NOT NULL REFERENCES locker_assignments(id),
+    name TEXT NOT NULL COLLATE NOCASE,
+    quantity INTEGER NOT NULL CHECK (quantity >= 0),
+    UNIQUE (assignment_id, name)
+  )`,
+  `CREATE TABLE locker_movements (
+    id INTEGER PRIMARY KEY,
+    item_id INTEGER NOT NULL REFERENCES locker_items(id),
+    kind TEXT NOT NULL CHECK (kind IN ('depot', 'retrait')),
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    stock_after INTEGER NOT NULL CHECK (stock_after >= 0),
+    notes TEXT,
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id)
+  )`,
+  'CREATE INDEX locker_movements_item ON locker_movements(item_id, id DESC)',
+];
+
+export const MIGRATIONS = [V1, V2];
+
+export function migrate(db) {
+  db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+  const row = db.get("SELECT value FROM meta WHERE key = 'schema_version'");
+  for (let version = row ? Number(row.value) : 0; version < MIGRATIONS.length; version += 1) {
+    db.transaction(() => {
+      for (const statement of MIGRATIONS[version]) db.exec(statement);
+      db.run(
+        "INSERT INTO meta (key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        String(version + 1),
+      );
+    });
+  }
+}

@@ -1,58 +1,45 @@
-import * as XLSX from 'xlsx';
+// Excel exports (.xlsx), built in the browser. The server prepares each table
+// (GET /api/export/:kind?format=json: header, rows, amounts in currency units); several tables can
+// go into one workbook, one sheet each. The spreadsheet library is loaded on first use only.
+import { api, qs } from '../lib/api.js';
 
-/**
- * Exporte un tableau de données vers un fichier Excel (.xlsx)
- * @param {Array} data - Tableau d'objets à exporter
- * @param {string} sheetName - Nom de l'onglet dans Excel
- * @param {string} fileName - Nom du fichier (sans extension)
- */
-export function exportToExcel(data, sheetName, fileName) {
-  const worksheet = XLSX.utils.json_to_sheet(data);
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+const MONEY_FORMAT = '#,##0';
 
-  // Auto-largeur des colonnes
-  const cols = Object.keys(data[0] || {}).map(key => ({
-    wch: Math.max(key.length, ...data.map(row => String(row[key] ?? '').length)) + 2
+function sheetFor(XLSX, { header, rows }) {
+  const sheet = XLSX.utils.aoa_to_sheet([header, ...rows]);
+  // Amount columns (their header names the currency) get a thousands format.
+  const moneyCols = header.map((h, i) => (/\((FCFA|[A-Z€$]{1,5})\)$/.test(h) ? i : -1)).filter((i) => i >= 0);
+  for (let r = 1; r <= rows.length; r += 1) {
+    for (const c of moneyCols) {
+      const cell = sheet[XLSX.utils.encode_cell({ r, c })];
+      if (cell && cell.t === 'n') cell.z = MONEY_FORMAT;
+    }
+  }
+  sheet['!cols'] = header.map((h, i) => ({
+    wch: Math.min(60, Math.max(String(h).length, ...rows.map((row) => String(row[i] ?? '').length)) + 2),
   }));
-  worksheet['!cols'] = cols;
-
-  XLSX.writeFile(workbook, `${fileName}.xlsx`);
+  return sheet;
 }
 
-/**
- * Exporte plusieurs onglets dans un seul fichier Excel
- * @param {Array} sheets - Tableau de { data, sheetName }
- * @param {string} fileName - Nom du fichier (sans extension)
- */
-export function exportMultiSheetExcel(sheets, fileName) {
+const safeSheetName = (name, used) => {
+  const base = String(name).replace(/[\\/?*[\]:]/g, ' ').slice(0, 31) || 'Feuille';
+  let candidate = base;
+  for (let n = 2; used.has(candidate); n += 1) candidate = `${base.slice(0, 28)} ${n}`;
+  used.add(candidate);
+  return candidate;
+};
+
+export async function writeWorkbook(tables, fileName) {
+  const XLSX = await import('xlsx');
   const workbook = XLSX.utils.book_new();
-
-  sheets.forEach(({ data, sheetName }) => {
-    if (!data || data.length === 0) return;
-    const worksheet = XLSX.utils.json_to_sheet(data);
-    const cols = Object.keys(data[0] || {}).map(key => ({
-      wch: Math.max(key.length, ...data.map(row => String(row[key] ?? '').length)) + 2
-    }));
-    worksheet['!cols'] = cols;
-    XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
-  });
-
-  XLSX.writeFile(workbook, `${fileName}.xlsx`);
+  const used = new Set();
+  for (const t of tables) XLSX.utils.book_append_sheet(workbook, sheetFor(XLSX, t), safeSheetName(t.sheet, used));
+  XLSX.writeFile(workbook, fileName.endsWith('.xlsx') ? fileName : `${fileName}.xlsx`);
 }
 
-/**
- * Formate les transactions pour l'export
- */
-export function formatTransactionsForExport(transactions) {
-  return transactions.map(t => ({
-    'Date': t.date,
-    'Entité': t.entityId === 'pn' ? 'Meiji Pointe-Noire' : 'Meiji Brazzaville',
-    'Type': t.type === 'income' ? 'Recette' : 'Dépense',
-    'Catégorie': t.category,
-    'Description': t.description,
-    'Compte': t.account,
-    'Montant (FCFA)': t.type === 'income' ? t.amount : -t.amount,
-    'Réf. Chèque': t.checkRef || '',
-  }));
+// exports: [{ kind, params }] -> one workbook. With a single export the server's file name is used.
+export async function downloadExcel(exports, fileName) {
+  const tables = [];
+  for (const { kind, params } of exports) tables.push(await api.get(`/api/export/${kind}${qs({ ...params, format: 'json' })}`));
+  await writeWorkbook(tables, fileName ?? tables[0].filename);
 }
