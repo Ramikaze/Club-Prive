@@ -103,18 +103,16 @@ function fill(club, { accounts = null, actor = null }) {
   subscribe(client5, annual, today);
   card(client5, 'virtuelle');
 
-  // Reservations, moved through their life cycle according to the real current time.
-  const roomList = club.rooms();
-  const rPrincipal = roomList[0]?.id ?? 1;
-  const rVip = roomList[1]?.id ?? rPrincipal;
-  const rPetit = roomList[2]?.id ?? rPrincipal;
+  // Reservations, moved through their life cycle according to the real current time. The club has a
+  // single room: every booking goes to the first open one.
+  const roomId = club.rooms()[0]?.id ?? 1;
 
   const book = (memberId, day, time, minutes, extra = {}) => {
     const start = startOf(day, time);
     club.at = Math.min(realNow - HOUR, start - 2 * DAY);
     return club.createReservation(manager, {
       member_id: memberId, date: day, start_time: time, duration_min: minutes,
-      room_id: extra.roomId ?? rPrincipal, party_size: extra.partySize ?? 2,
+      room_id: roomId, party_size: extra.partySize ?? 2,
       authorize_off_hours: extra.offHours ?? false, notes: extra.notes ?? null,
     }).reservation;
   };
@@ -138,27 +136,21 @@ function fill(club, { accounts = null, actor = null }) {
     }
   };
 
-  live(book(client2, addDays(today, -20), '18:00', 180, { roomId: rVip, partySize: 4 }), [[champagne, 1], [robusto, 2]], 'Carte bancaire');
-  live(book(client1, addDays(today, -8), '20:00', 60, { roomId: rPrincipal, partySize: 2 }), [[whisky, 1]], 'Espèces');
-  live(book(client4, addDays(today, -3), '19:00', 120, { roomId: rPetit, partySize: 2 }), [], null);
+  live(book(client2, addDays(today, -20), '18:00', 180, { partySize: 4 }), [[champagne, 1], [robusto, 2]], 'Carte bancaire');
+  live(book(client1, addDays(today, -8), '20:00', 60, { partySize: 2 }), [[whisky, 1]], 'Espèces');
+  live(book(client4, addDays(today, -3), '19:00', 120, { partySize: 2 }), [], null);
   // The example from the brief: 25 000 of room time + 40 000 bottle + 10 000 cigar = 75 000 in one payment.
-  live(book(client4, addDays(today, -1), '21:00', 60, { roomId: rPrincipal, partySize: 3, notes: 'Crédit épuisé : heure entièrement payante' }),
+  live(book(client4, addDays(today, -1), '21:00', 60, { partySize: 3, notes: 'Crédit épuisé : heure entièrement payante' }),
     [[whisky, 1], [robusto, 1]], 'Espèces');
-  live(book(client3, addDays(today, -1), '15:00', 150, { roomId: rVip, partySize: 4 }), [[corona, 2]], null);
-  const cancelled = book(client2, addDays(today, -2), '17:00', 120, { roomId: rPrincipal, partySize: 2 });
+  live(book(client3, addDays(today, -1), '15:00', 150, { partySize: 4 }), [[corona, 2]], null);
+  const cancelled = book(client2, addDays(today, -2), '17:00', 120, { partySize: 2 });
   club.at = cancelled.start_ms - DAY;
   club.cancelReservation(manager, cancelled.id, { reason: 'Empêchement du membre (démo)' });
 
-  live(book(client2, today, '12:00', 120, { roomId: rPrincipal, partySize: 3 }), [[robusto, 1]], 'Carte bancaire');
-  live(book(client5, today, '16:00', 90, { roomId: rVip, partySize: 4 }), [], null);
-  live(book(client1, today, '20:00', 60, { roomId: rPrincipal, partySize: 5 }), [[champagne, 1]], null);
-  book(client2, addDays(today, 1), '22:00', 210, { roomId: rVip, partySize: 6, offHours: true, notes: 'Soirée privée — dépassement autorisé (démo)' });
-  book(client5, addDays(today, 2), '14:00', 60, { roomId: rPetit, partySize: 2 });
-  book(client3, addDays(today, 2), '19:30', 90, { roomId: rPrincipal, partySize: 4 });
-
   // A session already running when the demonstration is loaded, so the room timer and the
   // per-member breakdown show at once: started about 45 minutes ago (or at opening), two members
-  // present, each with cigars and a bottle. Skipped when the club is closed at load time.
+  // present, each with cigars and a bottle. Skipped when the club is closed at load time; created
+  // before today's other bookings, which give way to it in the single room.
   const win = club.window();
   const slot = s.booking.slot_min;
   const ago = localParts(realNow - 45 * 60000, tz);
@@ -168,7 +160,6 @@ function fill(club, { accounts = null, actor = null }) {
     { date: localParts(realNow, tz).date, time: s.hours.open },
   ];
   const pairs = [[client1, client2], [client3, client5], [client4, client2], [client1, client5]];
-  const roomOrder = [...new Set([rPrincipal, rPetit, rVip])];
   const inRoom = (() => {
     for (const { date, time } of starts) {
       const start = startOf(date, time);
@@ -176,17 +167,15 @@ function fill(club, { accounts = null, actor = null }) {
       for (const minutes of [120, 60]) {
         if (start + minutes * 60000 <= realNow + 10 * 60000) continue;
         for (const [holder, guest] of pairs) {
-          for (const roomId of roomOrder) {
-            club.at = start - 30 * 60000;
-            try {
-              const r = club.createReservation(manager, {
-                member_id: holder, attendee_ids: [guest], date, start_time: time, duration_min: minutes,
-                room_id: roomId, party_size: 2, authorize_off_hours: true,
-              }).reservation;
-              return { r, holder, guest };
-            } catch (err) {
-              if (!(err instanceof AppError)) throw err; // slot taken or member busy: try the next one
-            }
+          club.at = start - 30 * 60000;
+          try {
+            const r = club.createReservation(manager, {
+              member_id: holder, attendee_ids: [guest], date, start_time: time, duration_min: minutes,
+              room_id: roomId, party_size: 2, authorize_off_hours: true,
+            }).reservation;
+            return { r, holder, guest };
+          } catch (err) {
+            if (!(err instanceof AppError)) throw err; // slot out of hours or member without credit: next one
           }
         }
       }
@@ -204,6 +193,21 @@ function fill(club, { accounts = null, actor = null }) {
       club.addItem(manager, r.id, { product_id: productId, quantity, consumer_member_id: consumer });
     });
   }
+
+  // Today's and later bookings, skipped where the session in progress already holds the room.
+  const unlessTaken = (create) => {
+    try {
+      create();
+    } catch (err) {
+      if (!(err instanceof AppError)) throw err;
+    }
+  };
+  unlessTaken(() => live(book(client2, today, '12:00', 120, { partySize: 3 }), [[robusto, 1]], 'Carte bancaire'));
+  unlessTaken(() => live(book(client5, today, '16:00', 90, { partySize: 4 }), [], null));
+  unlessTaken(() => live(book(client1, today, '20:00', 60, { partySize: 5 }), [[champagne, 1]], null));
+  unlessTaken(() => book(client2, addDays(today, 1), '22:00', 210, { partySize: 6, offHours: true, notes: 'Soirée privée — dépassement autorisé (démo)' }));
+  unlessTaken(() => book(client5, addDays(today, 2), '14:00', 60, { partySize: 2 }));
+  unlessTaken(() => book(client3, addDays(today, 2), '19:30', 90, { partySize: 4 }));
 
   // Overheads and a bank deposit (fictitious), entered by the owner on their own day.
   const categoryId = (name) => (club.get("SELECT id FROM categories WHERE kind = 'depense' AND active = 1 AND name = ?", name)

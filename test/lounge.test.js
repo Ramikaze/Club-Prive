@@ -142,7 +142,30 @@ test('migration v4 vers v5 : compatible avec et sans les premières tables de pa
   }
 });
 
+test('migration v8 : un seul salon, seules les salles par défaut jamais utilisées sont retirées', () => {
+  const db = nodeDb(':memory:');
+  try {
+    db.exec('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    for (const version of MIGRATIONS.slice(0, 7)) for (const sql of version) db.exec(sql);
+    db.run("INSERT INTO meta VALUES ('schema_version', '7')");
+    const at = '2026-01-01T00:00:00Z';
+    for (const [id, name] of [[1, 'Salon Principal'], [2, 'Salon VIP'], [3, 'Petit Salon']]) {
+      db.run('INSERT INTO rooms (id, name, capacity, created_at) VALUES (?, ?, 4, ?)', id, name, at);
+    }
+    db.exec('PRAGMA foreign_keys = OFF'); // a bare historical booking, without its member and plan
+    db.run(`INSERT INTO reservations (member_id, subscription_id, biz_day, start_ms, end_ms, duration_min, included_minutes, status,
+      tariff_hour, tariff_half, tariff_validated, created_at, room_id) VALUES (1, 1, '2026-01-01', 0, 3600000, 60, 60, 'terminee', 0, 0, 0, ?, 3)`, at);
+    migrate(db);
+    migrate(db);
+    assert.equal(db.get("SELECT value FROM meta WHERE key = 'schema_version'").value, String(MIGRATIONS.length));
+    const rooms = db.all('SELECT id, active, archived_at IS NOT NULL AS archived FROM rooms ORDER BY id').map((r) => ({ ...r }));
+    assert.deepEqual(rooms, [{ id: 1, active: 1, archived: 0 }, { id: 2, active: 0, archived: 1 }, { id: 3, active: 1, archived: 0 }]);
+  } finally { db.close(); }
+});
+
 test('salles multiples, nombre de personnes et désactivation d’un membre', async () => {
+  assert.equal(ok(await manager.get('/api/rooms')).length, 1); // the club opens with a single room
+  for (const [name, capacity] of [['Salon VIP', 6], ['Petit Salon', 4]]) ok(await admin.post('/api/rooms', { name, capacity }));
   const rooms = ok(await manager.get('/api/rooms'));
   assert.equal(rooms.length, 3);
   const [r1, r2] = rooms;

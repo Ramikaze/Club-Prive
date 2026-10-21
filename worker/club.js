@@ -67,10 +67,9 @@ const DEFAULT_PLANS = [
   },
 ];
 
+// The club has a single room; more can be added in the room settings.
 const DEFAULT_ROOMS = [
   { name: 'Salon Principal', capacity: 8, description: 'Grand salon privé' },
-  { name: 'Salon VIP', capacity: 6, description: 'Salon feutré & cigares' },
-  { name: 'Petit Salon', capacity: 4, description: 'Alcôve intimiste' },
 ];
 
 const RES_SELECT = `

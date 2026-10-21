@@ -442,7 +442,16 @@ const V7 = [
   'ALTER TABLE members ADD COLUMN deactivation_reason TEXT',
 ];
 
-export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7];
+// The club has a single room. The two extra rooms created by default are retired when they were
+// never used; a room with reservations stays, so its history keeps its place.
+const V8 = [
+  `UPDATE rooms SET active = 0,
+     archived_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+   WHERE name IN ('Salon VIP', 'Petit Salon') AND created_by IS NULL AND archived_at IS NULL
+     AND NOT EXISTS (SELECT 1 FROM reservations r WHERE r.room_id = rooms.id)`,
+];
+
+export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8];
 
 export function migrate(db) {
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');

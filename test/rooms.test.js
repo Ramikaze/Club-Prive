@@ -15,7 +15,10 @@ beforeEach(async () => {
   await admin.login('admin', 'rooms-admin-password');
   const bundle = await manager.login('gerant', 'rooms-manager-password');
   today = bundle.biz_today;
-  rooms = bundle.rooms;
+  // The club opens with a single room; these scenarios add two more to cover moves between rooms.
+  assert.equal(bundle.rooms.length, 1);
+  for (const [name, capacity] of [['Salon VIP', 6], ['Petit Salon', 4]]) ok(await admin.post('/api/rooms', { name, capacity }));
+  rooms = ok(await manager.get('/api/rooms'));
   members = [];
   for (const first_name of ['Alice', 'Bruno', 'Camille']) {
     const member = ok(await manager.post('/api/members', { first_name, last_name: 'Test', phone: '+000 000000' }));
