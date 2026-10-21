@@ -1,5 +1,6 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { localToUtcMs } from '../shared/time.js';
 import { Server, Client, ok } from './harness.js';
 
 let server, admin, manager, rooms, members, today;
@@ -257,4 +258,27 @@ test('désactivation d’un membre : historique conservé, accès bloqué, réac
   assert.equal(back.active, true);
   assert.ok(ok(await manager.get('/api/members')).some((m) => m.id === bruno.id));
   ok(await manager.post('/api/reservations', request({ member_id: bruno.id, start_time: '18:00' })));
+});
+
+test('démonstration : une séance est déjà en cours au chargement, avec les consommations de chaque membre', async () => {
+  ok(await admin.post('/api/admin/reset', { confirm: 'EFFACER' }));
+  const realNow = Date.now;
+  const loadedAt = localToUtcMs(today, '15:10', server.club.settings().timezone);
+  Date.now = () => loadedAt;
+  try {
+    ok(await admin.post('/api/admin/demo'));
+    const live = ok(await manager.get('/api/dashboard')).rooms_status.filter((rm) => rm.current?.status === 'en_cours');
+    assert.equal(live.length, 1, JSON.stringify(live.map((rm) => rm.name)));
+    const session = live[0].current;
+    assert.ok(Date.parse(session.started_at) < loadedAt && session.end_ms > loadedAt);
+    assert.equal(session.attendees.length, 2);
+    const byMember = new Map();
+    for (const line of session.consumptions) {
+      byMember.set(line.consumer_member_id, (byMember.get(line.consumer_member_id) ?? new Set()).add(line.account));
+    }
+    assert.deepEqual([...byMember.keys()].sort(), session.attendees.map((a) => a.member_id).sort());
+    for (const accounts of byMember.values()) assert.deepEqual([...accounts].sort(), ['alcool', 'cigares']);
+  } finally {
+    Date.now = realNow;
+  }
 });

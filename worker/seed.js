@@ -2,8 +2,8 @@
 // History is created through the same business methods as real use, with a backdated clock.
 // Accounts with known passwords are only created when the caller passes them (local development,
 // DEMO_ACCOUNTS=1). Online, an administrator loads the demonstration under their own account.
-import { conflict } from './errors.js';
-import { addDays, localToUtcMs } from '../shared/time.js';
+import { AppError, conflict } from './errors.js';
+import { addDays, fmtHHMM, localParts, localToUtcMs } from '../shared/time.js';
 
 export const DEMO_ACCOUNTS = [
   { login: 'proprietaire', name: 'Propriétaire A (démo)', role: 'admin', password: 'demo-proprio-2026' },
@@ -155,6 +155,55 @@ function fill(club, { accounts = null, actor = null }) {
   book(client2, addDays(today, 1), '22:00', 210, { roomId: rVip, partySize: 6, offHours: true, notes: 'Soirée privée — dépassement autorisé (démo)' });
   book(client5, addDays(today, 2), '14:00', 60, { roomId: rPetit, partySize: 2 });
   book(client3, addDays(today, 2), '19:30', 90, { roomId: rPrincipal, partySize: 4 });
+
+  // A session already running when the demonstration is loaded, so the room timer and the
+  // per-member breakdown show at once: started about 45 minutes ago (or at opening), two members
+  // present, each with cigars and a bottle. Skipped when the club is closed at load time.
+  const win = club.window();
+  const slot = s.booking.slot_min;
+  const ago = localParts(realNow - 45 * 60000, tz);
+  const startMin = ago.minutes - (ago.minutes % slot);
+  const starts = [
+    { date: startMin < win.open ? addDays(ago.date, -1) : ago.date, time: fmtHHMM(startMin) },
+    { date: localParts(realNow, tz).date, time: s.hours.open },
+  ];
+  const pairs = [[client1, client2], [client3, client5], [client4, client2], [client1, client5]];
+  const roomOrder = [...new Set([rPrincipal, rPetit, rVip])];
+  const inRoom = (() => {
+    for (const { date, time } of starts) {
+      const start = startOf(date, time);
+      if (start > realNow - 5 * 60000) continue;
+      for (const minutes of [120, 60]) {
+        if (start + minutes * 60000 <= realNow + 10 * 60000) continue;
+        for (const [holder, guest] of pairs) {
+          for (const roomId of roomOrder) {
+            club.at = start - 30 * 60000;
+            try {
+              const r = club.createReservation(manager, {
+                member_id: holder, attendee_ids: [guest], date, start_time: time, duration_min: minutes,
+                room_id: roomId, party_size: 2, authorize_off_hours: true,
+              }).reservation;
+              return { r, holder, guest };
+            } catch (err) {
+              if (!(err instanceof AppError)) throw err; // slot taken or member busy: try the next one
+            }
+          }
+        }
+      }
+    }
+    return null;
+  })();
+  if (inRoom) {
+    const { r, holder, guest } = inRoom;
+    club.at = r.start_ms;
+    club.startReservation(manager, r.id);
+    // Served within the elapsed time, so both members have cigars and a bottle even in a young session.
+    const served = [[10, holder, robusto, 1], [20, holder, whisky, 1], [25, guest, corona, 2], [35, guest, champagne, 1]];
+    served.forEach(([afterMin, consumer, productId, quantity], i) => {
+      club.at = r.start_ms + Math.min(afterMin * 60000, ((realNow - r.start_ms) * (i + 1)) / (served.length + 1));
+      club.addItem(manager, r.id, { product_id: productId, quantity, consumer_member_id: consumer });
+    });
+  }
 
   // Overheads and a bank deposit (fictitious), entered by the owner on their own day.
   const categoryId = (name) => (club.get("SELECT id FROM categories WHERE kind = 'depense' AND active = 1 AND name = ?", name)
