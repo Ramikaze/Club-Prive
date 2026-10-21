@@ -285,3 +285,24 @@ test('démonstration : une séance est déjà en cours au chargement, avec les c
     Date.now = realNow;
   }
 });
+
+test('salle unique : une fois, les autres salles sont retirées et leurs réservations à venir passent au salon', async () => {
+  const [main, vip, petit] = rooms;
+  const historyVip = await book({ room_id: vip.id, start_time: '11:00' });
+  const historyPetit = await book({ room_id: petit.id, member_id: members[1].id, start_time: '12:00' });
+  for (const r of [historyVip, historyPetit]) ok(await manager.post(`/api/reservations/${r.id}/finish`));
+  const toMove = await book({ room_id: petit.id, member_id: members[1].id, start_time: '16:00' });
+  await book({ room_id: main.id, start_time: '20:00' });
+  const stuck = await book({ room_id: vip.id, member_id: members[2].id, start_time: '20:00' }); // the main room is taken then
+
+  server.club.run("DELETE FROM meta WHERE key = 'single_room'"); // as on a database from before the single-room rule
+  await server.restart();
+  assert.deepEqual(ok(await manager.get('/api/rooms')).map((r) => r.id), [main.id, vip.id]);
+  assert.equal(ok(await manager.get(`/api/reservations/${toMove.id}`)).reservation.room_id, main.id);
+  assert.equal(ok(await manager.get(`/api/reservations/${stuck.id}`)).reservation.room_id, vip.id);
+  assert.equal(ok(await manager.get(`/api/reservations/${historyPetit.id}`)).reservation.room_name, petit.name);
+
+  ok(await manager.post(`/api/reservations/${stuck.id}/cancel`, { reason: 'Salle unique' }));
+  await server.restart(); // runs only once: the room the club keeps open is left alone
+  assert.deepEqual(ok(await manager.get('/api/rooms')).map((r) => r.id), [main.id, vip.id]);
+});

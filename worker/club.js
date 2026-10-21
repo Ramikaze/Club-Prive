@@ -161,6 +161,10 @@ export class Club {
         }
       }
       this.run('UPDATE reservations SET room_id = (SELECT id FROM rooms ORDER BY id LIMIT 1) WHERE room_id IS NULL');
+      if (!this.get("SELECT 1 AS x FROM meta WHERE key = 'single_room'")) {
+        this.retireExtraRooms();
+        this.run("INSERT INTO meta (key, value) VALUES ('single_room', ?)", this.nowIso());
+      }
       if (!this.get('SELECT 1 AS x FROM categories LIMIT 1')) {
         for (const [kind, names] of Object.entries(DEFAULT_CATEGORIES)) {
           for (const name of names) this.run('INSERT INTO categories (kind, name, created_at) VALUES (?, ?, ?)', kind, name, this.nowIso());
@@ -657,6 +661,28 @@ export class Club {
     this.run('UPDATE rooms SET active = 0, archived_at = ?, updated_at = ? WHERE id = ?', this.nowIso(), this.nowIso(), r.id);
     this.audit(actor, 'salle.supprimer', 'room', r.id, { name: r.name });
     return { ok: true, deleted_id: r.id };
+  }
+
+  // The club has a single room. Run once per database: bookings still to come in the other rooms
+  // move to the main room when it is free, then the other rooms are retired (their history keeps
+  // its original room, as with a deleted room). A room still holding a booking that cannot move stays.
+  retireExtraRooms() {
+    const keep = this.get("SELECT id FROM rooms WHERE active = 1 AND archived_at IS NULL ORDER BY name = 'Salon Principal' DESC, id LIMIT 1");
+    if (!keep) return;
+    const now = this.nowIso();
+    const pending = this.all(
+      "SELECT id, start_ms, end_ms FROM reservations WHERE status IN ('reservee', 'en_cours') AND room_id <> ? ORDER BY start_ms",
+      keep.id,
+    );
+    for (const r of pending) {
+      if (this.overlapping(r.start_ms, r.end_ms, r.id, keep.id).length) continue;
+      this.run('UPDATE reservations SET room_id = ?, updated_at = ? WHERE id = ?', keep.id, now, r.id);
+    }
+    this.run(
+      `UPDATE rooms SET active = 0, archived_at = ?, updated_at = ? WHERE id <> ? AND archived_at IS NULL
+         AND NOT EXISTS (SELECT 1 FROM reservations r WHERE r.room_id = rooms.id AND r.status IN ('reservee', 'en_cours'))`,
+      now, now, keep.id,
+    );
   }
 
   activeCardCode(memberId) {
