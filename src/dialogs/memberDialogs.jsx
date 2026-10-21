@@ -4,14 +4,14 @@ import { useMemo, useState } from 'react';
 import { api, newKey } from '../lib/api.js';
 import { money, fmtDuration, dayLabel, bizToday, subStateLabel } from '../lib/format.js';
 import { useStore, useSettings } from '../store/useStore.js';
-import { openDialog, Modal } from '../components/ui/Modal.jsx';
+import { openDialog, Modal, actionDialog } from '../components/ui/Modal.jsx';
 import { toast } from '../components/ui/toast.jsx';
-import { Hypothesis, Notice, FormError } from '../components/ui/ui.jsx';
+import { Notice, FormError } from '../components/ui/ui.jsx';
 import { useSubmit } from '../lib/hooks.js';
 import { addDays, addMonths } from '../../shared/time.js';
 
 const planLabel = (p) => {
-  const price = p.price == null ? 'prix non défini' : `${money(p.price)}${p.price_validated ? '' : ' — à confirmer'}`;
+  const price = p.price == null ? 'prix non défini' : money(p.price);
   return `${p.name} (${price})`;
 };
 
@@ -136,13 +136,10 @@ function SubscriptionDialog({ close, member, onDone }) {
       <>
         <dl className="calc">
           <div><dt>Validité</dt><dd>{`${dayLabel(shown.startDate, 'short')} → ${dayLabel(end, 'short')}`}</dd></div>
-          <div><dt>Heures incluses</dt><dd>{fmtDuration(p.included_minutes)}{annual ? (mode === 'mensuelle' ? ' (2 h attribuées chaque mois)' : ' (disponibles dès l’activation)') : ''}
-            {annual ? <>{' '}<Hypothesis title="Mode d’attribution des heures annuelles à confirmer (paramétrable)." /></> : null}</dd></div>
+          <div><dt>Heures incluses</dt><dd>{fmtDuration(p.included_minutes)}{annual ? (mode === 'mensuelle' ? ' (2 h attribuées chaque mois)' : ' (disponibles dès l’activation)') : ''}</dd></div>
           <div className="total"><dt>Prix</dt><dd>{p.price == null ? 'non défini' : money(p.price)}</dd></div>
         </dl>
-        {p.price == null ? <Notice kind="warn">Aucun prix n’est établi pour cette formule : en démonstration, elle est activée sans ligne à encaisser ; en utilisation réelle, l’activation est bloquée.</Notice> : null}
-        {p.price != null && !p.price_validated ? <Notice kind="warn">Prix à confirmer : utilisable en démonstration, bloqué en utilisation réelle tant qu’un administrateur ne l’a pas validé.</Notice> : null}
-        <p className="subtle" style={{ marginTop: 8 }}>Les heures non utilisées ne sont pas reportées (règle de report à confirmer). Renouvellement manuel uniquement.</p>
+        {p.price == null ? <Notice kind="warn">Aucun prix n’est défini pour cette formule.</Notice> : null}
       </>
     );
   }
@@ -257,3 +254,38 @@ function AdjustCreditDialog({ close, member, sub, onDone }) {
 export function openAdjustCreditDialog(member, sub, onDone) {
   openDialog(AdjustCreditDialog, { member, sub, onDone });
 }
+
+// ---------------------------------------------------------------- deactivate / reactivate member
+
+// A member is never deleted: deactivation keeps payments, bookings and consumption in the books and
+// stops new bookings and room access until the member is reactivated.
+export function openDeactivateMemberDialog(member, onDone) {
+  const key = newKey();
+  actionDialog({
+    title: `Désactiver ${member.name}`,
+    danger: true,
+    confirmLabel: 'Désactiver le membre',
+    message: `${member.name} (${member.member_no}) ne pourra plus réserver, entrer en salle, prendre une formule ni recevoir de carte. Sa fiche, ses paiements, ses réservations et ses consommations restent conservés ; vous pourrez le réactiver à tout moment.`,
+    reasonLabel: 'Motif de la désactivation',
+    run: async ({ reason }) => {
+      await api.post(`/api/members/${member.id}/deactivate`, { reason }, key);
+      toast(`${member.name} est désactivé.`);
+      onDone?.();
+    },
+  });
+}
+
+export function openReactivateMemberDialog(member, onDone) {
+  const key = newKey();
+  actionDialog({
+    title: `Réactiver ${member.name}`,
+    confirmLabel: 'Réactiver le membre',
+    message: `${member.name} pourra de nouveau réserver et entrer en salle, selon sa formule, sa carte et son crédit.`,
+    run: async () => {
+      await api.post(`/api/members/${member.id}/reactivate`, {}, key);
+      toast(`${member.name} est réactivé.`);
+      onDone?.();
+    },
+  });
+}
+

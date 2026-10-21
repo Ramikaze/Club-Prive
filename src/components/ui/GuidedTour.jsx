@@ -6,71 +6,108 @@ import Icon from './Icon.jsx';
 
 export const TOUR_DONE_KEY = 'club-tour-done';
 
+// Each step points at the precise control or block it explains, with fallbacks to the page header
+// when that element is not on screen (no occupied room, empty agenda, phone layout...).
 const STEPS = [
   {
-    route: '/', targets: ['[data-tour="nav"]', '[data-tour="nav-mobile"]'], icon: 'menu', title: 'Navigation',
-    body: 'Chaque rubrique du club est à un clic. Sur téléphone, les rubriques principales sont dans la barre du bas et les autres dans le menu.',
+    route: '/', targets: ['[data-tour="nav"]', '[data-tour="nav-mobile"]'], icon: 'menu', title: 'Le menu du club',
+    body: 'Les rubriques suivent la soirée : Accueil, Salles, Agenda, Membres, Stocks & Cave, Caisse. Administration n’apparaît qu’aux administrateurs.',
+    features: ['Sur téléphone : rubriques principales en bas de l’écran, les autres dans le menu en haut à droite', 'Les onglets en tête de page passent d’une sous-rubrique à l’autre'],
   },
   {
-    route: '/', targets: ['[data-tour="dashboard"]'], icon: 'home', title: 'Tableau de bord',
-    body: 'La soirée en un coup d’œil : la salle est-elle occupée et jusqu’à quand, les séances du jour, ce qu’il reste à encaisser et les alertes.',
-    features: ['Formules qui expirent', 'Stocks bas', 'Séances à clôturer'],
+    route: '/', targets: ['.kpis', '[data-tour="dashboard"]'], icon: 'home', title: 'Les quatre repères de l’accueil',
+    body: 'Salles disponibles (et personnes présentes), séances du jour, encaissé aujourd’hui et reste à encaisser. Touchez un repère pour ouvrir la page correspondante.',
   },
   {
-    route: '/agenda', targets: ['[data-tour="agenda-views"]', '[data-tour="agenda"]'], icon: 'calendar', title: 'Agenda de la salle',
-    body: 'Vues jour, semaine et liste. Touchez un créneau libre pour réserver. Les hachures signalent les heures hors horaires habituels : jusqu’à 5 h, avec une autorisation explicite.',
+    route: '/', targets: ['[data-tour="live-rooms"]', '[data-tour="dashboard"]'], icon: 'rooms', title: 'Les salles en direct',
+    body: 'Pour chaque salle : le titulaire, le nombre de personnes, l’horaire et le temps déjà passé en salle. Ajoutez une bouteille ou un cigare sans quitter l’accueil.',
   },
   {
-    route: '/membres', targets: ['[data-tour="members"]'], icon: 'users', title: 'Membres et cartes',
-    body: 'Chaque membre a une formule et une carte, physique ou virtuelle. Le crédit d’heures est engagé à la réservation, consommé à la fin, libéré en cas d’annulation.',
-    features: ['Mensuelle : 2 heures', 'Annuelle : 24 heures', 'Au-delà : 25 000 l’heure, 15 000 la demi-heure'],
+    route: '/salles', targets: ['.rooms-grid'], icon: 'rooms', title: 'Salles & salons',
+    body: 'Une carte par salle : capacité, état (Disponible, Occupée, Fermée) et prochaine réservation prévue. La liste se met à jour toute seule.',
+    features: ['Filtres Toutes, Libres, Occupées', 'Création et modification des salles réservées aux administrateurs'],
   },
   {
-    route: '/produits', targets: ['[data-tour="products"]'], icon: 'box', title: 'Produits et stocks',
-    body: 'Cigares et bouteilles, vendues entières uniquement. Chaque entrée, vente, annulation ou ajustement laisse un mouvement de stock traçable.',
+    route: '/salles', targets: ['.room-card.is-free .room-card-actions .btn-primary', '.rooms-grid'], icon: 'plus', title: 'Installer un membre',
+    body: '« Installer un membre » ouvre une réservation qui commence tout de suite : titulaire, durée et membres présents. Chaque membre doit avoir une carte active, une formule valide et du crédit.',
+    features: ['« Réserver un créneau » pour plus tard', 'Le crédit de chaque membre présent est engagé à part'],
   },
   {
-    route: '/lounge', targets: ['[data-tour="lounge"]'], icon: 'humidor', title: 'Cave & casiers',
-    body: 'Relevez l’humidité et la température de chaque cave. Attribuez les casiers aux membres et tracez chaque dépôt ou retrait de leurs cigares personnels. Les échéances et les contrôles en retard apparaissent sur le tableau de bord.',
+    route: '/salles', targets: ['.room-card .session-timer', '.room-card.is-occupied', '.rooms-grid'], icon: 'clock', title: 'Le compteur de séance',
+    body: 'Il démarre dès l’arrivée du membre et défile à la seconde : heure d’arrivée, temps passé, temps restant jusqu’à la fin prévue.',
+    features: ['Orange dans les 10 dernières minutes', 'Rouge avec la durée du dépassement', '« Prolonger » depuis la carte de la salle'],
   },
   {
-    route: '/caisse', targets: ['[data-tour="cash"]'], icon: 'wallet', title: 'Caisse et sous-comptes',
-    body: 'Les recettes sont ventilées exactement entre Réservations, Alcool et Cigares. Chaque ligne est encaissée en totalité ; un remboursement est tracé avec son motif.',
-    features: ['Journal des encaissements', 'Exports CSV et Excel'],
+    route: '/salles', targets: ['.room-card .conso', '.room-card.is-occupied', '.rooms-grid'], icon: 'receipt', title: 'Consommations par membre',
+    body: 'Chaque membre présent avec ce qu’il a pris : Cigares et Alcool dans des parties séparées avec leur sous-total, puis le total du salon en bas.',
+    features: ['« Facturer bouteille / cigare » : choisissez le membre puis touchez le produit (+1)', 'La note reste au nom du titulaire', '« Libérer la salle » termine la séance et consomme les crédits'],
   },
   {
-    route: '/depenses', targets: ['[data-tour="expenses"]'], icon: 'receipt', title: 'Dépenses',
-    body: 'Le gérant saisit les dépenses du jour. L’administrateur saisit aussi les entrées diverses et les transferts entre caisses, et peut annuler une opération en indiquant un motif.',
+    route: '/agenda', targets: ['[data-tour="agenda-views"]', '[data-tour="agenda"]'], icon: 'calendar', title: 'Vues de l’agenda',
+    body: 'Jour pour le détail heure par heure, Semaine pour l’ensemble, Liste pour filtrer par statut. Les flèches et « Aujourd’hui » changent de date.',
   },
   {
-    admin: true, route: '/tresorerie', targets: ['[data-tour="treasury"]'], icon: 'bank', title: 'Trésorerie',
-    body: 'Le solde de chaque caisse et compte sur la période, et le résultat : encaissements nets moins dépenses, par sous-compte.',
+    route: '/agenda', targets: ['.tl-slot:not([disabled])', '[data-tour="agenda"]'], icon: 'calendar', title: 'Réserver depuis l’agenda',
+    body: 'Touchez un créneau libre pour réserver à cette heure. Minimum une heure ; les zones hachurées sont hors horaires habituels (jusqu’à 5 h, avec une autorisation explicite).',
+    features: ['Le devis affiche crédit utilisé et supplément avant confirmation', 'Une salle ne peut pas être réservée deux fois sur le même créneau'],
   },
   {
-    admin: true, route: '/grand-livre', targets: ['[data-tour="ledger"]'], icon: 'book', title: 'Grand livre',
-    body: 'Tous les mouvements dans l’ordre chronologique, avec le solde courant. Filtrez par compte ou par sous-compte, puis exportez vers Excel.',
+    route: '/membres', targets: ['.search', '[data-tour="members"]'], icon: 'search', title: 'Retrouver un membre',
+    body: 'Cherchez par nom, téléphone, numéro de membre ou code de carte ; le QR code d’une carte ouvre aussi la fiche, après connexion du personnel.',
+    features: ['Formule mensuelle : 2 heures ; annuelle : 24 heures', 'Crédit engagé à la réservation, consommé à la fin, libéré à l’annulation', 'Au-delà : 25 000 l’heure, 15 000 la demi-heure'],
   },
   {
-    admin: true, route: '/cloture', targets: ['[data-tour="closing"]'], icon: 'lock', title: 'Clôture mensuelle',
-    body: 'Après les vérifications (espèces comptées, relevés rapprochés), le mois est verrouillé : plus aucune opération datée de ce mois. Une réouverture exige un motif et reste dans l’historique.',
+    route: '/membres', targets: ['[data-tour="members"] .actions .btn-primary', '[data-tour="members"]'], icon: 'user-plus', title: 'Nouveau membre',
+    body: 'Fiche, formule et carte physique ou virtuelle en une seule étape. La fiche montre ensuite crédit, cartes, séances et paiements.',
+  },
+  {
+    route: '/produits', targets: ['[data-tour="products"]'], icon: 'box', title: 'Catalogue & stocks',
+    body: 'Cigares et bouteilles (vendues entières uniquement) avec leur stock. Entrées et ajustements avec motif ; chaque mouvement reste dans l’historique du produit.',
+    features: ['Alerte quand un stock passe sous son seuil', 'Onglet Cave pour la conservation'],
+  },
+  {
+    route: '/lounge', targets: ['.humidor-card', '[data-tour="lounge"]'], icon: 'humidor', title: 'Cave à cigares',
+    body: 'Relevés manuels d’humidité et de température, seuils propres à chaque cave. Un relevé hors seuils déclenche une alerte ; un contrôle en retard est signalé.',
+  },
+  {
+    route: '/caisse', targets: ['.account-cards', '[data-tour="cash"]'], icon: 'wallet', title: 'Caisse',
+    body: 'Les recettes sont ventilées exactement entre Réservations, Alcool et Cigares. Les notes ouvertes s’encaissent ligne par ligne, en totalité.',
+    features: ['Remboursement tracé avec son motif', 'Exports CSV et Excel'],
+  },
+  {
+    route: '/depenses', targets: ['[data-tour="expenses"] .actions .btn-primary', '[data-tour="expenses"]'], icon: 'receipt', title: 'Dépenses du jour',
+    body: '« Nouvelle dépense » : catégorie, montant, caisse ou compte utilisé, et le sous-compte concerné pour suivre sa marge.',
+    features: ['L’administrateur saisit aussi entrées diverses et transferts', 'Annulation avec motif, jamais de suppression'],
   },
   {
     admin: true, route: '/parametres', targets: ['[data-tour="settings"]'], icon: 'settings', title: 'Paramètres',
-    body: 'Horaires, tarifs et formules, utilisateurs, soldes d’ouverture, catégories de dépenses, journal des actions et données de démonstration.',
+    body: 'Horaires, tarifs et formules, moyens de paiement, soldes d’ouverture, catégories de dépenses, utilisateurs, journal des actions et données de démonstration.',
+  },
+  {
+    admin: true, route: '/tresorerie', targets: ['.account-cards', '[data-tour="treasury"]'], icon: 'bank', title: 'Trésorerie',
+    body: 'Solde de chaque caisse et compte sur la période choisie, puis le résultat : encaissé net moins dépenses, par sous-compte.',
+  },
+  {
+    admin: true, route: '/grand-livre', targets: ['[data-tour="ledger"]'], icon: 'book', title: 'Grand livre',
+    body: 'Tous les mouvements de trésorerie dans l’ordre, avec le solde courant. Filtrez par compte ou par sous-compte ; exportez en CSV ou Excel.',
+  },
+  {
+    admin: true, route: '/cloture', targets: ['[data-tour="closing"]'], icon: 'lock', title: 'Clôture mensuelle',
+    body: 'Après trois vérifications (espèces comptées, relevés rapprochés, dépenses saisies), le mois est verrouillé. Une réouverture exige un motif et reste dans l’historique.',
   },
   {
     route: '/', targets: ['[data-tour="account"]', '[data-tour="menu"]'], icon: 'key', title: 'Votre compte',
-    body: 'Changez votre mot de passe, passez en thème sombre pour le service du soir, relancez cette visite ou déconnectez-vous.',
+    body: 'Changez votre mot de passe, passez en thème sombre pour le service du soir (la bascule se fait dans une fumée de cigare), relancez cette visite ou déconnectez-vous.',
   },
 ];
 
 const WELCOME_FEATURES = [
+  ['rooms', 'Salles, compteur de séance'],
+  ['receipt', 'Consommations par membre'],
   ['calendar', 'Agenda jour, semaine, liste'],
   ['users', 'Membres, cartes, crédits'],
-  ['box', 'Cigares et bouteilles'],
-  ['wallet', 'Caisse en trois sous-comptes'],
-  ['bank', 'Dépenses et trésorerie'],
-  ['excel', 'Grand livre, clôture, Excel'],
+  ['box', 'Stocks & cave à cigares'],
+  ['wallet', 'Caisse, dépenses, comptabilité'],
 ];
 
 const PAD = 16;

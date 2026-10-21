@@ -1,7 +1,7 @@
 // General ledger (/grand-livre, administrators): every cash movement of the period in order, with
 // the running balance of one treasury account or of all of them.
 import Icon from '../components/ui/Icon.jsx';
-import { AccountTag, Empty, Loaded, Notice, PageHead } from '../components/ui/ui.jsx';
+import { AccountTag, AdminTabs, Empty, Loaded, Notice, PageHead } from '../components/ui/ui.jsx';
 import PeriodPicker, { usePeriod } from '../components/ui/PeriodPicker.jsx';
 import { api, qs } from '../lib/api.js';
 import { money, dayLabel, ACCOUNT_LABEL } from '../lib/format.js';
@@ -22,6 +22,7 @@ export default function Ledger() {
 
   return (
     <>
+      <AdminTabs />
       <PageHead
         title="Grand livre"
         lead="Tous les mouvements de trésorerie dans l’ordre, avec le solde courant."

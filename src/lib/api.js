@@ -59,6 +59,7 @@ export const api = {
   get: (url) => request('GET', url),
   post: (url, body, key = newKey()) => request('POST', url, body, key),
   put: (url, body, key = newKey()) => request('PUT', url, body, key),
+  del: (url, body = {}, key = newKey()) => request('DELETE', url, body, key),
   // Read-only computations sent with POST (previews): no idempotency key needed.
   preview: (url, body) => request('POST', url, body, null),
 };

@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
-import { Empty, FormError, Hypothesis, Loaded, Notice, PageHead } from '../components/ui/ui.jsx';
+import { AdminTabs, Empty, FormError, Loaded, Notice, PageHead, Segmented } from '../components/ui/ui.jsx';
 import { Modal, actionDialog, openDialog } from '../components/ui/Modal.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import { api, newKey } from '../lib/api.js';
@@ -13,9 +13,12 @@ import { useIsAdmin, useSettings, useStore } from '../store/useStore.js';
 const TIME_ZONES = ['Africa/Brazzaville', 'Africa/Kinshasa', 'Africa/Douala', 'Africa/Lagos', 'Africa/Abidjan', 'Africa/Casablanca',
   'Europe/Paris', 'Europe/Brussels', 'Europe/London', 'America/Montreal', 'America/New_York', 'Asia/Dubai', 'UTC'];
 
-const SECTIONS = [['sec-club', 'Club'], ['sec-hours', 'Horaires'], ['sec-tariffs', 'Tarifs'], ['sec-plans', 'Formules'],
-  ['sec-rules', 'Règles à confirmer'], ['sec-payments', 'Paiements'], ['sec-treasury', 'Trésorerie'], ['sec-categories', 'Catégories'],
-  ['sec-demo', 'Mode démonstration'], ['sec-data', 'Données'], ['sec-users', 'Utilisateurs'], ['sec-audit', 'Journal']];
+const SETTINGS_TABS = [
+  ['club', 'Club & Horaires'],
+  ['tarifs', 'Tarifs & Formules'],
+  ['finances', 'Paiements & Catégories'],
+  ['systeme', 'Équipe & Système'],
+];
 
 const CATEGORY_KIND = { depense: 'Dépense', recette: 'Entrée diverse' };
 
@@ -153,7 +156,7 @@ function ResetDialog({ close, onDone }) {
         <Notice kind="danger">Opération définitive : les données effacées ne peuvent pas être récupérées. Utilisez-la pour repartir d’un club vide, par exemple après une démonstration.</Notice>
         <dl className="kv">
           <dt>Supprimés</dt>
-          <dd>membres, cartes, abonnements, réservations, encaissements, remboursements, produits, stocks, caves, relevés, casiers et collections privées, dépenses, clôtures, historique et soldes d’ouverture.</dd>
+          <dd>membres, cartes, abonnements, réservations, encaissements, remboursements, produits, stocks, caves et relevés, dépenses, clôtures, historique et soldes d’ouverture.</dd>
           <dt>Conservés</dt>
           <dd>comptes utilisateurs, paramètres, formules, catégories.</dd>
         </dl>
@@ -176,9 +179,9 @@ function ClubSection({ save }) {
   }));
   return (
     <section className="card settings-section" id="sec-club">
-      <div className="card-head"><h2>Club</h2></div>
+      <div className="card-head"><h2>Identité du club</h2></div>
       <form className="form-grid" onSubmit={onSubmit} noValidate>
-        <label className="field"><span>Nom du club <Hypothesis title="Nom, logo et charte graphique non fournis." label="à définir" /></span>
+        <label className="field"><span>Nom du club</span>
           <input name="club_name" defaultValue={s.club_name} required maxLength={80} /></label>
         <div className="form-row">
           <label className="field"><span>Libellé de la devise</span>
@@ -188,9 +191,91 @@ function ClubSection({ save }) {
           <label className="field"><span>Fuseau horaire</span><input name="timezone" list="tz-list" defaultValue={s.timezone} required />
             <datalist id="tz-list">{TIME_ZONES.map((z) => <option key={z} value={z} />)}</datalist></label>
         </div>
-        <p className="subtle">Les montants sont enregistrés de façon exacte : changer le libellé de la devise ne modifie aucune valeur.</p>
         <FormFooter busy={busy} error={error} />
       </form>
+    </section>
+  );
+}
+
+function RoomDialog({ close, room, onDone }) {
+  const editing = Boolean(room);
+  const [key] = useState(newKey);
+  const { busy, error, onSubmit } = useFormAction(async (v) => {
+    const body = {
+      name: v.name,
+      capacity: Number(v.capacity) || 4,
+      description: v.description,
+      active: editing ? Boolean(v.active) : true,
+    };
+    const list = editing
+      ? await api.put(`/api/rooms/${room.id}`, body, key)
+      : await api.post('/api/rooms', body, key);
+    close();
+    toast(editing ? 'Salle modifiée.' : 'Salle ajoutée.');
+    onDone?.(list);
+  });
+  return (
+    <Modal title={editing ? `Modifier ${room.name}` : 'Nouvelle salle'} onClose={close}>
+      <form className="form-grid" onSubmit={onSubmit} noValidate>
+        <div className="form-row">
+          <label className="field"><span>Nom de la salle</span><input name="name" required maxLength={80} defaultValue={room?.name ?? ''} placeholder="Ex. Salon Privé" /></label>
+          <label className="field"><span>Capacité (personnes)</span><input type="number" name="capacity" min="1" max="100" required defaultValue={room?.capacity ?? 6} /></label>
+        </div>
+        <label className="field"><span>Description (facultatif)</span><input name="description" maxLength={200} defaultValue={room?.description ?? ''} placeholder="Ex. Fauteuils club, table basse, cave dédiée" /></label>
+        {editing ? (
+          <label className="check"><input type="checkbox" name="active" value="1" defaultChecked={room.active} /><span>Salle disponible à la réservation</span></label>
+        ) : null}
+        <FormError error={error} />
+        <div className="modal-actions"><button type="button" className="btn" onClick={close}>Annuler</button>
+          <button type="submit" className="btn btn-primary" disabled={busy} aria-busy={busy}>{editing ? 'Enregistrer' : 'Ajouter la salle'}</button></div>
+      </form>
+    </Modal>
+  );
+}
+
+function RoomsSection() {
+  const rooms = useStore((st) => st.rooms);
+  const updateRooms = (list) => useStore.setState({ rooms: list });
+  const onDelete = (rm) => actionDialog({
+    title: `Supprimer ${rm.name}`,
+    danger: true,
+    confirmLabel: 'Supprimer la salle',
+    message: `Confirmer la suppression de la salle « ${rm.name} » ?`,
+    run: async () => {
+      const list = await api.del(`/api/rooms/${rm.id}`, {});
+      updateRooms(list);
+      toast('Salle supprimée.');
+    },
+  });
+  return (
+    <section className="card settings-section" id="sec-rooms">
+      <div className="card-head">
+        <h2>Salles & Salons</h2>
+        <button type="button" className="btn btn-sm btn-primary" onClick={() => openDialog(RoomDialog, { room: null, onDone: updateRooms })}>
+          <Icon name="plus" /> Nouvelle salle
+        </button>
+      </div>
+      <div className="table-wrap">
+        <table className="table stack-sm">
+          <thead><tr><th>Salle</th><th>Capacité</th><th>Description</th><th>État</th><th><span className="sr-only">Actions</span></th></tr></thead>
+          <tbody>
+            {rooms.map((rm) => (
+              <tr key={rm.id} className={rm.active ? undefined : 'is-muted'}>
+                <td data-label="Salle"><strong>{rm.name}</strong></td>
+                <td data-label="Capacité">{rm.capacity} pers.</td>
+                <td data-label="Description" className="subtle">{rm.description || '—'}</td>
+                <td data-label="État">{rm.active ? <span className="chip chip-ok">active</span> : <span className="chip">désactivée</span>}</td>
+                <td className="actions">
+                  <button type="button" className="btn btn-sm btn-ghost" onClick={() => openDialog(RoomDialog, { room: rm, onDone: updateRooms })}>Modifier</button>{' '}
+                  {rooms.length > 1 && (
+                    <button type="button" className="btn btn-sm btn-danger" onClick={() => onDelete(rm)}>Supprimer</button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }
@@ -217,8 +302,7 @@ function HoursSection({ save }) {
           <label className="field"><span>Pas de prolongation</span><select name="extension_step_min" defaultValue={s.booking.extension_step_min}>{[15, 30, 60].map((n) => <option key={n} value={n}>{n} min</option>)}</select></label>
         </div>
         <label className="check"><input type="checkbox" name="manager_can_authorize_off_hours" value="1" defaultChecked={s.manager_can_authorize_off_hours} />
-          <span>Le gérant peut autoriser un dépassement des horaires habituels <Hypothesis title="Rôle habilité à autoriser les prolongations après la fermeture : à confirmer." /></span></label>
-        <p className="subtle">Horaires envisagés : 10 h à minuit, prolongation possible jusqu’à 2 h, 3 h, 4 h ou 5 h. Créneaux de 30 min et minimum d’une heure : hypothèses de la version 1.</p>
+          <span>Le gérant peut autoriser un dépassement des horaires habituels</span></label>
         <FormFooter busy={busy} error={error} />
       </form>
     </section>
@@ -243,7 +327,7 @@ function TariffSection({ save }) {
           <label className="field"><span>Demi-heure restante ({s.currency.label})</span><input name="half" inputMode="decimal" defaultValue={toMajor(t.half)} required /></label>
         </div>
         <label className="check"><input type="checkbox" name="validated" value="1" defaultChecked={t.validated} /><span>Je valide ce tarif pour une utilisation réelle</span></label>
-        <p className="subtle">Montants annoncés dans les messages audio (25 000 l’heure, 15 000 la demi-heure). Exemple : 90 minutes payantes = 1 heure + 1 demi-heure. Un changement de tarif ne recalcule pas les réservations déjà confirmées.</p>
+        <p className="subtle">Un changement de tarif ne recalcule pas les réservations déjà confirmées.</p>
         <FormFooter busy={busy} error={error} />
       </form>
     </section>
@@ -288,9 +372,9 @@ function PlansSection({ version, applyBundle }) {
   const plans = useStore((st) => st.plans);
   return (
     <section className="card settings-section" id="sec-plans">
-      <div className="card-head"><h2>Formules</h2></div>
+      <div className="card-head"><h2>Formules d’abonnement</h2></div>
       <div className="grid-2">{plans.map((p) => <PlanForm key={`${p.id}-${version}`} plan={p} applyBundle={applyBundle} />)}</div>
-      <p className="subtle" style={{ marginTop: 10 }}>Le prix annuel n’est pas déduit du prix mensuel. Une modification ne s’applique qu’aux nouvelles activations.</p>
+      <p className="subtle" style={{ marginTop: 10 }}>Une modification ne s’applique qu’aux nouvelles activations.</p>
     </section>
   );
 }
@@ -304,15 +388,15 @@ function RulesSection({ save }) {
   }));
   return (
     <section className="card settings-section" id="sec-rules">
-      <div className="card-head"><h2>Règles à confirmer</h2></div>
+      <div className="card-head"><h2>Règles d’exploitation</h2></div>
       <form className="form-grid" onSubmit={onSubmit} noValidate>
         <div className="form-row">
-          <label className="field"><span>Attribution des 24 h annuelles <Hypothesis title="Mode d’attribution à confirmer." /></span>
+          <label className="field"><span>Attribution des heures annuelles</span>
             <select name="annual_allocation_mode" defaultValue={s.annual_allocation_mode}>
               <option value="activation">Toutes disponibles dès l’activation</option>
               <option value="mensuelle">2 h attribuées chaque mois</option></select>
             <span className="help">S’applique aux nouvelles activations.</span></label>
-          <label className="field"><span>Sous-compte des ventes de formules <Hypothesis title="Rattachement des ventes de cartes à valider." /></span>
+          <label className="field"><span>Sous-compte des ventes de formules</span>
             <select name="subscription_revenue_account" defaultValue={s.subscription_revenue_account}>
               {Object.entries(ACCOUNT_LABEL).map(([k, label]) => <option key={k} value={k}>{label}</option>)}</select></label>
         </div>
@@ -321,15 +405,7 @@ function RulesSection({ save }) {
           <label className="field"><span>Seuil d’alerte de stock par défaut</span><input type="number" name="low_stock_default" min="0" defaultValue={s.low_stock_default} /></label>
         </div>
         <label className="check"><input type="checkbox" name="refunds_admin_only" value="1" defaultChecked={s.refunds_admin_only} />
-          <span>Remboursements réservés aux administrateurs <Hypothesis title="Règles de remboursement à valider." /></span></label>
-        <dl className="kv">
-          <dt>Report des heures</dt><dd>Non géré : les heures non utilisées expirent avec la formule.</dd>
-          <dt>Suspension, renouvellement auto.</dt><dd>Non gérés : renouvellement manuel avec historique.</dd>
-          <dt>Annulation tardive</dt><dd>Aucun frais : l’annulation libère les heures engagées.</dd>
-          <dt>Paiements partiels</dt><dd>Non gérés : chaque ligne est encaissée intégralement.</dd>
-          <dt>Répartition entre associés</dt><dd>À définir.</dd>
-          <dt>Comptabilité</dt><dd>Suivi des recettes uniquement ; reconnaissance des revenus d’abonnement à définir.</dd>
-        </dl>
+          <span>Remboursements réservés aux administrateurs</span></label>
         <FormFooter busy={busy} error={error} />
       </form>
     </section>
@@ -345,7 +421,7 @@ function PaymentsSection({ save }) {
     <section className="card settings-section" id="sec-payments">
       <div className="card-head"><h2>Moyens de paiement</h2></div>
       <form className="form-grid" onSubmit={onSubmit} noValidate>
-        <label className="field"><span>Un moyen par ligne <Hypothesis title="Moyens de paiement réels à confirmer. Paiements enregistrés manuellement en version 1." /></span>
+        <label className="field"><span>Un moyen par ligne</span>
           <textarea name="methods" rows={5} defaultValue={s.payment_methods.join('\n')} /></label>
         <FormFooter busy={busy} error={error} />
       </form>
@@ -471,7 +547,7 @@ function DataSection({ applyBundle, onReset }) {
     <section className="card settings-section" id="sec-data">
       <div className="card-head"><h2>Données</h2></div>
       <div className="stack">
-        <p>Les données de démonstration (membres, produits, caves, casiers et opérations fictifs) se chargent uniquement sur un club vide, en mode démonstration.
+        <p>Les données de démonstration (membres, produits, caves et opérations fictifs) se chargent uniquement sur un club vide, en mode démonstration.
           {' '}Pour démarrer en utilisation réelle, effacez toutes les données : les comptes utilisateurs, les paramètres, les formules et les catégories sont conservés.</p>
         <div className="row">
           <button type="button" className="btn" onClick={loadDemo} disabled={busy} aria-busy={busy}><Icon name="database" /> Charger les données de démonstration</button>
@@ -536,10 +612,12 @@ function AuditSection({ audit }) {
 
 function SettingsPage() {
   const setBundle = useStore((st) => st.setBundle);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const qTab = searchParams.get('onglet');
+  const tab = SETTINGS_TABS.some(([k]) => k === qTab) ? qTab : 'club';
   const state = useLoad(() => Promise.all([
     api.get('/api/users'), api.get('/api/audit?limit=150'), api.get('/api/ledger/categories'),
   ]), []);
-  // Bumped after each saved change: the forms are rebuilt from the new settings (as the vanilla re-render did).
   const [version, setVersion] = useState(0);
   const [categories, setCategories] = useState(null);
 
@@ -557,31 +635,57 @@ function SettingsPage() {
     setCategories(null);
     api.get('/api/me').then(applyBundle, (e) => toast(e.message, 'error'));
   };
-  const jump = (id) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
   return (
     <Loaded state={state}>{([users, audit, loadedCategories]) => (
       <>
+        <AdminTabs />
         <PageHead
-          title="Paramètres"
-          lead="Réservés aux administrateurs. Les éléments marqués « hypothèse » ou « à définir » attendent une décision."
+          title="Paramètres du club"
+          lead="Configuration générale, tarifs, moyens de paiement et comptes utilisateurs."
           tour="settings"
         />
-        <nav className="settings-nav" aria-label="Sections">
-          {SECTIONS.map(([id, label]) => <button key={id} type="button" className="btn btn-sm" onClick={() => jump(id)}>{label}</button>)}
-        </nav>
-        <ClubSection key={`club-${version}`} save={save} />
-        <HoursSection key={`hours-${version}`} save={save} />
-        <TariffSection key={`tariff-${version}`} save={save} />
-        <PlansSection version={version} applyBundle={applyBundle} />
-        <RulesSection key={`rules-${version}`} save={save} />
-        <PaymentsSection key={`payments-${version}`} save={save} />
-        <TreasurySection key={`treasury-${version}`} save={save} />
-        <CategoriesSection list={categories ?? loadedCategories} onChange={setCategories} />
-        <DemoSection save={save} />
-        <DataSection applyBundle={(bundle) => { setCategories(null); applyBundle(bundle); }} onReset={onReset} />
-        <UsersSection users={users} onChanged={() => state.reload()} />
-        <AuditSection audit={audit} />
+        <div className="toolbar">
+          <Segmented
+            label="Catégorie de paramètres"
+            value={tab}
+            options={SETTINGS_TABS}
+            onChange={(k) => setSearchParams(k === 'club' ? {} : { onglet: k })}
+          />
+        </div>
+
+        {tab === 'club' && (
+          <>
+            <RoomsSection />
+            <ClubSection key={`club-${version}`} save={save} />
+            <HoursSection key={`hours-${version}`} save={save} />
+            <RulesSection key={`rules-${version}`} save={save} />
+          </>
+        )}
+
+        {tab === 'tarifs' && (
+          <>
+            <TariffSection key={`tariff-${version}`} save={save} />
+            <PlansSection version={version} applyBundle={applyBundle} />
+          </>
+        )}
+
+        {tab === 'finances' && (
+          <>
+            <PaymentsSection key={`payments-${version}`} save={save} />
+            <TreasurySection key={`treasury-${version}`} save={save} />
+            <CategoriesSection list={categories ?? loadedCategories} onChange={setCategories} />
+          </>
+        )}
+
+        {tab === 'systeme' && (
+          <>
+            <UsersSection users={users} onChanged={() => state.reload()} />
+            <DemoSection save={save} />
+            <DataSection applyBundle={(bundle) => { setCategories(null); applyBundle(bundle); }} onReset={onReset} />
+            <AuditSection audit={audit} />
+          </>
+        )}
       </>
     )}</Loaded>
   );
@@ -594,3 +698,4 @@ export default function Settings() {
   }
   return <SettingsPage />;
 }
+

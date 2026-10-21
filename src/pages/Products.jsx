@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
-import { DemoChip, Empty, FormError, Hypothesis, Loaded, PageHead, Segmented } from '../components/ui/ui.jsx';
+import { DemoChip, Empty, FormError, Loaded, PageHead, Segmented, StocksTabs } from '../components/ui/ui.jsx';
 import { Modal, openDialog } from '../components/ui/Modal.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import { api, newKey } from '../lib/api.js';
@@ -171,21 +171,15 @@ export default function Products() {
   return (
     <Loaded state={state}>{([products, movements]) => {
       const list = products.filter((p) => !cat || p.category === cat);
-      const anyDemo = products.some((p) => p.is_demo);
       return (
         <>
+          <StocksTabs />
           <PageHead
-            title="Produits et stocks"
-            lead="Cigares et bouteilles d’alcool. Les ventes se saisissent depuis la note d’une réservation."
+            title="Catalogue & Stocks"
+            lead="Cigares et bouteilles du club."
             actions={admin ? <button type="button" className="btn btn-primary" onClick={() => productDialog(null, reload)}><Icon name="plus" /> Nouveau produit</button> : null}
             tour="products"
           />
-          {anyDemo && (
-            <div className="notice notice-bronze" style={{ marginBottom: 14 }}><Icon name="info" />
-              <span>Catalogue fictif de démonstration : la liste réelle des cigares et des bouteilles, les prix et les quantités seront renseignés ultérieurement.{' '}
-                <Hypothesis title="La vente de cigares à l’unité est une hypothèse à confirmer." label="cigares à l’unité" /></span>
-            </div>
-          )}
           <div className="toolbar">
             <Segmented
               label="Catégorie"

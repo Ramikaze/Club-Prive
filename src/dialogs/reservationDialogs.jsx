@@ -7,8 +7,10 @@ import { useStore, useSettings } from '../store/useStore.js';
 import { openDialog, Modal, actionDialog } from '../components/ui/Modal.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import Icon from '../components/ui/Icon.jsx';
-import { Hypothesis, Notice, FormError } from '../components/ui/ui.jsx';
-import { useSubmit } from '../lib/hooks.js';
+import { AccountTag, Chip, Hypothesis, Loaded, Notice, FormError } from '../components/ui/ui.jsx';
+import ConsumptionBreakdown, { ConsumerPicker, consumptionOf } from '../components/ui/ConsumptionBreakdown.jsx';
+import { useLoad, useSubmit } from '../lib/hooks.js';
+import { openPaymentDialog } from './moneyDialogs.jsx';
 import { daysBetween, parseHHMM } from '../../shared/time.js';
 import { supplementDetail } from '../../shared/rules.js';
 
@@ -43,6 +45,21 @@ function defaultStart(date) {
 const creditLine = (summary) => (summary?.credit
   ? ` · crédit disponible ${fmtDuration(summary.credit.available)}` : '');
 
+export function memberRoomEligibility(m) {
+  if (!m) return { ok: false, reason: 'Membre inconnu' };
+  if (m.active === false) return { ok: false, reason: 'Membre désactivé' };
+  if (m.cards_deactivated) return { ok: false, reason: 'Carte désactivée' };
+  const state = m.subscription?.state;
+  if (!['active', 'expire_bientot'].includes(state)) {
+    return { ok: false, reason: state === 'expiree' ? 'Carte / formule expirée' : 'Aucune formule active' };
+  }
+  const avail = m.subscription?.credit?.available ?? 0;
+  if (avail <= 0) {
+    return { ok: false, reason: 'Crédit épuisé (0 min)' };
+  }
+  return { ok: true, available: avail };
+}
+
 const conflictText = (conflicts) => conflicts.map((c) => `${c.member_name} (${c.start_time} – ${c.end_time})`).join(', ');
 
 // ---------------------------------------------------------------- new reservation
@@ -66,7 +83,10 @@ function durationOptions(w, slot, minDur, startTime) {
 function QuotePanel({ q, s }) {
   const warnings = [];
   if (q.conflicts.length) {
-    warnings.push(<Notice key="conflicts" kind="danger">{`Créneau occupé : ${conflictText(q.conflicts)}.`}</Notice>);
+    warnings.push(<Notice key="conflicts" kind="danger">{`${q.room?.name ?? 'Salle'} déjà occupée sur ce créneau : ${conflictText(q.conflicts)}. Choisissez une autre salle disponible ci-dessus.`}</Notice>);
+  }
+  if (q.room && q.party_size > q.room.capacity) {
+    warnings.push(<Notice key="cap" kind="warn">{`Le nombre de membres (${q.party_size}) dépasse la capacité de ${q.room.name} (${q.room.capacity} pers.).`}</Notice>);
   }
   if (q.off_hours) {
     warnings.push(<Notice key="off" kind="warn">{q.can_authorize_off_hours
@@ -79,17 +99,26 @@ function QuotePanel({ q, s }) {
   return (
     <>
       <dl className="calc">
+        {q.room ? <div><dt>Salle</dt><dd>{`${q.room.name} · ${q.party_size} membre(s) présent(s) (capacité ${q.room.capacity} pers.)`}</dd></div> : null}
         <div><dt>Horaire</dt><dd>{`${dayLabel(q.biz_day, 'medium')} · ${q.start_time} → ${q.end_time}${q.end_next_day ? ' (lendemain)' : ''}`}</dd></div>
         <div><dt>Durée</dt><dd>{fmtDuration(q.duration_min)}</dd></div>
-        <div><dt>Formule</dt><dd>{`${q.subscription.plan_name} · jusqu’au ${dayLabel(q.subscription.end_date, 'short')}`}</dd></div>
-        <div><dt>Crédit disponible</dt><dd>{fmtDuration(q.credit_before.available)}</dd></div>
-        <div><dt>Heures incluses utilisées</dt><dd>{fmtDuration(q.included_minutes)}</dd></div>
+        <div><dt>Formule (titulaire)</dt><dd>{`${q.subscription.plan_name} · jusqu’au ${dayLabel(q.subscription.end_date, 'short')}`}</dd></div>
+        <div><dt>Crédit disponible (titulaire)</dt><dd>{fmtDuration(q.credit_before.available)}</dd></div>
+        <div><dt>Heures incluses utilisées (titulaire)</dt><dd>{fmtDuration(q.included_minutes)}</dd></div>
+        {q.extra_attendees?.length ? (
+          <div>
+            <dt>Crédits accompagnants ({q.extra_attendees.length})</dt>
+            <dd>
+              {q.extra_attendees.map((a) => `${a.name} : −${fmtDuration(a.included_minutes)} (sur ${fmtDuration(a.credit_available)})`).join(' · ')}
+            </dd>
+          </div>
+        ) : null}
         <div><dt>Temps payant</dt><dd>{supplementText(q.paid_minutes, q.tariff)}
           {q.paid_minutes && !q.tariff.validated
             ? <>{' '}<Hypothesis title="Tarif annoncé dans les messages audio, non encore validé par un administrateur." label="tarif à valider" /></>
             : null}</dd></div>
         <div className="total"><dt>Supplément à régler</dt><dd>{money(q.supplement_amount)}</dd></div>
-        <div><dt>Crédit restant après</dt><dd>{fmtDuration(q.credit_after)}</dd></div>
+        <div><dt>Crédit restant après (titulaire)</dt><dd>{fmtDuration(q.credit_after)}</dd></div>
       </dl>
       {warnings.length ? <div className="stack" style={{ marginTop: 10 }}>{warnings}</div> : null}
     </>
@@ -98,6 +127,8 @@ function QuotePanel({ q, s }) {
 
 function BookingDialog({ close, preset, onDone }) {
   const s = useSettings();
+  const storeRooms = useStore((st) => st.rooms);
+  const activeRooms = storeRooms.filter((rm) => rm.active);
   const w = win();
   const { slot_min: slot, min_duration_min: minDur } = s.booking;
   const [key] = useState(newKey);
@@ -106,10 +137,17 @@ function BookingDialog({ close, preset, onDone }) {
     const date = preset.date ?? bizToday();
     const wanted = preset.start_time ?? defaultStart(date);
     const list = startOptions(win(), slot, minDur);
-    // As a native select does: a start time missing from the list falls back to the first option.
-    return { date, start: list.some((o) => o.label === wanted) ? wanted : (list[0]?.label ?? wanted) };
+    return {
+      date,
+      start: list.some((o) => o.label === wanted) ? wanted : (list[0]?.label ?? wanted),
+      roomId: preset.room_id ?? activeRooms[0]?.id ?? 1,
+      startNow: Boolean(preset.start_now),
+    };
   });
   const [member, setMember] = useState(preset.member ?? null);
+  const [extraMembers, setExtraMembers] = useState([]);
+  const [roomId, setRoomId] = useState(init.roomId);
+  const [startNow, setStartNow] = useState(init.startNow);
   const [date, setDate] = useState(init.date);
   const [start, setStart] = useState(init.start);
   const [duration, setDuration] = useState(minDur);
@@ -120,19 +158,31 @@ function BookingDialog({ close, preset, onDone }) {
   const [loading, setLoading] = useState(() => Boolean(preset.member));
   const [search, setSearch] = useState('');
   const [found, setFound] = useState({ list: null, error: null });
+  const [attSearch, setAttSearch] = useState('');
+  const [allMembers, setAllMembers] = useState([]);
 
   const seq = useRef(0);
   const searchSeq = useRef(0);
   const quoteTimer = useRef(null);
   const searchTimer = useRef(null);
   const latest = useRef(null);
-  latest.current = { member, date, start, duration, notes, auth };
+  latest.current = { member, extraMembers, roomId, startNow, date, start, duration, notes, auth };
 
   const payload = () => {
     const v = latest.current;
+    const attendeeIds = v.extraMembers.map((m) => m.id);
     return {
-      member_id: v.member?.id, date: v.date, start_time: v.start, duration_min: Number(v.duration),
-      notes: v.notes, authorize_off_hours: v.auth,
+      member_id: v.member?.id,
+      room_id: Number(v.roomId),
+      party_size: 1 + attendeeIds.length,
+      attendee_ids: attendeeIds,
+      require_credit: true,
+      start_now: Boolean(v.startNow && v.date === bizToday()),
+      date: v.date,
+      start_time: v.start,
+      duration_min: Number(v.duration),
+      notes: v.notes,
+      authorize_off_hours: v.auth,
     };
   };
 
@@ -157,7 +207,6 @@ function BookingDialog({ close, preset, onDone }) {
     setLoading(false);
   };
 
-  // Debounced: the form values are read when the request leaves, a stale answer is ignored.
   const requestQuote = () => {
     clearTimeout(quoteTimer.current);
     setLoading(true);
@@ -167,14 +216,11 @@ function BookingDialog({ close, preset, onDone }) {
   const runSearch = async (value) => {
     const q = value.trim();
     const n = (searchSeq.current += 1);
-    if (!q) {
-      setFound({ list: null, error: null });
-      return;
-    }
     try {
-      const list = await api.get(`/api/members?q=${encodeURIComponent(q)}`);
+      const list = await api.get(q ? `/api/members?q=${encodeURIComponent(q)}` : '/api/members');
       if (n !== searchSeq.current) return;
       setFound({ list, error: null });
+      if (!q) setAllMembers(list);
     } catch (e) {
       if (n !== searchSeq.current) return;
       setFound({ list: null, error: e.message });
@@ -196,8 +242,15 @@ function BookingDialog({ close, preset, onDone }) {
   };
 
   const pick = (x) => {
+    const elig = memberRoomEligibility(x);
+    if (!elig.ok) {
+      toast(`Accès refusé pour ${x.name} : ${elig.reason}.`, 'error');
+      return;
+    }
     stopSearch();
     setMember(x);
+    setExtraMembers((prev) => prev.filter((m) => m.id !== x.id));
+    latest.current.member = x;
     requestQuote();
   };
 
@@ -209,6 +262,27 @@ function BookingDialog({ close, preset, onDone }) {
     setQuote(null);
     setQuoteError(null);
     setLoading(false);
+    runSearch('');
+  };
+
+  const addCompanion = (x) => {
+    const elig = memberRoomEligibility(x);
+    if (!elig.ok) {
+      toast(`Accès refusé pour ${x.name} : ${elig.reason}.`, 'error');
+      return;
+    }
+    const next = [...extraMembers, x];
+    setExtraMembers(next);
+    latest.current.extraMembers = next;
+    setAttSearch('');
+    requestQuote();
+  };
+
+  const removeCompanion = (id) => {
+    const next = extraMembers.filter((m) => m.id !== id);
+    setExtraMembers(next);
+    latest.current.extraMembers = next;
+    requestQuote();
   };
 
   useEffect(() => () => {
@@ -219,7 +293,9 @@ function BookingDialog({ close, preset, onDone }) {
   }, []);
 
   useEffect(() => {
+    api.get('/api/members').then(setAllMembers).catch(() => {});
     if (latest.current.member) requestQuote();
+    else runSearch('');
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onStart = (e) => {
@@ -230,19 +306,25 @@ function BookingDialog({ close, preset, onDone }) {
     requestQuote();
   };
 
+  const selectRoom = (nextRoomId) => {
+    setRoomId(Number(nextRoomId));
+    latest.current.roomId = Number(nextRoomId);
+    requestQuote();
+  };
+
   const onSubmit = (e) => {
     e.preventDefault();
     submit(async () => {
-      if (!member) throw new Error('Choisissez un membre.');
+      if (!member) throw new Error('Choisissez un membre titulaire.');
       const detail = await api.post('/api/reservations', payload(), key);
       close();
-      toast(`Réservation confirmée : ${detail.reservation.member_name}, ${dayLabel(detail.reservation.biz_day, 'medium')} à ${detail.reservation.start_time}.`);
+      toast(`${detail.reservation.status === 'en_cours' ? 'Membres installés' : 'Réservation confirmée'} : ${detail.reservation.member_name} (${detail.reservation.room_name}, ${detail.reservation.party_size} membre(s)).`);
       onDone?.(detail);
     });
   };
 
   let quoteBox = null;
-  if (!member) quoteBox = <p className="subtle">Choisissez un membre pour afficher le détail du calcul.</p>;
+  if (!member) quoteBox = <p className="subtle">Choisissez un membre ayant une carte active et du crédit disponible pour calculer la séance.</p>;
   else if (loading && !quote) quoteBox = <p className="subtle">Calcul en cours…</p>;
   else if (quoteError) quoteBox = <Notice kind="danger">{quoteError}</Notice>;
   else if (quote) quoteBox = <QuotePanel q={quote} s={s} />;
@@ -252,14 +334,29 @@ function BookingDialog({ close, preset, onDone }) {
   const canSubmit = ready && !(quote.conflicts.length > 0 || quote.tariff_blocked
     || (quote.off_hours && (!quote.can_authorize_off_hours || !auth)));
 
+  const roomsList = quote?.rooms_availability ?? activeRooms.map((rm) => ({ ...rm, available: true, conflicts: [] }));
+  const currentRoom = roomsList.find((rm) => rm.id === Number(roomId)) ?? activeRooms[0];
+  const selectedIds = new Set([member?.id, ...extraMembers.map((m) => m.id)].filter(Boolean));
+  const qNorm = attSearch.trim().toLowerCase();
+  const companionCandidates = allMembers.filter((m) => {
+    if (selectedIds.has(m.id)) return false;
+    if (!qNorm) return memberRoomEligibility(m).ok;
+    return (
+      m.name.toLowerCase().includes(qNorm)
+      || m.member_no.toLowerCase().includes(qNorm)
+      || (m.card_code && m.card_code.toLowerCase().includes(qNorm))
+      || (m.phone && m.phone.toLowerCase().includes(qNorm))
+    );
+  }).slice(0, 6);
+
   return (
-    <Modal title="Nouvelle réservation" size="wide" onClose={close}>
+    <Modal title={startNow ? 'Installer des membres dans une salle' : 'Nouvelle réservation'} size="wide" onClose={close}>
       <form className="form-grid" onSubmit={onSubmit} noValidate>
-        <fieldset><legend>Membre</legend><div id="bk-member">
+        <fieldset><legend>Membre titulaire (carte active & crédit &gt; 0 requis)</legend><div id="bk-member">
           {member ? (
             <div className="row">
               <div className="grow" style={{ flex: 1, minWidth: 0 }}>
-                <strong>{member.name}</strong> <span className="subtle">{member.member_no}</span>
+                <strong>{member.name}</strong> <span className="subtle">{member.member_no}{member.card_code ? ` · carte ${member.card_code}` : ''}</span>
                 <div className="subtle">{subStateLabel(member.subscription)}{creditLine(member.subscription)}</div>
               </div>
               {preset.lockMember ? null : <button type="button" className="btn btn-sm" onClick={changeMember}>Changer</button>}
@@ -267,21 +364,135 @@ function BookingDialog({ close, preset, onDone }) {
           ) : (
             <>
               <div className="search"><Icon name="search" /><input type="search" value={search} onChange={onSearch}
-                placeholder="Nom, téléphone, n° de membre ou de carte" aria-label="Rechercher un membre" autoComplete="off" autoFocus /></div>
+                placeholder="Nom, téléphone, n° de membre ou code carte" aria-label="Rechercher un membre" autoComplete="off" autoFocus /></div>
               <div id="bk-results" className="list" aria-live="polite">
                 {found.error ? <Notice kind="danger">{found.error}</Notice> : null}
                 {found.list ? (found.list.length
-                  ? found.list.slice(0, 8).map((x) => (
-                    <button key={x.id} type="button" className="list-item" onClick={() => pick(x)}>
-                      <div className="grow"><div className="title">{x.name} <span className="subtle">{x.member_no}</span></div>
-                        <div className="meta">{subStateLabel(x.subscription)}{creditLine(x.subscription)}</div></div>
-                    </button>
-                  ))
+                  ? found.list.slice(0, 8).map((x) => {
+                    const elig = memberRoomEligibility(x);
+                    return (
+                      <button
+                        key={x.id}
+                        type="button"
+                        className="list-item"
+                        aria-disabled={!elig.ok}
+                        style={elig.ok ? undefined : { opacity: 0.55 }}
+                        onClick={() => pick(x)}
+                      >
+                        <div className="grow">
+                          <div className="title">{x.name} <span className="subtle">{x.member_no}{x.card_code ? ` · ${x.card_code}` : ''}</span></div>
+                          <div className="meta">{subStateLabel(x.subscription)}{creditLine(x.subscription)}</div>
+                        </div>
+                        {elig.ok
+                          ? <span className="chip chip-ok">{fmtDuration(elig.available)} dispo</span>
+                          : <span className="chip chip-danger">{elig.reason}</span>}
+                      </button>
+                    );
+                  })
                   : <p className="subtle">Aucun membre trouvé.</p>) : null}
               </div>
             </>
           )}
         </div></fieldset>
+
+        <fieldset><legend>Salle & Membres présents</legend>
+          <div className="room-picker-grid">
+            {roomsList.map((rm) => {
+              const selected = Number(roomId) === rm.id;
+              const free = rm.available !== false;
+              return (
+                <button
+                  key={rm.id}
+                  type="button"
+                  className={`room-pick-btn${selected ? ' selected' : ''}${!free ? ' busy' : ''}`}
+                  onClick={() => selectRoom(rm.id)}
+                >
+                  <div className="row" style={{ justifyContent: 'space-between', width: '100%' }}>
+                    <strong>{rm.name}</strong>
+                    <span className={`chip ${free ? 'chip-ok' : 'chip-danger'}`}>{free ? 'Disponible' : 'Occupée'}</span>
+                  </div>
+                  <div className="subtle" style={{ fontSize: '0.78rem' }}>
+                    Jusqu’à {rm.capacity} membres{!free && rm.conflicts?.[0] ? ` · ${rm.conflicts[0].member_name}` : ''}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {member ? (
+            <div className="stack" style={{ marginTop: 12 }}>
+              <div className="row" style={{ justifyContent: 'space-between' }}>
+                <span className="subtle">
+                  <strong>{1 + extraMembers.length}</strong> / {currentRoom?.capacity ?? 8} membre(s) présent(s) — chaque membre consomme son propre crédit d’heures
+                </span>
+              </div>
+              <div className="attendee-chips">
+                <span className="chip chip-bronze">
+                  {member.name} ({member.member_no}) · titulaire
+                </span>
+                {extraMembers.map((m) => (
+                  <span key={m.id} className="chip chip-ok" style={{ gap: 6 }}>
+                    {m.name} ({fmtDuration(m.subscription?.credit?.available ?? 0)} dispo)
+                    <button
+                      type="button"
+                      className="chip-remove-btn"
+                      onClick={() => removeCompanion(m.id)}
+                      aria-label={`Retirer ${m.name} de la salle`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+              {1 + extraMembers.length < (currentRoom?.capacity ?? 8) ? (
+                <div>
+                  <div className="search" style={{ marginTop: 4 }}>
+                    <Icon name="search" />
+                    <input
+                      type="search"
+                      value={attSearch}
+                      onChange={(e) => setAttSearch(e.target.value)}
+                      placeholder="Ajouter un autre membre présent (nom, n° membre ou carte avec crédit > 0)…"
+                      aria-label="Ajouter un membre accompagnant"
+                    />
+                  </div>
+                  {companionCandidates.length ? (
+                    <div className="list" style={{ marginTop: 6, maxHeight: 165, overflowY: 'auto' }}>
+                      {companionCandidates.map((c) => {
+                        const elig = memberRoomEligibility(c);
+                        return (
+                          <button
+                            key={c.id}
+                            type="button"
+                            className="list-item"
+                            style={{ minHeight: 42, padding: '6px 4px', opacity: elig.ok ? 1 : 0.55 }}
+                            aria-disabled={!elig.ok}
+                            onClick={() => addCompanion(c)}
+                          >
+                            <div className="grow">
+                              <strong>{c.name}</strong> <span className="subtle">{c.member_no}{c.card_code ? ` · ${c.card_code}` : ''}</span>
+                            </div>
+                            {elig.ok
+                              ? <span className="chip chip-ok">+ Ajouter ({fmtDuration(elig.available)} dispo)</span>
+                              : <span className="chip chip-danger">{elig.reason}</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {date === bizToday() ? (
+            <label className="check" style={{ marginTop: 10 }}>
+              <input type="checkbox" checked={startNow} onChange={(e) => setStartNow(e.target.checked)} />
+              <span><strong>Membre(s) déjà présent(s)</strong> (installer immédiatement en salle occupée)</span>
+            </label>
+          ) : null}
+        </fieldset>
+
         <div className="form-row">
           <label className="field"><span>Journée</span>
             <input type="date" name="date" value={date} required onChange={(e) => { setDate(e.target.value); requestQuote(); }} /></label>
@@ -306,7 +517,9 @@ function BookingDialog({ close, preset, onDone }) {
         <FormError error={error} />
         <div className="modal-actions">
           <button type="button" className="btn" onClick={close}>Annuler</button>
-          <button type="submit" className="btn btn-primary" id="bk-submit" disabled={busy || !canSubmit} aria-busy={busy}>Confirmer la réservation</button>
+          <button type="submit" className="btn btn-primary" id="bk-submit" disabled={busy || !canSubmit} aria-busy={busy}>
+            {startNow && date === bizToday() ? 'Installer dans la salle' : 'Confirmer la réservation'}
+          </button>
         </div>
       </form>
     </Modal>
@@ -315,6 +528,118 @@ function BookingDialog({ close, preset, onDone }) {
 
 export function openBookingDialog(preset = {}, onDone) {
   openDialog(BookingDialog, { preset: preset ?? {}, onDone });
+}
+
+// ---------------------------------------------------------------- add/remove member in room
+
+function AddAttendeeDialog({ close, r, onDone }) {
+  const state = useLoad(() => api.get('/api/members'), []);
+  const [q, setQ] = useState('');
+  const { busy, error, submit } = useSubmit();
+
+  const presentIds = new Set((r.attendees ?? [{ member_id: r.member_id }]).map((a) => a.member_id));
+
+  const addMember = (m) => {
+    const elig = memberRoomEligibility(m);
+    if (!elig.ok) {
+      toast(`Accès refusé pour ${m.name} : ${elig.reason}.`, 'error');
+      return;
+    }
+    submit(async () => {
+      const res = await api.post(`/api/reservations/${r.id}/attendees`, { member_id: m.id }, newKey());
+      close();
+      toast(`${m.name} ajouté(e) dans ${r.room_name} (crédit engagé sur sa carte).`);
+      onDone?.(res);
+    });
+  };
+
+  return (
+    <Modal title={`Ajouter un membre dans ${r.room_name ?? 'la salle'}`} size="wide" onClose={close}>
+      <Loaded state={state}>{(members) => {
+        const norm = q.trim().toLowerCase();
+        const filtered = members.filter((m) => {
+          if (presentIds.has(m.id)) return false;
+          if (!norm) return true;
+          return (
+            m.name.toLowerCase().includes(norm)
+            || m.member_no.toLowerCase().includes(norm)
+            || (m.card_code && m.card_code.toLowerCase().includes(norm))
+            || (m.phone && m.phone.toLowerCase().includes(norm))
+          );
+        });
+        // Show eligible members first
+        filtered.sort((a, b) => Number(memberRoomEligibility(b).ok) - Number(memberRoomEligibility(a).ok));
+
+        return (
+          <div className="form-grid">
+            <Notice kind="info">
+              Seuls les membres disposant d’une <strong>carte active</strong> et d’un <strong>crédit d’utilisation restant (&gt; 0 min)</strong> peuvent entrer dans la salle. Chaque membre présent consomme son propre crédit ({fmtDuration(r.duration_min)} max pour cette séance).
+            </Notice>
+            <div className="search">
+              <Icon name="search" />
+              <input
+                type="search"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Rechercher par nom, n° de membre, code de carte ou scan QR…"
+                aria-label="Rechercher un membre à ajouter dans la salle"
+                autoFocus
+              />
+            </div>
+            <FormError error={error} />
+            <div className="list" style={{ maxHeight: 340, overflowY: 'auto' }}>
+              {filtered.length ? filtered.map((m) => {
+                const elig = memberRoomEligibility(m);
+                const deduction = elig.ok ? Math.min(elig.available, r.duration_min) : 0;
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    className="list-item"
+                    aria-disabled={!elig.ok || busy}
+                    style={elig.ok ? undefined : { opacity: 0.55 }}
+                    onClick={() => addMember(m)}
+                  >
+                    <div className="grow">
+                      <div className="title">
+                        <strong>{m.name}</strong> <span className="subtle">{m.member_no}{m.card_code ? ` · carte ${m.card_code}` : ''}</span>
+                      </div>
+                      <div className="meta">
+                        {subStateLabel(m.subscription)}{creditLine(m.subscription)}
+                        {elig.ok ? ` · Décompte séance : −${fmtDuration(deduction)}` : ''}
+                      </div>
+                    </div>
+                    {elig.ok ? (
+                      <span className="chip chip-ok">+ Faire entrer ({fmtDuration(elig.available)} dispo)</span>
+                    ) : (
+                      <span className="chip chip-danger">{elig.reason}</span>
+                    )}
+                  </button>
+                );
+              }) : <p className="subtle">Aucun membre correspondant.</p>}
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="btn" onClick={close}>Fermer</button>
+            </div>
+          </div>
+        );
+      }}</Loaded>
+    </Modal>
+  );
+}
+
+export function openAddAttendeeDialog(r, onDone) {
+  openDialog(AddAttendeeDialog, { r, onDone });
+}
+
+export async function quickRemoveAttendee(r, att, onDone) {
+  try {
+    const res = await api.del(`/api/reservations/${r.id}/attendees/${att.member_id}`, {}, newKey());
+    toast(`${att.name} retiré(e) de ${r.room_name} (crédit libéré).`);
+    onDone?.(res);
+  } catch (e) {
+    toast(e.message, 'error');
+  }
 }
 
 // ---------------------------------------------------------------- extension
@@ -463,4 +788,169 @@ export function openCancelReservationDialog(detail, onDone) {
       onDone?.(res);
     },
   });
+}
+
+// ---------------------------------------------------------------- quick 1-click consumption & actions
+
+const PRODUCT_GROUPS = [
+  ['cigare', 'Cigares'],
+  ['bouteille', 'Bouteilles'],
+];
+
+function ConsumptionDialog({ close, reservationId, memberName, roomName, onDone }) {
+  const state = useLoad(() => Promise.all([
+    api.get(`/api/reservations/${reservationId}`),
+    api.get('/api/products'),
+  ]), [reservationId]);
+  const [addingId, setAddingId] = useState(null);
+  const [error, setError] = useState(null);
+  const [consumer, setConsumer] = useState(null);
+
+  const addProduct = async (p, forMember) => {
+    if (addingId) return;
+    setAddingId(p.id);
+    setError(null);
+    try {
+      await api.post(`/api/reservations/${reservationId}/items`, { product_id: p.id, quantity: 1, consumer_member_id: forMember.member_id }, newKey());
+      toast(`+1 ${p.name} pour ${forMember.name}.`);
+      state.reload();
+      onDone?.();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setAddingId(null);
+    }
+  };
+
+  return (
+    <Modal title={`Facturer bouteilles & cigares — ${roomName ? `${roomName} · ` : ''}${memberName}`} size="wide" onClose={close}>
+      <Loaded state={state}>{([detail, products]) => {
+        const due = detail.charges.filter((c) => c.status === 'due');
+        const dueTotal = due.reduce((sum, c) => sum + c.amount, 0);
+        const attendees = detail.reservation.attendees ?? [];
+        const forMember = attendees.find((a) => a.member_id === consumer) ?? attendees[0]
+          ?? { member_id: detail.reservation.member_id, name: detail.reservation.member_name };
+        return (
+          <div className="form-grid">
+            <p className="subtle">Choisissez le membre, puis touchez une bouteille ou un cigare pour l’ajouter immédiatement (+1). La note reste au nom du titulaire.</p>
+            <ConsumerPicker attendees={attendees} value={forMember.member_id} onChange={setConsumer} />
+            {PRODUCT_GROUPS.map(([cat, label]) => {
+              const items = products.filter((p) => p.category === cat);
+              return (
+                <div key={cat} className="stack">
+                  <h3 style={{ margin: '4px 0 2px', fontSize: '0.95rem' }}>{label}</h3>
+                  {items.length ? (
+                    <div className="quick-product-grid">
+                      {items.map((p) => {
+                        const out = p.stock_qty <= 0;
+                        const busy = addingId === p.id;
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            className="quick-product-btn"
+                            disabled={out || Boolean(addingId)}
+                            onClick={() => addProduct(p, forMember)}
+                          >
+                            <div className="quick-product-top">
+                              <strong>{p.name}</strong>
+                              <span className="chip chip-ok">{busy ? '…' : '+ 1'}</span>
+                            </div>
+                            <div className="quick-product-meta">
+                              <span className="num">{money(p.price)}</span>
+                              <span>{out ? 'Rupture' : `${p.stock_qty} en stock`}</span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : <p className="subtle">Aucun produit dans cette catégorie.</p>}
+                </div>
+              );
+            })}
+            <FormError error={error} />
+            <div className="card" style={{ padding: '12px 14px', background: 'var(--surface-2)' }}>
+              <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
+                <strong>Consommations par membre ({detail.reservation.room_name})</strong>
+                <span className="num">Reste à payer sur la note : <strong>{money(dueTotal)}</strong></span>
+              </div>
+              <ConsumptionBreakdown attendees={attendees} lines={consumptionOf(detail.charges)} />
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="btn" onClick={close}>Fermer</button>
+              {dueTotal > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => {
+                    close();
+                    openPaymentDialog({ lines: detail.charges, memberName: detail.reservation.member_name }, onDone);
+                  }}
+                >
+                  <Icon name="wallet" /> Encaisser {money(dueTotal)}
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      }}</Loaded>
+    </Modal>
+  );
+}
+
+export function openConsumptionDialog(r, onDone) {
+  openDialog(ConsumptionDialog, { reservationId: r.id, memberName: r.member_name, roomName: r.room_name, onDone });
+}
+
+export async function openQuickPayReservation(r, onDone) {
+  try {
+    const detail = await api.get(`/api/reservations/${r.id}`);
+    openPaymentDialog({ lines: detail.charges, memberName: detail.reservation.member_name }, onDone);
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+export async function quickStartReservation(r, onDone) {
+  try {
+    await api.post(`/api/reservations/${r.id}/start`, {});
+    toast(`Arrivée enregistrée : ${r.member_name} (${r.room_name}).`);
+    onDone?.();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+export function quickFinishReservation(r, onDone) {
+  actionDialog({
+    title: `Libérer ${r.room_name ?? 'la salle'} — ${r.member_name}`,
+    message: `Confirmer la fin de l’occupation (${r.start_time} – ${r.end_time})${r.due_amount ? ` ? Il reste ${money(r.due_amount)} à encaisser sur la note.` : ' ?'}`,
+    confirmLabel: 'Terminer et libérer la salle',
+    run: async () => {
+      await api.post(`/api/reservations/${r.id}/finish`, {});
+      toast('Salle libérée.');
+      onDone?.();
+    },
+  });
+}
+
+export async function quickUpdatePartySize(r, nextCount, onDone) {
+  const clamped = Math.max(1, Math.min(50, Number(nextCount) || 1));
+  try {
+    const res = await api.put(`/api/reservations/${r.id}/occupancy`, { party_size: clamped });
+    toast(`${clamped} personne(s) présente(s) dans ${res.reservation.room_name}.`);
+    onDone?.(res);
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+export async function quickChangeRoom(r, roomId, onDone) {
+  try {
+    const res = await api.put(`/api/reservations/${r.id}/occupancy`, { room_id: Number(roomId) });
+    toast(`Salle modifiée : ${res.reservation.room_name}.`);
+    onDone?.(res);
+  } catch (e) {
+    toast(e.message, 'error');
+  }
 }

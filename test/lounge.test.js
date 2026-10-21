@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { Server, Client, ok } from './harness.js';
 import { MIGRATIONS, migrate } from '../worker/schema.js';
 import { nodeDb } from '../worker/db-node.js';
-import { addDays, localToUtcMs } from '../shared/time.js';
+import { encodeQrMatrix, qrSvgPath } from '../src/lib/qrcode.js';
 
-let server, admin, manager, member, cave, today;
+let server, admin, manager, cave;
 const thresholds = {
   name: 'Réserve', location: 'Salon', humidity_min: 65, humidity_max: 72,
   temperature_min: 18, temperature_max: 22, reading_interval_hours: 24,
@@ -19,23 +19,15 @@ beforeEach(async () => {
   ok(await admin.post('/api/users', { login: 'gerant', name: 'Gérant test', role: 'gerant', password: 'test-lounge-manager' }));
   manager = new Client(server);
   await manager.login('gerant', 'test-lounge-manager');
-  member = ok(await manager.post('/api/members', { first_name: 'Camille', last_name: 'Test', phone: '00000000' }));
   cave = ok(await admin.post('/api/humidors', thresholds));
-  today = server.club.loungeToday();
 });
 afterEach(() => server.destroy());
-
-async function assigned(code = 'A-01', end = addDays(today, 30)) {
-  const locker = ok(await admin.post('/api/lockers', { code, humidor_id: cave.id }));
-  return ok(await manager.post(`/api/lockers/${locker.id}/assign`, { member_id: member.id, end_date: end }));
-}
 
 test('caves : authentification et rôles contrôlés par le serveur', async () => {
   const anonymous = new Client(server);
   assert.equal((await anonymous.get('/api/lounge')).status, 401);
   assert.equal((await manager.post('/api/humidors', { ...thresholds, name: 'Autre' })).status, 403);
   assert.equal((await manager.put(`/api/humidors/${cave.id}`, thresholds)).status, 403);
-  assert.equal((await manager.post('/api/lockers', { code: 'A-01', humidor_id: cave.id })).status, 403);
   const detail = ok(await manager.post(`/api/humidors/${cave.id}/readings`, { humidity: 68, temperature: 20 }));
   assert.equal((await manager.post(`/api/humidor-readings/${detail.latest.id}/void`, { reason: 'Erreur de saisie' })).status, 403);
   assert.equal(detail.latest.created_by_name, 'Gérant test');
@@ -87,104 +79,20 @@ test('caves : relevé rejoué une seule fois et changement de seuil appliqué au
   assert.equal(ok(await admin.put(`/api/humidors/${cave.id}`, { ...thresholds, humidity_max: 75 })).status, 'conforme');
 });
 
-test('casiers : attribution concurrente refusée, membre inexistant et dates invalides rejetés', async () => {
-  const locker = ok(await admin.post('/api/lockers', { code: 'A-01', humidor_id: cave.id }));
-  assert.equal((await admin.post('/api/lockers', { code: 'a-01', humidor_id: cave.id })).status, 409);
-  assert.equal((await manager.post(`/api/lockers/${locker.id}/assign`, { member_id: 999, end_date: today })).status, 404);
-  for (const end of ['', '2026-02-30', addDays(today, -1)]) {
-    assert.equal((await manager.post(`/api/lockers/${locker.id}/assign`, { member_id: member.id, end_date: end })).status, 400);
-  }
-  const results = await Promise.all([1, 2].map(() => manager.post(`/api/lockers/${locker.id}/assign`, { member_id: member.id, end_date: today })));
-  assert.deepEqual(results.map((r) => r.status).sort(), [200, 409]);
-  assert.equal(ok(await manager.get(`/api/members/${member.id}`)).lockers[0].id, locker.id);
-});
-
-test('casiers : dépôts idempotents, regroupement des références et retraits atomiques', async () => {
-  const locker = await assigned();
-  const path = `/api/locker-assignments/${locker.assignment_id}/items`;
-  const body = { name: 'Robusto personnel', quantity: 4 };
-  const headers = { 'idempotency-key': 'deposit-once-123' };
-  const first = ok(await manager.post(path, body, headers));
-  ok(await manager.post(path, body, headers));
-  let detail = ok(await manager.post(path, { name: 'ROBUSTO PERSONNEL', quantity: 2 }));
-  assert.equal(detail.items.length, 1);
-  assert.equal(detail.cigar_count, 6);
-  assert.equal(detail.movements.length, 2);
-  assert.equal((await manager.post(path, { name: 'Autre', quantity: 0 })).status, 400);
-  const withdraw = `/api/locker-items/${first.items[0].id}/withdraw`;
-  assert.equal((await manager.post(withdraw, { quantity: 7, notes: 'Remis au membre' })).status, 409);
-  assert.equal((await manager.post(withdraw, { quantity: 1, notes: '' })).status, 400);
-  const results = await Promise.all([1, 2].map(() => manager.post(withdraw, { quantity: 4, notes: 'Remis au membre' })));
-  assert.deepEqual(results.map((r) => r.status).sort(), [200, 409]);
-  detail = ok(await manager.get(`/api/lockers/${locker.id}`));
-  assert.equal(detail.cigar_count, 2);
-  assert.equal(detail.movements.length, 3);
-  assert.equal(detail.movements[0].stock_after, 2);
-  assert.equal(server.club.get('SELECT COUNT(*) AS n FROM stock_movements').n, 0);
-  assert.equal(server.club.get('SELECT COUNT(*) AS n FROM charges').n, 0);
-});
-
-test('casiers : libération uniquement à vide, historique conservé et ancien écran inopérant', async () => {
-  const locker = await assigned();
-  const path = `/api/locker-assignments/${locker.assignment_id}`;
-  const contents = ok(await manager.post(`${path}/items`, { name: 'Corona', quantity: 2 }));
-  assert.equal((await manager.post(`${path}/release`, { reason: 'Fin du service' })).status, 409);
-  ok(await manager.post(`/api/locker-items/${contents.items[0].id}/withdraw`, { quantity: 2, notes: 'Restitués au membre' }));
-  const release = ok(await manager.post(`${path}/release`, { reason: 'Fin de mise à disposition' }));
-  assert.equal(release.status, 'libre');
-  assert.equal(release.items.length, 0);
-  assert.equal(release.movements.length, 2);
-  assert.ok(release.assignments[0].released_at);
-  const next = ok(await manager.post(`/api/lockers/${locker.id}/assign`, { member_id: member.id, end_date: addDays(today, 40) }));
-  assert.notEqual(next.assignment_id, locker.assignment_id);
-  for (const operation of ['items', 'renew', 'release']) {
-    assert.equal((await manager.post(`${path}/${operation}`, { name: 'Ancien', quantity: 3, end_date: addDays(today, 80), reason: 'Fin' })).status, 409);
-  }
-  assert.equal(ok(await manager.get(`/api/lockers/${locker.id}`)).cigar_count, 0);
-});
-
-test('casiers : échéance au jour civil local, renouvellement et retrait après expiration', async () => {
-  const locker = await assigned('A-01', today);
-  const path = `/api/locker-assignments/${locker.assignment_id}`;
-  const contents = ok(await manager.post(`${path}/items`, { name: 'Robusto', quantity: 2 }));
-  server.club.at = localToUtcMs(addDays(today, 1), '01:00', 'Africa/Brazzaville');
-  assert.equal(server.club.bizToday(), today); // The lounge follows calendar dates, not the late-night booking day.
-  assert.equal(ok(await manager.get(`/api/lockers/${locker.id}`)).status, 'expire');
-  assert.equal((await manager.post(`${path}/items`, { name: 'Robusto', quantity: 1 })).status, 409);
-  ok(await manager.post(`/api/locker-items/${contents.items[0].id}/withdraw`, { quantity: 1, notes: 'Restitution' }));
-  assert.equal((await manager.post(`${path}/renew`, { end_date: today })).status, 400);
-  assert.equal(ok(await manager.post(`${path}/renew`, { end_date: addDays(today, 30) })).status, 'occupe');
-  ok(await manager.post(`${path}/items`, { name: 'Robusto', quantity: 1 }));
-});
-
-test('casiers : mise hors service protégée et attribution bloquée', async () => {
-  const locker = ok(await admin.post('/api/lockers', { code: 'A-01', humidor_id: cave.id }));
-  const path = `/api/lockers/${locker.id}/availability`;
-  assert.equal((await manager.put(path, { active: false, reason: 'Maintenance' })).status, 403);
-  assert.equal((await admin.put(path, { active: 'false', reason: 'Maintenance' })).status, 400);
-  assert.equal(ok(await admin.put(path, { active: false, reason: 'Maintenance' })).status, 'indisponible');
-  assert.equal((await manager.post(`/api/lockers/${locker.id}/assign`, { member_id: member.id, end_date: today })).status, 409);
-  ok(await admin.put(path, { active: true, reason: 'Entretien terminé' }));
-  ok(await manager.post(`/api/lockers/${locker.id}/assign`, { member_id: member.id, end_date: today }));
-  assert.equal((await admin.put(path, { active: false, reason: 'Maintenance' })).status, 409);
-});
-
 test('lounge : indicateurs cohérents, persistance et effacement dans le bon ordre', async () => {
-  const locker = await assigned('A-01', addDays(today, 2));
-  ok(await manager.post(`/api/locker-assignments/${locker.assignment_id}/items`, { name: 'Robusto', quantity: 12 }));
   ok(await manager.post(`/api/humidors/${cave.id}/readings`, { humidity: 80, temperature: 20 }));
   const before = ok(await manager.get('/api/lounge'));
-  assert.deepEqual(before.summary, { humidors: 1, alerts: 1, checks_due: 0, lockers: 1, occupied: 1, available: 0, expiring: 1, cigars: 12 });
+  assert.deepEqual(before.summary, { humidors: 1, alerts: 1, checks_due: 0 });
   assert.deepEqual(ok(await manager.get('/api/dashboard')).lounge.summary, before.summary);
   await server.restart();
   assert.deepEqual(ok(await manager.get('/api/lounge')).summary, before.summary);
   ok(await admin.post('/api/admin/reset', { confirm: 'EFFACER' }));
   const after = ok(await admin.get('/api/lounge'));
   assert.equal(after.humidors.length, 0);
-  assert.equal(after.lockers.length, 0);
+  assert.equal(after.summary.humidors, 0);
 });
 
-test('migration v1 vers v2 : membres et données existants conservés, migration rejouable', () => {
+test('migration v1 vers v5 : membres et données existants conservés, migration rejouable', () => {
   const db = nodeDb(':memory:');
   try {
     db.exec('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
@@ -193,8 +101,99 @@ test('migration v1 vers v2 : membres et données existants conservés, migration
     db.run("INSERT INTO members (id, member_no, first_name, last_name, phone, created_at) VALUES (42, 'CP-42', 'Ancien', 'Membre', '000', '2026-01-01T00:00:00Z')");
     migrate(db);
     migrate(db);
-    assert.equal(db.get("SELECT value FROM meta WHERE key = 'schema_version'").value, '2');
+    assert.equal(db.get("SELECT value FROM meta WHERE key = 'schema_version'").value, String(MIGRATIONS.length));
     assert.equal(db.get('SELECT first_name FROM members WHERE id = 42').first_name, 'Ancien');
     assert.equal(db.get('SELECT COUNT(*) AS n FROM humidors').n, 0);
   } finally { db.close(); }
+});
+
+test('migration v2 vers v5 : anciennes tables de casiers supprimées, caves et relevés conservés', () => {
+  const db = nodeDb(':memory:');
+  try {
+    db.exec('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    for (const version of [0, 1]) for (const sql of MIGRATIONS[version]) db.exec(sql);
+    db.exec('CREATE TABLE lockers (id INTEGER PRIMARY KEY, code TEXT NOT NULL)');
+    db.exec('CREATE TABLE locker_assignments (id INTEGER PRIMARY KEY, locker_id INTEGER REFERENCES lockers(id))');
+    db.run("INSERT INTO meta VALUES ('schema_version', '2')");
+    db.run("INSERT INTO humidors (id, name, humidity_min, humidity_max, temperature_min, temperature_max, reading_interval_hours, created_at) VALUES (7, 'Réserve', 65, 72, 18, 22, 24, '2026-01-01T00:00:00Z')");
+    db.run("INSERT INTO lockers VALUES (1, 'A-01')");
+    migrate(db);
+    assert.equal(db.get("SELECT value FROM meta WHERE key = 'schema_version'").value, String(MIGRATIONS.length));
+    assert.equal(db.get("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name LIKE 'locker%'").n, 0);
+    assert.equal(db.get('SELECT name FROM humidors WHERE id = 7').name, 'Réserve');
+  } finally { db.close(); }
+});
+
+test('migration v4 vers v5 : compatible avec et sans les premières tables de participants', () => {
+  for (const earlyV4 of [false, true]) {
+    const db = nodeDb(':memory:');
+    try {
+      db.exec('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+      for (const version of MIGRATIONS.slice(0, 4)) for (const sql of version) db.exec(sql);
+      if (earlyV4) db.exec('DROP TABLE reservation_attendees');
+      db.run("INSERT INTO meta VALUES ('schema_version', '4')");
+      db.run("INSERT INTO rooms (id, name, capacity, created_at) VALUES (8, 'Salon historique', 4, '2026-01-01T00:00:00Z')");
+      migrate(db);
+      migrate(db);
+      assert.equal(db.get("SELECT value FROM meta WHERE key = 'schema_version'").value, String(MIGRATIONS.length));
+      assert.deepEqual({ ...db.get('SELECT name, archived_at FROM rooms WHERE id = 8') }, { name: 'Salon historique', archived_at: null });
+      assert.equal(db.get('SELECT COUNT(*) AS n FROM reservation_attendees').n, 0);
+    } finally { db.close(); }
+  }
+});
+
+test('salles multiples, nombre de personnes et désactivation d’un membre', async () => {
+  const rooms = ok(await manager.get('/api/rooms'));
+  assert.equal(rooms.length, 3);
+  const [r1, r2] = rooms;
+
+  const m1 = ok(await manager.post('/api/members', { first_name: 'Client', last_name: 'Un', phone: '+000 1' }));
+  const m2 = ok(await manager.post('/api/members', { first_name: 'Client', last_name: 'Deux', phone: '+000 2' }));
+  const { plans } = ok(await manager.get('/api/me'));
+  const today = server.club.bizToday();
+  ok(await manager.post(`/api/members/${m1.id}/subscriptions`, { plan_id: plans[0].id, start_date: today }));
+  ok(await manager.post(`/api/members/${m2.id}/subscriptions`, { plan_id: plans[0].id, start_date: today }));
+
+  // Two reservations at the exact same slot in different rooms succeed:
+  const res1 = ok(await manager.post('/api/reservations', {
+    member_id: m1.id, date: today, start_time: '18:00', duration_min: 60, room_id: r1.id, party_size: 4,
+  }));
+  assert.equal(res1.reservation.room_id, r1.id);
+  assert.equal(res1.reservation.party_size, 4);
+
+  const res2 = ok(await manager.post('/api/reservations', {
+    member_id: m2.id, date: today, start_time: '18:00', duration_min: 60, room_id: r2.id, party_size: 2,
+  }));
+  assert.equal(res2.reservation.room_id, r2.id);
+
+  // Updating party_size in 1 click:
+  const updated = ok(await manager.put(`/api/reservations/${res1.reservation.id}/occupancy`, { party_size: 6 }));
+  assert.equal(updated.reservation.party_size, 6);
+
+  // A member is deactivated, never deleted: once their booking is cancelled, the record and its
+  // history stay, out of the default list.
+  ok(await manager.post(`/api/reservations/${res1.reservation.id}/cancel`, { reason: 'Départ du membre' }));
+  ok(await manager.post(`/api/members/${m1.id}/deactivate`, { reason: 'Départ du club' }));
+  const kept = ok(await manager.get(`/api/members/${m1.id}`));
+  assert.equal(kept.active, false);
+  assert.ok(kept.reservations.some((r) => r.id === res1.reservation.id));
+  assert.equal(kept.subscriptions.length, 1);
+});
+
+test('carte de membre : génération du QR code SVG et recherche par URL de QR code', async () => {
+  const m = ok(await manager.post('/api/members', { first_name: 'Alexandre', last_name: 'Dumas', phone: '+225 07 00 11 22' }));
+  const issued = ok(await manager.post(`/api/members/${m.id}/cards`, { kind: 'virtuelle', code: '' }));
+  const cardView = ok(await manager.get(`/api/cards/${issued.card_id}`));
+  assert.match(cardView.card.code, /^CV-[A-Z0-9]{4}-[A-Z0-9]{4}$/);
+
+  const qrUrl = `https://club-prive.example.com/#/membres/${m.id}?card=${encodeURIComponent(cardView.card.code)}`;
+  const matrix = encodeQrMatrix(qrUrl);
+  assert.ok(matrix.size >= 29 && matrix.size <= 57);
+  const svg = qrSvgPath(matrix, 2);
+  assert.equal(svg.viewBoxSize, matrix.size + 4);
+  assert.match(svg.path, /^M\d+,\d+h1v1h-1z/);
+
+  const found = ok(await manager.get(`/api/members?q=${encodeURIComponent(qrUrl)}`));
+  assert.equal(found.length, 1);
+  assert.equal(found[0].id, m.id);
 });

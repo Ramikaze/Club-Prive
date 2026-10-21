@@ -6,13 +6,6 @@ export const ACTION_LABELS = {
   'cave.modifier': 'Configuration de cave modifiée',
   'cave.releve': 'Contrôle de conservation',
   'cave.releve_annuler': 'Relevé annulé',
-  'casier.creer': 'Casier créé',
-  'casier.disponibilite': 'Disponibilité du casier modifiée',
-  'casier.attribuer': 'Casier attribué',
-  'casier.renouveler': 'Casier renouvelé',
-  'casier.liberer': 'Casier libéré',
-  'casier.depot': 'Dépôt de cigares privés',
-  'casier.retrait': 'Retrait de cigares privés',
   connexion: 'Connexion',
   'parametres.modifier': 'Paramètres modifiés',
   'formule.modifier': 'Formule modifiée',
@@ -22,6 +15,12 @@ export const ACTION_LABELS = {
   'utilisateur.mot_de_passe_modifie': 'Mot de passe modifié',
   'membre.creer': 'Membre créé',
   'membre.modifier': 'Fiche membre modifiée',
+  'membre.supprimer': 'Membre supprimé',
+  'membre.desactiver': 'Membre désactivé',
+  'membre.reactiver': 'Membre réactivé',
+  'salle.creer': 'Salle créée',
+  'salle.modifier': 'Salle modifiée',
+  'salle.supprimer': 'Salle supprimée',
   'abonnement.activer': 'Formule activée',
   'abonnement.renouveler': 'Formule renouvelée',
   'abonnement.annuler': 'Abonnement annulé',
@@ -29,6 +28,7 @@ export const ACTION_LABELS = {
   'carte.emettre': 'Carte émise',
   'carte.desactiver': 'Carte désactivée',
   'reservation.creer': 'Réservation créée',
+  'reservation.modifier': 'Salle / nombre de personnes modifié',
   'reservation.prolonger': 'Prolongation',
   'reservation.demarrer': 'Arrivée : réservation démarrée',
   'reservation.terminer': 'Réservation terminée',
@@ -61,21 +61,20 @@ export function auditSummary(a) {
     case 'cave.releve':
       return `${d.nom} · ${d.humidite} % HR · ${d.temperature} °C${d.notes ? ` · ${d.notes}` : ''}`;
     case 'cave.releve_annuler':
-    case 'casier.liberer':
       return d.motif;
-    case 'casier.creer':
-      return `${d.casier} · ${d.cave}`;
-    case 'casier.disponibilite':
-      return `${d.casier} · ${d.disponible ? 'disponible' : 'hors service'} · ${d.motif}`;
-    case 'casier.attribuer':
-      return `${d.casier} · membre n° ${d.membre} · jusqu’au ${dayLabel(d.fin, 'short')}`;
-    case 'casier.renouveler':
-      return `${dayLabel(d.avant, 'short')} → ${dayLabel(d.fin, 'short')}`;
-    case 'casier.depot':
-    case 'casier.retrait':
-      return `${d.cigare} × ${d.quantite}${d.motif ? ` · ${d.motif}` : ''}`;
+    case 'membre.supprimer':
+    case 'membre.reactiver':
+      return `${d.nom ?? ''} (${d.member_no ?? ''})`;
+    case 'membre.desactiver':
+      return `${d.nom ?? ''} (${d.member_no ?? ''}) — ${d.motif ?? ''}`;
+    case 'salle.creer':
+    case 'salle.modifier':
+    case 'salle.supprimer':
+      return `${d.name ?? ''}${d.capacity ? ` · ${d.capacity} pers.` : ''}`;
     case 'reservation.creer':
-      return `${fmtDuration(d.duree ?? 0)}, dont ${fmtDuration(d.minutes_incluses ?? 0)} incluses${d.supplement ? ` ; supplément ${money(d.supplement)}` : ''}${d.hors_horaires ? ' ; hors horaires autorisé' : ''}`;
+      return `${d.salle ? `${d.salle} · ` : ''}${d.personnes ? `${d.personnes} pers. · ` : ''}${fmtDuration(d.duree ?? 0)}, dont ${fmtDuration(d.minutes_incluses ?? 0)} incluses${d.supplement ? ` ; supplément ${money(d.supplement)}` : ''}${d.hors_horaires ? ' ; hors horaires autorisé' : ''}`;
+    case 'reservation.modifier':
+      return `${d.salle ?? ''} · ${d.personnes ?? 1} personne(s)`;
     case 'reservation.prolonger':
       return `+${fmtDuration(d.minutes ?? 0)}${d.supplement_ajoute ? ` ; supplément +${money(d.supplement_ajoute)}` : ''}${d.hors_horaires ? ' ; hors horaires autorisé' : ''}`;
     case 'reservation.terminer':

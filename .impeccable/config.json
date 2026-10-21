@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "src/club.css"
+        ],
+        "createdAt": "2026-10-19T08:15:52.549Z",
+        "reason": "Agent review: the three existing matches encode functional status, not decorative card accents: toast success/error, day-calendar reservation status, and its narrower weekly variant. Preserve these established operational indicators; no user confirmation claimed."
+      }
+    ]
+  }
+}

@@ -2,7 +2,7 @@
 // and the simplified result (net collected per sub-account minus expenses).
 import { Link } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
-import { AccountTag, Loaded, Notice, PageHead } from '../components/ui/ui.jsx';
+import { AccountTag, AdminTabs, Loaded, Notice, PageHead } from '../components/ui/ui.jsx';
 import PeriodPicker, { usePeriod } from '../components/ui/PeriodPicker.jsx';
 import { api, qs } from '../lib/api.js';
 import { money, dayLabel } from '../lib/format.js';
@@ -33,8 +33,9 @@ export default function Treasury() {
 
   return (
     <>
+      <AdminTabs />
       <PageHead
-        title="Trésorerie"
+        title="Trésorerie & Bilans"
         lead="Soldes des caisses et des comptes, et résultat de la période."
         tour="treasury"
         actions={(

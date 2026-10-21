@@ -8,13 +8,14 @@ import { Toasts } from './components/ui/toast.jsx';
 import { Empty } from './components/ui/ui.jsx';
 import Login from './pages/Login.jsx';
 import Dashboard from './pages/Dashboard.jsx';
+import Rooms from './pages/Rooms.jsx';
 import Agenda from './pages/Agenda.jsx';
 import Members from './pages/Members.jsx';
 import Member from './pages/Member.jsx';
 import MemberCard from './pages/MemberCard.jsx';
 import Reservation from './pages/Reservation.jsx';
 import Products from './pages/Products.jsx';
-import Lounge, { HumidorPage, LockerPage } from './pages/Lounge.jsx';
+import Lounge, { HumidorPage } from './pages/Lounge.jsx';
 import Cash from './pages/Cash.jsx';
 import Expenses from './pages/Expenses.jsx';
 import Treasury from './pages/Treasury.jsx';
@@ -81,6 +82,7 @@ export default function App() {
       <Routes>
         <Route element={<AppShell />}>
           <Route index element={<Dashboard />} />
+          <Route path="salles" element={<Rooms />} />
           <Route path="agenda" element={<Agenda />} />
           <Route path="membres" element={<Members />} />
           <Route path="membres/:id" element={<Member />} />
@@ -89,7 +91,6 @@ export default function App() {
           <Route path="produits" element={<Products />} />
           <Route path="lounge" element={<Lounge />} />
           <Route path="lounge/caves/:id" element={<HumidorPage />} />
-          <Route path="lounge/casiers/:id" element={<LockerPage />} />
           <Route path="caisse" element={<Cash />} />
           <Route path="depenses" element={<Expenses />} />
           <Route path="tresorerie" element={<AdminOnly><Treasury /></AdminOnly>} />

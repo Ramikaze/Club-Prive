@@ -1,6 +1,6 @@
 import { Link, useSearchParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
-import { AccountTag, Empty, Hypothesis, Loaded, PageHead, Segmented } from '../components/ui/ui.jsx';
+import { AccountTag, CashTabs, Empty, Loaded, PageHead, Segmented } from '../components/ui/ui.jsx';
 import { api, qs } from '../lib/api.js';
 import { ACCOUNT_LABEL, bizToday, dateTime, dayLabel, money } from '../lib/format.js';
 import { useBusy, useLoad } from '../lib/hooks.js';
@@ -109,6 +109,7 @@ function ManagerCash() {
       const total = by.reservations + by.alcool + by.cigares;
       return (
         <>
+          <CashTabs />
           <PageHead title="Encaissements" lead={`Caisse du ${dayLabel(journal.from, 'title')}`} tour="cash" />
           <div className="account-cards" style={{ marginBottom: 16 }}>
             {Object.entries(by).map(([k, v]) => (
@@ -121,7 +122,6 @@ function ManagerCash() {
             <section className="card"><div className="card-head"><h2>Encaissements du jour</h2></div><JournalTable payments={journal.payments} /></section>
             {journal.refunds.length > 0 && <section className="card"><div className="card-head"><h2>Remboursements du jour</h2></div><RefundsTable refunds={journal.refunds} /></section>}
           </div>
-          <p className="subtle" style={{ marginTop: 12 }}>Les sous-comptes sur une période et les exports sont réservés aux administrateurs.</p>
         </>
       );
     }}</Loaded>
@@ -160,14 +160,14 @@ function AdminCash() {
         <Icon name="excel" /> Excel<span className="sr-only"> : {label}</span></button>
     </span>
   );
-  const revenueAccount = settings.subscription_revenue_account;
 
   return (
     <Loaded state={state}>{([sum, journal, open]) => (
       <>
+        <CashTabs />
         <PageHead
-          title="Encaissements et sous-comptes"
-          lead={`${from === to ? dayLabel(from, 'title') : `Du ${dayLabel(from, 'medium')} au ${dayLabel(to, 'medium')}`} · journées d’exploitation (de ${settings.hours.open} à ${settings.hours.open} le lendemain)`}
+          title="Encaissements & Notes"
+          lead={`${from === to ? dayLabel(from, 'title') : `Du ${dayLabel(from, 'medium')} au ${dayLabel(to, 'medium')}`}`}
           tour="cash"
         />
         <div className="toolbar">
@@ -184,13 +184,8 @@ function AdminCash() {
           {sum.accounts.map((a) => <AccountCard key={a.account} a={a} />)}
           <AccountCard a={sum.total} total />
         </div>
-        <div className="notice notice-info" style={{ margin: '14px 0' }}><Icon name="info" />
-          <span>Suivi des recettes et des encaissements, pas une comptabilité complète.
-            {' '}Les ventes de formules sont rattachées au sous-compte « {ACCOUNT_LABEL[revenueAccount]} » <Hypothesis title="Affectation des recettes d’abonnement à valider (modifiable dans les paramètres)." />.
-            {' '}La répartition entre associés reste à définir.</span>
-        </div>
 
-        <div className="grid-2">
+        <div className="grid-2 section-gap">
           <section className="card">
             <div className="card-head"><h2>Exports CSV</h2></div>
             <div className="form-grid">

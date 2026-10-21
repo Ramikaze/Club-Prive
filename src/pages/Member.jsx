@@ -9,6 +9,7 @@ import { useLoad } from '../lib/hooks.js';
 import { useIsAdmin } from '../store/useStore.js';
 import {
   openBookingDialog, openMemberDialog, openSubscriptionDialog, openCardDialog, openAdjustCreditDialog, openPaymentDialog,
+  openDeactivateMemberDialog, openReactivateMemberDialog, memberRoomEligibility,
 } from '../dialogs/index.js';
 
 function CreditBlock({ credit }) {
@@ -38,13 +39,19 @@ function MemberDetail({ m, reload }) {
   const isAdmin = useIsAdmin();
   const summary = m.subscription;
   const current = m.subscriptions.find((s) => s.id === summary.id && ['active', 'expire_bientot'].includes(summary.state));
-  const canBook = Boolean(current) || summary.state === 'a_venir';
+  const elig = memberRoomEligibility(m);
   const due = m.charges.filter((c) => c.status === 'due');
   const dueTotal = due.reduce((sum, c) => sum + c.amount, 0);
   const memberForDialogs = { ...m };
 
-  const book = () => openBookingDialog({ member: { id: m.id, name: m.name, member_no: m.member_no, subscription: summary }, lockMember: true },
-    (det) => navigate(`/reservations/${det.reservation.id}`));
+  const book = () => {
+    if (!elig.ok) {
+      toast(`Accès salle refusé pour ${m.name} : ${elig.reason}.`, 'error');
+      return;
+    }
+    openBookingDialog({ member: { id: m.id, name: m.name, member_no: m.member_no, subscription: summary }, lockMember: true },
+      (det) => navigate(`/reservations/${det.reservation.id}`));
+  };
 
   const cancelSub = () => {
     const key = newKey();
@@ -77,16 +84,37 @@ function MemberDetail({ m, reload }) {
     <>
       <PageHead
         title={m.name}
-        lead={<>{m.member_no} <Chip group="sub" value={summary.state} /> <DemoChip on={m.is_demo} /></>}
+        lead={<>{m.member_no} {m.active ? <Chip group="sub" value={summary.state} /> : <span className="chip chip-danger">désactivé</span>} <DemoChip on={m.is_demo} /></>}
         back={{ to: '/membres', label: 'Membres' }}
         actions={(
           <>
             <button type="button" className="btn" onClick={() => openMemberDialog(m, reload)}><Icon name="edit" /> Modifier</button>
-            {canBook ? <button type="button" className="btn btn-primary" onClick={book}><Icon name="plus" /> Réservation</button> : null}
+            {m.active
+              ? <button type="button" className="btn btn-danger" onClick={() => openDeactivateMemberDialog(m, reload)}><Icon name="ban" /> Désactiver</button>
+              : <button type="button" className="btn" onClick={() => openReactivateMemberDialog(m, reload)}><Icon name="undo" /> Réactiver</button>}
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={book}
+              aria-disabled={!elig.ok}
+              title={elig.ok ? 'Réserver une salle' : `Accès salle impossible : ${elig.reason}`}
+            >
+              <Icon name="plus" /> Réservation
+              {elig.ok ? null : <span className="sr-only"> — indisponible : {elig.reason}</span>}
+            </button>
           </>
         )}
         tour="member"
       />
+
+      {!m.active && (
+        <div className="toolbar">
+          <Notice kind="warn">
+            Membre désactivé le {dateTime(m.deactivated_at)}{m.deactivated_by_name ? ` par ${m.deactivated_by_name}` : ''} : {m.deactivation_reason}.
+            Il ne peut plus réserver, entrer en salle, prendre une formule ni recevoir de carte ; tout son historique reste consultable ci-dessous.
+          </Notice>
+        </div>
+      )}
 
       <div className="grid-2">
         <section className="card">
@@ -110,23 +138,32 @@ function MemberDetail({ m, reload }) {
                 : summary.state === 'a_venir' ? `Formule ${summary.plan_name} à partir du ${dayLabel(summary.start_date, 'short')}.` : 'Aucune formule : activez une formule pour permettre les réservations.'}
             </Notice>
           )}
-          <p className="subtle" style={{ marginTop: 10 }}>Report des heures non utilisées, suspension et renouvellement automatique : règles à confirmer (non gérés en version 1).</p>
         </section>
 
         <section className="card">
-          <div className="card-head"><h2>Cartes</h2><button type="button" className="btn btn-sm" onClick={() => openCardDialog(memberForDialogs, reload)}><Icon name="card" /> Émettre une carte</button></div>
+          <div className="card-head">
+            <h2>Cartes</h2>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => openCardDialog(memberForDialogs, (res) => (res?.card_id ? navigate(`/cartes/${res.card_id}`) : reload()))}
+            >
+              <Icon name="card" /> Émettre une carte
+            </button>
+          </div>
           {m.cards.length ? (
             <div className="list">{m.cards.map((c) => (
               <div className="list-item" key={c.id}>
                 <div className="grow"><div className="title"><span className="mono">{c.code}</span></div>
                   <div className="meta">Carte {c.kind} · émise le {dateTime(c.issued_at)}{c.deactivation_reason ? ` · ${c.deactivation_reason}` : ''}</div></div>
                 {c.status === 'active' ? <span className="chip chip-ok">active</span> : <span className="chip">désactivée</span>}
-                <Link className="btn btn-sm btn-ghost" to={`/cartes/${c.id}`}><Icon name="printer" /><span className="sr-only">Afficher ou imprimer la carte {c.code}</span></Link>
+                <Link className="btn btn-sm" to={`/cartes/${c.id}`} aria-label={`Afficher ou imprimer la carte ${c.code} avec son QR code`}>
+                  <Icon name="printer" /> Carte & QR
+                </Link>
                 {c.status === 'active' ? <button type="button" className="btn btn-sm btn-ghost" onClick={() => deactivate(c)}>Désactiver</button> : null}
               </div>
             ))}</div>
           ) : <Empty icon="card">Aucune carte émise.</Empty>}
-          <p className="subtle" style={{ marginTop: 8 }}>Carte physique ou virtuelle : même membre, même abonnement, aucun crédit supplémentaire.</p>
         </section>
 
         <section className="card">
@@ -151,25 +188,18 @@ function MemberDetail({ m, reload }) {
         </section>
 
         <section className="card span-2">
-          <div className="card-head"><h2>Casiers privés</h2><Link className="subtle" to="/lounge?vue=casiers">Gérer les casiers</Link></div>
-          {m.lockers.length ? <div className="list">{m.lockers.map((l) => <Link className="list-item" to={`/lounge/casiers/${l.id}`} key={l.id}>
-            <Icon name="lock" size={20} /><div className="grow"><div className="title">Casier {l.code} · {l.humidor_name}</div>
-              <div className="meta">{l.cigar_count} cigare(s) en garde · jusqu’au {dayLabel(l.end_date, 'short')}</div></div><Chip group="locker" value={l.status} /><Icon name="right" size={18} />
-          </Link>)}</div> : <Empty icon="lock">Aucun casier attribué à ce membre.</Empty>}
-        </section>
-
-        <section className="card span-2">
           <div className="card-head"><h2>Réservations</h2></div>
           {m.reservations.length ? (
             <div className="table-wrap"><table className="table stack-sm">
-              <thead><tr><th>Journée</th><th>Horaire</th><th>Durée</th><th>Incluses</th><th className="num">Supplément</th><th>Statut</th></tr></thead>
+              <thead><tr><th>Journée</th><th>Salle</th><th>Horaire</th><th>Personnes</th><th>Durée</th><th className="num">Supplément</th><th>Statut</th></tr></thead>
               <tbody>{m.reservations.map((r) => (
                 <tr key={r.id} className={r.status === 'annulee' ? 'is-muted' : ''}>
                   <td data-label="Journée"><Link to={`/reservations/${r.id}`}>{dayLabel(r.biz_day, 'medium')}</Link></td>
+                  <td data-label="Salle">{r.room_name || 'Salon Principal'}{r.member_id !== m.id && <div className="subtle">Accompagnant · titulaire : {r.member_name}</div>}</td>
                   <td data-label="Horaire" className="nowrap">{r.start_time} – {r.end_time}</td>
+                  <td data-label="Personnes">{r.party_size || 1} pers.</td>
                   <td data-label="Durée">{fmtDuration(r.duration_min)}</td>
-                  <td data-label="Incluses">{fmtDuration(r.included_minutes)}</td>
-                  <td data-label="Supplément" className="num">{money(r.supplement_amount)}</td>
+                  <td data-label="Supplément" className="num">{r.member_id === m.id ? money(r.supplement_amount) : '—'}</td>
                   <td data-label="Statut"><Chip group="res" value={r.status} /></td></tr>
               ))}</tbody></table></div>
           ) : <Empty icon="calendar">Aucune réservation.</Empty>}
@@ -181,7 +211,7 @@ function MemberDetail({ m, reload }) {
             <div className="list">{m.subscriptions.map((s) => (
               <div className="list-item" key={s.id}>
                 <div className="grow"><div className="title">{s.plan_name}</div>
-                  <div className="meta">{`${dayLabel(s.start_date, 'short')} → ${dayLabel(s.end_date, 'short')} · ${s.price == null ? 'prix non défini' : money(s.price)}${s.price != null && !s.price_validated ? ' (tarif à confirmer)' : ''} · ${fmtDuration(s.credit.consumed)} consommées sur ${fmtDuration(s.credit.granted)}${s.cancel_reason ? ` · annulée : ${s.cancel_reason}` : ''}`}</div></div>
+                  <div className="meta">{`${dayLabel(s.start_date, 'short')} → ${dayLabel(s.end_date, 'short')} · ${s.price == null ? 'prix non défini' : money(s.price)} · ${fmtDuration(s.credit.consumed)} consommées sur ${fmtDuration(s.credit.granted)}${s.cancel_reason ? ` · annulée : ${s.cancel_reason}` : ''}`}</div></div>
                 <Chip group="sub" value={s.state} /></div>
             ))}</div>
           ) : <Empty icon="info">Aucune formule.</Empty>}

@@ -79,7 +79,6 @@ export const ROLE_LABEL = { admin: 'Propriétaire / administrateur', gerant: 'G�
 
 export const STATUS = {
   humidor: { conforme: ['Dans les seuils', 'ok'], alerte: ['Hors seuils', 'danger'], a_controler: ['À contrôler', 'warn'] },
-  locker: { libre: ['Disponible', 'ok'], occupe: ['Attribué', 'neutral'], expire: ['Échu', 'danger'], a_renouveler: ['À renouveler', 'warn'], indisponible: ['Hors service', 'neutral'] },
   res: { reservee: ['Réservée', 'info'], en_cours: ['En cours', 'ok'], terminee: ['Terminée', 'neutral'], annulee: ['Annulée', 'danger'] },
   charge: { due: ['À encaisser', 'warn'], payee: ['Encaissée', 'ok'], annulee: ['Annulée', 'neutral'], remboursee: ['Remboursée', 'danger'] },
   sub: {
