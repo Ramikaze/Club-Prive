@@ -11,6 +11,7 @@ export const useStore = create((set) => ({
   rooms: [],
   accounts: [],
   instanceLabel: null, // « Version de test » on the test site, null on the clients' site
+  entering: false, // true just after signing in: the app zooms in out of the dark
   setBundle: (bundle) => {
     const instanceLabel = bundle.instance_label ?? null;
     document.title = `${instanceLabel ? `[${instanceLabel}] ` : ''}${bundle.settings.club_name} — Gestion`;

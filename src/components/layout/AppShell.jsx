@@ -2,7 +2,7 @@
 // account menu, password change and the guided tour.
 import { useEffect, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import Icon, { BrandMark } from '../ui/Icon.jsx';
+import Icon from '../ui/Icon.jsx';
 import { Modal, openDialog, closeAllDialogs } from '../ui/Modal.jsx';
 import { FormError } from '../ui/ui.jsx';
 import { toast } from '../ui/toast.jsx';
@@ -101,6 +101,12 @@ export default function AppShell() {
   const me = useStore((s) => s.me);
   const settings = useStore((s) => s.settings);
   const instanceLabel = useStore((s) => s.instanceLabel);
+  const entering = useStore((s) => s.entering);
+  useEffect(() => {
+    if (!entering) return undefined;
+    const t = setTimeout(() => useStore.setState({ entering: false }), 700);
+    return () => clearTimeout(t);
+  }, [entering]);
   const isAdmin = me.role === 'admin';
   const { pathname } = useLocation();
   const current = navFor(pathname);
@@ -126,10 +132,9 @@ export default function AppShell() {
   const aria = (path) => (path === current ? 'page' : undefined);
 
   return (
-    <div className="shell">
+    <div className={`shell${entering ? ' is-entering' : ''}`}>
       <aside className="sidebar" aria-label="Navigation principale">
         <div className="brand">
-          <BrandMark />
           <div><div className="brand-name">{settings.club_name}</div><div className="brand-sub">Club privé</div></div>
         </div>
         <nav className="side-nav" data-tour="nav">
@@ -151,7 +156,7 @@ export default function AppShell() {
       </aside>
       <div className="main-col">
         <header className="topbar">
-          <div className="brand"><BrandMark /><div className="brand-name">{settings.club_name}</div></div>
+          <div className="brand"><div className="brand-name">{settings.club_name}</div></div>
           <button type="button" className="icon-btn" data-tour="menu" aria-label="Compte, rubriques et réglages"
             onClick={() => openDialog(AccountMenu, { onTour: startTour })}><Icon name="menu" /></button>
         </header>

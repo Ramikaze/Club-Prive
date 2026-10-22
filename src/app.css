@@ -578,6 +578,26 @@
 
 .smoke-layer { position: fixed; inset: 0; z-index: 90; width: 100%; height: 100%; pointer-events: none; }
 
+/* Signing in: the card and the smoke zoom towards the viewer and fade, then the app comes out of
+   the dark, settling from slightly larger. Transform and opacity only. */
+.login-page.is-leaving .login-stack { animation: login-zoom 420ms var(--ease-out) forwards; }
+.login-page.is-leaving .login-smoke { animation: login-smoke-zoom 420ms var(--ease-out) forwards; }
+@keyframes login-zoom { to { opacity: 0; transform: scale(1.14); } }
+@keyframes login-smoke-zoom { to { opacity: 0.3; transform: scale(1.3); } }
+.shell.is-entering { animation: shell-zoom 520ms var(--ease-out) both; }
+.shell.is-entering::after {
+  content: ''; position: fixed; inset: 0; z-index: 200; pointer-events: none;
+  background: #171210; animation: shell-veil 520ms var(--ease-out) forwards;
+}
+@keyframes shell-zoom { from { transform: scale(1.06); } }
+@keyframes shell-veil { to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .login-page.is-leaving .login-stack, .login-page.is-leaving .login-smoke { animation: login-fade 150ms ease forwards; }
+  .shell.is-entering { animation: none; }
+  .shell.is-entering::after { animation-duration: 200ms; }
+}
+@keyframes login-fade { to { opacity: 0; } }
+
 /* New page or section: each block settles in place as it arrives (including content replacing a
    loading skeleton). Section tabs stay still, so the tabs of one rubric read as one place.
    Leaving is instant: navigation never waits. */
