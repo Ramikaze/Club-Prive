@@ -66,7 +66,7 @@ async function readJson(request) {
 
 export function createApi({ db, env = {} }) {
   migrate(db);
-  const club = new Club(db);
+  const club = new Club(db, { instanceLabel: env.INSTANCE_LABEL || null });
   club.bootstrap();
 
   const allowedOrigins = String(env.ALLOWED_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -143,7 +143,9 @@ export function createApi({ db, env = {} }) {
   }, (ctx) => club.changeOwnPassword(ctx.user, ctx.passwordHash, ctx.tokenHash));
 
   // First start online: the first administrator is created with the SETUP_TOKEN secret.
-  add('GET', '/api/setup', { public: true }, () => ({ needed: !club.hasUsers(), token_configured: !!env.SETUP_TOKEN }));
+  add('GET', '/api/setup', { public: true }, () => ({
+    needed: !club.hasUsers(), token_configured: !!env.SETUP_TOKEN, instance_label: club.instanceLabel,
+  }));
   add('POST', '/api/setup', {
     public: true,
     prepare: async (ctx) => {

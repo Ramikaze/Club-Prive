@@ -10,8 +10,10 @@ export const useStore = create((set) => ({
   plans: [],
   rooms: [],
   accounts: [],
+  instanceLabel: null, // « Version de test » on the test site, null on the clients' site
   setBundle: (bundle) => {
-    document.title = `${bundle.settings.club_name} — Gestion`;
+    const instanceLabel = bundle.instance_label ?? null;
+    document.title = `${instanceLabel ? `[${instanceLabel}] ` : ''}${bundle.settings.club_name} — Gestion`;
     set({
       status: 'ready',
       me: bundle.user,
@@ -19,6 +21,7 @@ export const useStore = create((set) => ({
       plans: bundle.plans,
       rooms: bundle.rooms ?? [],
       accounts: bundle.accounts,
+      instanceLabel,
       bootError: null,
     });
   },

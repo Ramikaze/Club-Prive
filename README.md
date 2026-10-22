@@ -106,3 +106,18 @@ npx wrangler secret put SETUP_TOKEN
 Ouvrir l’application et créer le premier compte avec ce code. Valider les tarifs et paramètres, puis désactiver le mode démonstration avant l’utilisation réelle. Le mode démonstration autorise les tarifs non validés ; il ne constitue pas une séparation entre bases de données.
 
 L’effacement des données depuis les paramètres inclut caves et relevés. Il conserve les utilisateurs, les paramètres, les formules et les catégories. Cette opération est définitive et ne remplace pas une sauvegarde.
+
+### Version de test
+
+Une seconde installation, séparée du site des clients, sert à essayer chaque changement avant sa mise en ligne. C’est l’environnement `test` de `wrangler.jsonc` : son propre Worker (`club-prive-test`), sa propre base et ses propres comptes. Un bandeau « Version de test » l’identifie à l’écran et dans le titre de l’onglet.
+
+| Site | Adresse | Mise en ligne |
+| --- | --- | --- |
+| Clients | `https://club-prive.ramikaze.workers.dev` | `npm run deploy` |
+| Test | `https://club-prive-test.ramikaze.workers.dev` | `npm run deploy:test` |
+
+Ordre conseillé : `npm test`, puis `npm run deploy:test`, vérification sur le site de test, puis `npm run deploy`. Le secret d’installation du site de test se configure à part :
+
+```sh
+npx wrangler secret put SETUP_TOKEN --env test
+```

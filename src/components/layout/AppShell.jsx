@@ -100,6 +100,7 @@ function AccountMenu({ close, onTour }) {
 export default function AppShell() {
   const me = useStore((s) => s.me);
   const settings = useStore((s) => s.settings);
+  const instanceLabel = useStore((s) => s.instanceLabel);
   const isAdmin = me.role === 'admin';
   const { pathname } = useLocation();
   const current = navFor(pathname);
@@ -154,6 +155,12 @@ export default function AppShell() {
           <button type="button" className="icon-btn" data-tour="menu" aria-label="Compte, rubriques et réglages"
             onClick={() => openDialog(AccountMenu, { onTour: startTour })}><Icon name="menu" /></button>
         </header>
+        {instanceLabel && (
+          <div className="banner banner-test" role="note">
+            <Icon name="alert" />
+            <span><strong>{instanceLabel}</strong> — site d’essai, séparé du site des clients : ses comptes et ses données ne sont pas les leurs.</span>
+          </div>
+        )}
         {settings.demo_mode && (
           <div className="banner" role="note">
             <Icon name="info" />

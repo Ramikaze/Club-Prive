@@ -80,12 +80,18 @@ function SetupForm({ tokenConfigured }) {
 export default function Login() {
   const [setup, setSetup] = useState(null);
   useEffect(() => {
-    api.get('/api/setup').then(setSetup).catch(() => setSetup({ needed: false }));
+    api.get('/api/setup').then((s) => {
+      setSetup(s);
+      if (s.instance_label) document.title = `[${s.instance_label}] Connexion — Club Privé`;
+    }).catch(() => setSetup({ needed: false }));
   }, []);
   return (
     <div className="login-page">
-      {!setup && <div className="login-card"><Skeleton /></div>}
-      {setup && (setup.needed ? <SetupForm tokenConfigured={setup.token_configured} /> : <LoginForm />)}
+      <div className="login-stack">
+        {setup?.instance_label && <p className="login-instance" role="note">{setup.instance_label} · site d’essai</p>}
+        {!setup && <div className="login-card"><Skeleton /></div>}
+        {setup && (setup.needed ? <SetupForm tokenConfigured={setup.token_configured} /> : <LoginForm />)}
+      </div>
     </div>
   );
 }

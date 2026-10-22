@@ -306,3 +306,17 @@ test('salle unique : une fois, les autres salles sont retirées et leurs réserv
   await server.restart(); // runs only once: the room the club keeps open is left alone
   assert.deepEqual(ok(await manager.get('/api/rooms')).map((r) => r.id), [main.id, vip.id]);
 });
+
+test('version de test : l’étiquette de l’instance est transmise à la connexion et à l’interface', async () => {
+  assert.equal(ok(await new Client(server).get('/api/setup')).instance_label, null);
+  assert.equal(ok(await admin.get('/api/me')).instance_label, null);
+  const testSite = new Server({ INSTANCE_LABEL: 'Version de test' });
+  await testSite.start();
+  try {
+    assert.equal(ok(await new Client(testSite).get('/api/setup')).instance_label, 'Version de test');
+    await testSite.addUser('essai', 'Essai', 'admin', 'test-site-password');
+    assert.equal((await new Client(testSite).login('essai', 'test-site-password')).instance_label, 'Version de test');
+  } finally {
+    testSite.destroy();
+  }
+});

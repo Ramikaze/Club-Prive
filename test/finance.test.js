@@ -17,7 +17,7 @@ after(() => server.destroy());
 
 test('15. installation : le premier administrateur exige le code SETUP_TOKEN', async () => {
   const anonymous = new Client(server);
-  assert.deepEqual(ok(await anonymous.get('/api/setup')), { needed: true, token_configured: true });
+  assert.deepEqual(ok(await anonymous.get('/api/setup')), { needed: true, token_configured: true, instance_label: null });
   assert.equal((await anonymous.post('/api/login', { login: 'x', password: 'y' })).status, 401);
   const wrong = await anonymous.post('/api/setup', { setup_token: 'faux', login: 'patron', name: 'Patron', password: 'mot-de-passe-patron' });
   assert.equal(wrong.status, 403);

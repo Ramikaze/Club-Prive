@@ -100,8 +100,9 @@ const CHARGE_SELECT = `
   LEFT JOIN refunds rf ON rf.charge_id = c.id`;
 
 export class Club {
-  constructor(db) {
+  constructor(db, { instanceLabel = null } = {}) {
     this.db = db;
+    this.instanceLabel = instanceLabel; // e.g. « Version de test » on the test Worker; null on the clients' site
     this.depth = 0;
     this.cachedSettings = null;
     this.at = null; // fixed clock (ms), used only by the demo seed to backdate history
@@ -238,6 +239,7 @@ export class Club {
       accounts: ACCOUNTS.map((key) => ({ key, label: ACCOUNT_LABELS[key] })),
       biz_today: this.bizToday(),
       server_time: this.nowIso(),
+      instance_label: this.instanceLabel,
     };
   }
 

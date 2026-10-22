@@ -10,7 +10,8 @@
     "start": "vite build && wrangler dev --port 8787",
     "build": "vite build",
     "test": "node --test test/*.test.js",
-    "deploy": "vite build && wrangler deploy"
+    "deploy": "vite build && wrangler deploy",
+    "deploy:test": "vite build && wrangler deploy --env test"
   },
   "dependencies": {
     "lucide-react": "^0.379.0",

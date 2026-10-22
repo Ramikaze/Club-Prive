@@ -213,6 +213,8 @@ main:focus { outline: none; }
 .banner svg { width: 18px; height: 18px; flex: none; margin-top: 1px; color: var(--bronze-text); }
 .banner > span { flex: 1; min-width: 0; }
 .banner > a { flex: none; }
+.banner-test { background: var(--warn-soft); border-bottom-color: var(--warn); }
+.banner-test strong, .banner-test svg { color: var(--warn); }
 
 @media (max-width: 899px) {
   .shell { grid-template-columns: minmax(0, 1fr); }
@@ -617,6 +619,11 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .login-card { width: min(400px, 100%); background: var(--surface); border-radius: 16px; padding: 28px 26px; box-shadow: var(--shadow-lg); display: grid; gap: 16px; }
 .login-card h1 { font-size: 1.6rem; }
 .login-card .brand-mark { width: 44px; height: 44px; }
+.login-stack { width: min(400px, 100%); display: grid; gap: 12px; justify-items: center; }
+.login-instance {
+  margin: 0; padding: 6px 14px; border-radius: 999px; background: var(--warn-soft); color: var(--warn);
+  font-size: 0.85rem; font-weight: 600;
+}
 
 /* ------------------------------------------------------------------ settings */
 
