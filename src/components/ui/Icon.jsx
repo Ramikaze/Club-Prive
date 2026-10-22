@@ -25,10 +25,13 @@ export default function Icon({ name, size, ...props }) {
 
 export function BrandMark({ className = 'brand-mark' }) {
   return (
+    // Limen, « La bague » : a cigar band with the L in its medallion (same drawing as public/favicon.svg).
     <svg className={className} viewBox="0 0 64 64" aria-hidden="true">
-      <rect width="64" height="64" rx="14" fill="#2a2b2f" />
-      <path d="M32 12 50 32 32 52 14 32Z" fill="none" stroke="#c8925a" strokeWidth="4" />
-      <path d="M32 23 41 32 32 41 23 32Z" fill="#c8925a" />
+      <rect width="64" height="64" rx="14" fill="#231b15" />
+      <path d="M6 24h11M6 40h11M47 24h11M47 40h11" stroke="#d1a16c" strokeWidth="2.5" />
+      <circle cx="32" cy="32" r="15" fill="none" stroke="#d1a16c" strokeWidth="2.5" />
+      <circle cx="32" cy="32" r="11.5" fill="none" stroke="#a07a52" strokeWidth="1" />
+      <path d="M25.4 23h7v1.5h-1.6v14H36l1.3-3h1.4l-.5 4.5H25.4v-1.5H27v-14h-1.6z" fill="#d1a16c" />
     </svg>
   );
 }

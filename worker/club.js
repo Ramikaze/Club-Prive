@@ -38,7 +38,7 @@ const WIPE_ORDER = [
 
 export function defaultSettings() {
   return {
-    club_name: 'Club Privé',
+    club_name: 'Limen',
     currency: { label: 'FCFA', decimals: 0 },
     timezone: 'Africa/Brazzaville',
     hours: { open: '10:00', close: '24:00', max_end: '05:00' },

@@ -26,7 +26,7 @@ export const useStore = create((set) => ({
     });
   },
   signOut: () => {
-    document.title = 'Connexion — Club Privé';
+    document.title = 'Connexion — Limen';
     set({ status: 'login', me: null });
   },
   setOffline: (error) => set({ status: 'offline', bootError: error }),

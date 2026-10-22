@@ -220,3 +220,17 @@ test('carte de membre : génération du QR code SVG et recherche par URL de QR c
   assert.equal(found.length, 1);
   assert.equal(found[0].id, m.id);
 });
+
+test('migration v9 : le club s’appelle Limen, un nom choisi dans les paramètres est conservé', () => {
+  for (const [stored, expected] of [['Club Privé', 'Limen'], ['Le Cercle', 'Le Cercle']]) {
+    const db = nodeDb(':memory:');
+    try {
+      db.exec('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+      for (const version of MIGRATIONS.slice(0, 8)) for (const sql of version) db.exec(sql);
+      db.run("INSERT INTO meta VALUES ('schema_version', '8')");
+      db.run("INSERT INTO settings (key, value, updated_at) VALUES ('club_name', ?, '2026-01-01T00:00:00Z')", JSON.stringify(stored));
+      migrate(db);
+      assert.equal(JSON.parse(db.get("SELECT value FROM settings WHERE key = 'club_name'").value), expected);
+    } finally { db.close(); }
+  }
+});

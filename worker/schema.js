@@ -451,7 +451,14 @@ const V8 = [
      AND NOT EXISTS (SELECT 1 FROM reservations r WHERE r.room_id = rooms.id)`,
 ];
 
-export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8];
+// The club is named Limen. A name still at the former default is updated; a name chosen in the
+// settings is kept.
+const V9 = [
+  `UPDATE settings SET value = '"Limen"', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+   WHERE key = 'club_name' AND value = '"Club Privé"'`,
+];
+
+export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9];
 
 export function migrate(db) {
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');

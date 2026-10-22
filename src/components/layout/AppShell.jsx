@@ -130,7 +130,7 @@ export default function AppShell() {
       <aside className="sidebar" aria-label="Navigation principale">
         <div className="brand">
           <BrandMark />
-          <div><div className="brand-name">{settings.club_name}</div><div className="brand-sub">Gestion du club</div></div>
+          <div><div className="brand-name">{settings.club_name}</div><div className="brand-sub">Club privé</div></div>
         </div>
         <nav className="side-nav" data-tour="nav">
           {NAV.filter((n) => !n.admin || isAdmin).map((n) => (n.group

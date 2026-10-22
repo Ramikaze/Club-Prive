@@ -21,7 +21,7 @@ function LoginForm() {
   return (
     <form className="login-card" onSubmit={onSubmit} noValidate>
       <BrandMark />
-      <div><h1>Connexion</h1><p className="muted">Espace réservé au personnel et aux propriétaires du club.</p></div>
+      <div><h1>Connexion</h1><p className="muted">Limen, club privé : espace réservé au personnel et aux propriétaires.</p></div>
       <label className="field"><span>Identifiant</span>
         <input autoComplete="username" autoCapitalize="none" spellCheck="false" required autoFocus value={v.login} onChange={set('login')} /></label>
       <label className="field"><span>Mot de passe</span>
@@ -82,7 +82,7 @@ export default function Login() {
   useEffect(() => {
     api.get('/api/setup').then((s) => {
       setSetup(s);
-      if (s.instance_label) document.title = `[${s.instance_label}] Connexion — Club Privé`;
+      if (s.instance_label) document.title = `[${s.instance_label}] Connexion — Limen`;
     }).catch(() => setSetup({ needed: false }));
   }, []);
   return (
