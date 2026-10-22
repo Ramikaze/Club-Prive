@@ -67,6 +67,8 @@ Les seuils sont choisis par l’administrateur et sont obligatoires lors de la c
 
 ### Réservations et salles
 
+Le club n’a pas d’horaires d’ouverture : la salle se réserve à toute heure, de jour comme de nuit, sans autorisation particulière. Une séance dure au plus 24 heures. La journée commence à l’heure réglée dans les paramètres (06:00 par défaut) : une séance commencée avant cette heure compte, pour l’agenda et la caisse, dans la journée de la veille. Une réservation dure au moins une heure, deux heures le vendredi et le samedi à partir de 18 h, nuit comprise.
+
 Chaque réservation dispose d’un titulaire et peut accueillir plusieurs membres, avec un engagement de crédit propre à chacun. Les prolongations engagent le crédit disponible des participants ; la clôture le consomme, tandis que l’annulation ou le retrait d’un accompagnant libère son engagement. Les suppléments et consommations restent facturés au titulaire. Un abonnement rattaché à une séance active, même comme accompagnant, ne peut pas être annulé.
 
 L’effectif total, invités compris, respecte la capacité de la salle lors d’une création, d’un ajout de membre ou d’un transfert. Aucun membre ne peut participer à deux réservations qui se chevauchent, quelle que soit la salle. Une séance terminée conserve son effectif et sa salle.

@@ -4,43 +4,63 @@ import { localParts, addDays, daysBetween, parseHHMM } from './time.js';
 export const ACCOUNTS = ['reservations', 'alcool', 'cigares'];
 export const ACCOUNT_LABELS = { reservations: 'Réservations', alcool: 'Alcool', cigares: 'Cigares' };
 
-// Opening hours expressed in minutes from midnight of the business day.
-// A time at or before opening belongs to the next calendar day (e.g. close 24:00, max_end 05:00).
+// The club has no opening hours: it opens whenever the room is booked, day or night. A business
+// day still starts at `hours.open` (06:00 by default) for the agenda and the books, so a session
+// started before that time counts in the previous day, like a late evening. The window is that
+// whole day, in minutes from midnight of the business day (e.g. 06:00 to 06:00 the next day).
 export function bookingWindow(hours) {
-  const open = parseHHMM(hours.open);
-  const close = parseHHMM(hours.close);
-  const maxEnd = parseHHMM(hours.max_end);
-  const c = close <= open ? close + 1440 : close;
-  const x = maxEnd <= open ? maxEnd + 1440 : maxEnd;
-  return { open, close: c, maxEnd: Math.max(x, c) };
+  const open = parseHHMM(hours.open) ?? 360;
+  return { open, close: open + 1440, maxEnd: open + 1440 };
 }
 
 export function validateHours(hours) {
   const open = parseHHMM(hours.open);
-  const close = parseHHMM(hours.close);
-  const maxEnd = parseHHMM(hours.max_end);
-  if (open == null || open >= 1440) return "Heure d'ouverture invalide (format HH:MM).";
-  if (close == null) return 'Heure de fermeture invalide (format HH:MM, 24:00 accepté).';
-  if (maxEnd == null) return 'Heure maximale de fin invalide (format HH:MM).';
-  const w = bookingWindow(hours);
-  if (w.close <= w.open) return "La fermeture doit suivre l'ouverture.";
-  if ((maxEnd <= open ? maxEnd + 1440 : maxEnd) < w.close) return 'La fin maximale de prolongation doit être après la fermeture habituelle.';
-  if (w.maxEnd >= w.open + 1440) return 'La plage totale doit rester inférieure à 24 heures.';
+  if (open == null || open >= 1440) return 'Heure de début de journée invalide (format HH:MM).';
   return null;
 }
 
-// Places an occupation [startMs, endMs) relative to its business day.
+// Friday and Saturday evenings, from 18:00 until the end of the night, a booking lasts longer: it
+// has its own minimum duration, 2 h by default. `bizDay` is the business day the booking starts on
+// and `startRel` its start in minutes from that day's midnight (01:00 the following night is 1500),
+// so a Friday night session that starts after midnight still counts as Friday evening.
+export const WEEKEND_FROM = 18 * 60;
+export function isWeekend(bizDay, startRel) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(bizDay ?? ''))) return false;
+  const [y, m, d] = bizDay.split('-').map(Number);
+  const weekday = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 5 Friday, 6 Saturday
+  return (weekday === 5 || weekday === 6) && startRel >= WEEKEND_FROM;
+}
+
+export function minDurationFor(booking, bizDay, startRel) {
+  const base = booking.min_duration_min;
+  return isWeekend(bizDay, startRel) ? Math.max(base, booking.weekend_min_duration_min ?? base) : base;
+}
+
+// A booking of 3 hours or more is secured by a deposit: half of its paid time (the hours beyond the
+// member's credit), taken when it is booked; the balance is paid before entering the room. It can
+// be cancelled until midnight before its business day; the deposit stays with the club, and so it
+// does if the member does not come. Nothing paid, no deposit.
+export const DEPOSIT_FROM = 180; // minutes
+export function depositFor(durationMin, supplement) {
+  if (durationMin < DEPOSIT_FROM || !(supplement > 0)) return 0;
+  return Math.round(supplement / 2);
+}
+
+// Amount in hundredths -> « 12 500 FCFA ».
+export function formatMoney(minor, currency = { label: 'FCFA', decimals: 0 }) {
+  const d = currency.decimals ?? 0;
+  const n = new Intl.NumberFormat('fr-FR', { minimumFractionDigits: d, maximumFractionDigits: d }).format(minor / 100);
+  return `${n} ${currency.label}`;
+}
+
+// Places an occupation [startMs, endMs) on its business day, given by its start.
 export function placeInWindow(startMs, endMs, tz, win) {
   const s = localParts(startMs, tz);
   const e = localParts(endMs, tz);
   const bizDay = s.minutes < win.open ? addDays(s.date, -1) : s.date;
   const startRel = daysBetween(bizDay, s.date) * 1440 + s.minutes;
   const endRel = daysBetween(bizDay, e.date) * 1440 + e.minutes;
-  return {
-    bizDay, startRel, endRel,
-    inWindow: startRel >= win.open && endRel <= win.maxEnd && endRel > startRel,
-    offHours: startRel >= win.close || endRel > win.close,
-  };
+  return { bizDay, startRel, endRel };
 }
 
 // Paid minutes -> amount. Each full hour at the hourly price, a remainder up to 30 min at the

@@ -283,26 +283,30 @@ function RoomsSection() {
 function HoursSection({ save }) {
   const s = useSettings();
   const { busy, error, onSubmit } = useFormAction((v) => save({
-    hours: { open: v.open, close: v.close, max_end: v.max_end },
-    booking: { slot_min: Number(v.slot_min), min_duration_min: Number(v.min_duration_min), extension_step_min: Number(v.extension_step_min) },
-    manager_can_authorize_off_hours: Boolean(v.manager_can_authorize_off_hours),
+    hours: { open: v.open },
+    booking: {
+      slot_min: Number(v.slot_min),
+      min_duration_min: Number(v.min_duration_min),
+      weekend_min_duration_min: Number(v.weekend_min_duration_min),
+      extension_step_min: Number(v.extension_step_min),
+    },
   }));
   return (
     <section className="card settings-section" id="sec-hours">
-      <div className="card-head"><h2>Horaires et créneaux</h2></div>
+      <div className="card-head"><h2>Journée et créneaux</h2></div>
+      <p className="subtle">Pas d’horaires d’ouverture : la salle se réserve à toute heure, de jour comme de nuit.</p>
       <form className="form-grid" onSubmit={onSubmit} noValidate>
         <div className="form-row">
-          <label className="field"><span>Ouverture</span><input name="open" defaultValue={s.hours.open} pattern="\d{1,2}:\d{2}" required /></label>
-          <label className="field"><span>Fermeture habituelle</span><input name="close" defaultValue={s.hours.close} pattern="\d{1,2}:\d{2}" required /><span className="help">24:00 = minuit</span></label>
-          <label className="field"><span>Fin maximale de prolongation</span><input name="max_end" defaultValue={s.hours.max_end} pattern="\d{1,2}:\d{2}" required /><span className="help">heure du lendemain</span></label>
+          <label className="field"><span>Début de la journée</span><input name="open" defaultValue={s.hours.open} pattern="\d{1,2}:\d{2}" required />
+            <span className="help">Pour l’agenda et la caisse : une séance qui commence avant cette heure compte dans la journée de la veille.</span></label>
         </div>
         <div className="form-row">
           <label className="field"><span>Créneaux</span><select name="slot_min" defaultValue={s.booking.slot_min}>{[15, 30, 60].map((n) => <option key={n} value={n}>{n} min</option>)}</select></label>
           <label className="field"><span>Durée minimale</span><select name="min_duration_min" defaultValue={s.booking.min_duration_min}>{[30, 60, 90, 120].map((n) => <option key={n} value={n}>{fmtDuration(n)}</option>)}</select></label>
+          <label className="field"><span>Vendredi et samedi dès 18 h</span><select name="weekend_min_duration_min" defaultValue={s.booking.weekend_min_duration_min ?? s.booking.min_duration_min}>{[60, 90, 120, 150, 180].map((n) => <option key={n} value={n}>{fmtDuration(n)}</option>)}</select>
+            <span className="help">Durée minimale de ces soirées.</span></label>
           <label className="field"><span>Pas de prolongation</span><select name="extension_step_min" defaultValue={s.booking.extension_step_min}>{[15, 30, 60].map((n) => <option key={n} value={n}>{n} min</option>)}</select></label>
         </div>
-        <label className="check"><input type="checkbox" name="manager_can_authorize_off_hours" value="1" defaultChecked={s.manager_can_authorize_off_hours} />
-          <span>Le gérant peut autoriser un dépassement des horaires habituels</span></label>
         <FormFooter busy={busy} error={error} />
       </form>
     </section>

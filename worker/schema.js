@@ -458,7 +458,34 @@ const V9 = [
    WHERE key = 'club_name' AND value = '"Club Privé"'`,
 ];
 
-export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9];
+// The club has no opening hours: it opens whenever the room is booked. Only the start of the
+// business day remains; one still at the former default 10:00 moves to 06:00, so a night session
+// counts with the evening before. The off-hours authorization setting goes with the hours.
+const V10 = [
+  `UPDATE settings SET value = json_object('open',
+     CASE WHEN json_extract(value, '$.open') = '10:00' THEN '06:00' ELSE json_extract(value, '$.open') END),
+     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+   WHERE key = 'hours'`,
+  "DELETE FROM settings WHERE key = 'manager_can_authorize_off_hours'",
+];
+
+// On Friday, Saturday and Sunday a booking lasts at least 2 hours: clubs that already saved their
+// booking settings get the weekend minimum too.
+const V11 = [
+  `UPDATE settings SET value = json_set(value, '$.weekend_min_duration_min',
+     max(120, coalesce(json_extract(value, '$.min_duration_min'), 60))),
+     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+   WHERE key = 'booking' AND json_extract(value, '$.weekend_min_duration_min') IS NULL`,
+];
+
+// Bookings of 3 hours or more are secured by a deposit (half of their paid time): the amount taken
+// is kept on the booking, and its line is marked so it can be told from the balance.
+const V12 = [
+  'ALTER TABLE reservations ADD COLUMN deposit_amount INTEGER NOT NULL DEFAULT 0 CHECK (deposit_amount >= 0)',
+  'ALTER TABLE charges ADD COLUMN deposit INTEGER NOT NULL DEFAULT 0 CHECK (deposit IN (0, 1))',
+];
+
+export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12];
 
 export function migrate(db) {
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');

@@ -60,16 +60,17 @@ function Event({ r, day, slotH, compact, settings }) {
 
 function slots(day, reservations, { compact = false, now, settings, maxRooms = 1, onSlot }) {
   const w = win();
-  const { slot_min: slot, min_duration_min: minDur } = settings.booking;
+  const slot = settings.booking.slot_min;
   const busy = reservations.map((r) => [relOf(day, r.start_ms), relOf(day, r.end_ms)]);
   const rows = [];
+  // The whole business day, every slot bookable: the club has no opening hours.
   for (let rel = w.open; rel < w.maxEnd; rel += slot) {
     const busyCount = busy.filter(([a, b]) => a <= rel && rel < b).length;
     const occupied = busyCount >= maxRooms;
     const past = slotStartMs(day, rel) + slot * 60000 <= now;
-    const canBook = !occupied && !past && rel + minDur <= w.maxEnd;
-    const classes = `tl-row ${rel % 60 === 0 ? 'hour' : 'half'} ${rel >= w.close ? 'off' : ''} ${rel === 1440 ? 'midnight' : ''}`;
-    const compactClass = compact ? `${rel >= w.close ? 'off' : ''} ${rel % 60 ? 'half' : ''}` : '';
+    const canBook = !occupied && !past;
+    const classes = `tl-row ${rel % 60 === 0 ? 'hour' : 'half'} ${rel === 1440 ? 'midnight' : ''}`;
+    const compactClass = compact && rel % 60 ? 'half' : '';
     const time = relLabel(rel);
     const button = (
       <button
@@ -100,7 +101,6 @@ function NowLine({ day, slotH, now, settings }) {
 function DayView({ day, list, now, settings, maxRooms, onSlot }) {
   const active = list.filter((r) => r.status !== 'annulee');
   const cancelled = list.filter((r) => r.status === 'annulee');
-  const s = settings;
   return (
     <>
       <section className="card agenda-card">
@@ -113,7 +113,6 @@ function DayView({ day, list, now, settings, maxRooms, onSlot }) {
           <span><i style={{ background: 'var(--info-soft)', borderLeft: '3px solid var(--info)' }} /> Réservée</span>
           <span><i style={{ background: 'var(--ok-soft)', borderLeft: '3px solid var(--ok)' }} /> En cours</span>
           <span><i style={{ background: 'var(--surface-3)', borderLeft: '3px solid var(--text-3)' }} /> Terminée</span>
-          <span><i style={{ background: 'var(--off-hours)' }} /> Après {s.hours.close} : autorisation requise (fin max. {s.hours.max_end})</span>
         </div>
       </section>
       {cancelled.length > 0 && (

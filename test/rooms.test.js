@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { localToUtcMs } from '../shared/time.js';
+import { addDays, localToUtcMs } from '../shared/time.js';
 import { Server, Client, ok } from './harness.js';
 
 let server, admin, manager, rooms, members, today;
@@ -319,4 +319,72 @@ test('version de test : l’étiquette de l’instance est transmise à la conne
   } finally {
     testSite.destroy();
   }
+});
+
+test('vendredi et samedi à partir de 18 h : une réservation dure au moins 2 heures', async () => {
+  const booking = server.club.settings().booking;
+  assert.equal((await admin.put('/api/settings', { booking: { ...booking, weekend_min_duration_min: 30 } })).status, 400);
+  ok(await admin.put('/api/settings', { booking: { ...booking, weekend_min_duration_min: 120 } }));
+  const weekday = (d) => new Date(`${d}T12:00:00Z`).getUTCDay();
+  let friday = addDays(today, 1);
+  while (weekday(friday) !== 5) friday = addDays(friday, 1);
+  const saturday = addDays(friday, 1);
+  const sunday = addDays(friday, 2);
+  const minimum = (r) => assert.equal(r.data.error?.code, 'DUREE_MINIMALE', JSON.stringify(r.data));
+  // Friday afternoon is the week; from 18:00, and through the night, the evening minimum applies.
+  ok(await manager.post('/api/reservations', request({ date: friday, start_time: '15:00', duration_min: 60 })));
+  const evening = await manager.post('/api/reservations', request({ date: friday, start_time: '18:00', duration_min: 60, member_id: members[1].id }));
+  minimum(evening);
+  assert.match(evening.data.error.message, /vendredi et le samedi à partir de 18 h/);
+  ok(await manager.post('/api/reservations', request({ date: friday, start_time: '18:00', duration_min: 120, member_id: members[1].id })));
+  minimum(await manager.post('/api/reservations', request({ date: friday, start_time: '01:00', duration_min: 60, member_id: members[2].id })));
+  minimum(await manager.post('/api/reservations', request({ date: saturday, start_time: '22:00', duration_min: 90 })));
+  // Saturday afternoon and Sunday evening keep the usual minimum.
+  ok(await manager.post('/api/reservations', request({ date: saturday, start_time: '15:00', duration_min: 60 })));
+  ok(await manager.post('/api/reservations', request({ date: sunday, start_time: '20:00', duration_min: 60, member_id: members[2].id })));
+});
+
+test('acompte : 3 h ou plus avec du temps payant, 50 % tout de suite, le solde avant l’entrée, annulable jusqu’à la veille', async () => {
+  const UM = 100;
+  const method = server.club.settings().payment_methods[0];
+  // Alice has 2 h of credit: a 4 h booking has 2 h of paid time, 50 000, so a 25 000 deposit.
+  const req = request({ date: addDays(today, 3), start_time: '19:00', duration_min: 240 });
+  const quote = ok(await manager.post('/api/reservations/quote', req));
+  assert.deepEqual([quote.supplement_amount, quote.deposit_amount, quote.balance_amount], [50000 * UM, 25000 * UM, 25000 * UM]);
+  const noDeposit = await manager.post('/api/reservations', req);
+  assert.equal(noDeposit.status, 400);
+  assert.equal(noDeposit.data.error.code, 'ACOMPTE_REQUIS');
+  const booked = ok(await manager.post('/api/reservations', { ...req, deposit_method: method }));
+  const timeLines = (d) => d.charges.filter((c) => c.kind === 'temps_supplementaire').map((c) => [c.deposit, c.status, c.amount]);
+  assert.deepEqual(timeLines(booked), [[true, 'payee', 25000 * UM], [false, 'due', 25000 * UM]]);
+  assert.equal(booked.reservation.deposit_amount, 25000 * UM);
+
+  // Before the day the member can cancel: the deposit stays with the club, the balance is cancelled.
+  const cancelled = ok(await manager.post(`/api/reservations/${booked.reservation.id}/cancel`, { reason: 'Changement de programme' }));
+  assert.equal(cancelled.deposit_kept, 25000 * UM);
+  assert.deepEqual(timeLines(cancelled), [[true, 'payee', 25000 * UM], [false, 'annulee', 25000 * UM]]);
+  rejected(await manager.post(`/api/reservations/${booked.reservation.id}/cancel`, { reason: 'Deux fois' }), 'STATUT');
+
+  // Entering the room needs the balance paid.
+  const bruno = ok(await manager.post('/api/reservations', {
+    ...request({ member_id: members[1].id, date: addDays(today, 4), start_time: '19:00', duration_min: 180 }), deposit_method: method,
+  }));
+  rejected(await manager.post(`/api/reservations/${bruno.reservation.id}/start`), 'SOLDE_REQUIS');
+  const balance = bruno.charges.find((c) => c.kind === 'temps_supplementaire' && c.status === 'due');
+  ok(await manager.post('/api/payments', { charge_ids: [balance.id], method }));
+  assert.equal(ok(await manager.post(`/api/reservations/${bruno.reservation.id}/start`)).reservation.status, 'en_cours');
+
+  // On the day it can no longer be cancelled: only the absence is recorded, and only the deposit is lost.
+  const tonight = ok(await manager.post('/api/reservations', {
+    ...request({ member_id: members[2].id, date: today, start_time: '23:30', duration_min: 180 }), deposit_method: method,
+  }));
+  assert.equal(tonight.reservation.late_cancellation, true);
+  rejected(await manager.post(`/api/reservations/${tonight.reservation.id}/cancel`, { reason: 'Imprévu' }), 'ANNULATION_TARDIVE');
+  const absent = ok(await manager.post(`/api/reservations/${tonight.reservation.id}/cancel`, { reason: 'Membre absent', no_show: true }));
+  assert.equal(absent.reservation.status, 'annulee');
+  assert.match(absent.reservation.cancel_reason, /^Absence/);
+  assert.equal(absent.deposit_kept, tonight.reservation.deposit_amount);
+  assert.equal(absent.released_minutes, 120);
+  const early = await manager.post(`/api/reservations/${bruno.reservation.id}/cancel`, { reason: 'Membre absent', no_show: true });
+  assert.notEqual(early.status, 200);
 });

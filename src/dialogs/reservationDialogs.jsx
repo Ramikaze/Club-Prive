@@ -12,7 +12,7 @@ import ConsumptionBreakdown, { ConsumerPicker, consumptionOf } from '../componen
 import { useLoad, useSubmit } from '../lib/hooks.js';
 import { openPaymentDialog } from './moneyDialogs.jsx';
 import { daysBetween, parseHHMM } from '../../shared/time.js';
-import { supplementDetail } from '../../shared/rules.js';
+import { minDurationFor, supplementDetail } from '../../shared/rules.js';
 
 export function supplementText(paid, tariff) {
   if (!paid) return 'aucun';
@@ -23,6 +23,7 @@ export function supplementText(paid, tariff) {
   return `${fmtDuration(paid)} → ${pieces.join(' + ')}`;
 }
 
+// Minutes from the business day's midnight: a time before the day starts is the following night.
 const startRelOf = (time) => {
   const m = parseHHMM(time);
   return m < win().open ? m + 1440 : m;
@@ -64,34 +65,33 @@ const conflictText = (conflicts) => conflicts.map((c) => `${c.member_name} (${c.
 
 // ---------------------------------------------------------------- new reservation
 
-function startOptions(w, slot, minDur) {
+// The club has no opening hours: any start of the business day can be booked, for any length.
+const LONGEST_OFFERED = 12 * 60; // the longest duration in the list; a session can be extended beyond
+
+function startOptions(w, slot) {
   const out = [];
-  for (let rel = w.open; rel + minDur <= w.maxEnd; rel += slot) {
-    const note = rel >= 1440 ? ' (après minuit)' : rel >= w.close ? ' (hors horaires)' : '';
-    out.push({ label: relLabel(rel), note });
-  }
+  for (let rel = w.open; rel < w.maxEnd; rel += slot) out.push({ label: relLabel(rel), note: rel >= 1440 ? ' (après minuit)' : '' });
   return out;
 }
 
-function durationOptions(w, slot, minDur, startTime) {
-  const rel = startRelOf(startTime);
+function durationOptions(slot, minDur) {
   const out = [];
-  for (let d = minDur; rel + d <= w.maxEnd; d += slot) out.push({ d, late: rel + d > w.close });
+  for (let d = minDur; d <= LONGEST_OFFERED; d += slot) out.push({ d });
   return out;
 }
 
-function QuotePanel({ q, s }) {
+function QuotePanel({ q, s, now }) {
   const warnings = [];
+  if (q.deposit_amount) {
+    warnings.push(<Notice key="deposit" kind="info">{now
+      ? `Séance de 3 h ou plus avec entrée immédiate : tout le temps payant (${money(q.supplement_amount)}) s’encaisse maintenant.`
+      : `Séance de 3 h ou plus : acompte de 50 % (${money(q.deposit_amount)}) encaissé maintenant, solde de ${money(q.balance_amount)} à régler avant l’entrée en salle. Annulable jusqu’à la veille à minuit ; l’acompte reste acquis au club, y compris si le membre ne vient pas.`}</Notice>);
+  }
   if (q.conflicts.length) {
     warnings.push(<Notice key="conflicts" kind="danger">{`${q.room?.name ?? 'Salle'} déjà occupée sur ce créneau : ${conflictText(q.conflicts)}. Choisissez une autre salle disponible ci-dessus.`}</Notice>);
   }
   if (q.room && q.party_size > q.room.capacity) {
     warnings.push(<Notice key="cap" kind="warn">{`Le nombre de membres (${q.party_size}) dépasse la capacité de ${q.room.name} (${q.room.capacity} pers.).`}</Notice>);
-  }
-  if (q.off_hours) {
-    warnings.push(<Notice key="off" kind="warn">{q.can_authorize_off_hours
-      ? `Ce créneau dépasse les horaires habituels (${s.hours.open} – ${s.hours.close}) : une autorisation explicite est nécessaire.`
-      : 'Ce créneau dépasse les horaires habituels : seul un administrateur peut l’autoriser.'}</Notice>);
   }
   if (q.paid_minutes && q.tariff_blocked) {
     warnings.push(<Notice key="tariff" kind="danger">Le tarif du temps supplémentaire n’est pas validé par un administrateur.</Notice>);
@@ -118,6 +118,12 @@ function QuotePanel({ q, s }) {
             ? <>{' '}<Hypothesis title="Tarif annoncé dans les messages audio, non encore validé par un administrateur." label="tarif à valider" /></>
             : null}</dd></div>
         <div className="total"><dt>Supplément à régler</dt><dd>{money(q.supplement_amount)}</dd></div>
+        {q.deposit_amount && !now ? (
+          <>
+            <div><dt>Acompte (50 %), maintenant</dt><dd>{money(q.deposit_amount)}</dd></div>
+            <div><dt>Solde, avant l’entrée en salle</dt><dd>{money(q.balance_amount)}</dd></div>
+          </>
+        ) : null}
         <div><dt>Crédit restant après (titulaire)</dt><dd>{fmtDuration(q.credit_after)}</dd></div>
       </dl>
       {warnings.length ? <div className="stack" style={{ marginTop: 10 }}>{warnings}</div> : null}
@@ -130,13 +136,13 @@ function BookingDialog({ close, preset, onDone }) {
   const storeRooms = useStore((st) => st.rooms);
   const activeRooms = storeRooms.filter((rm) => rm.active);
   const w = win();
-  const { slot_min: slot, min_duration_min: minDur } = s.booking;
+  const slot = s.booking.slot_min;
   const [key] = useState(newKey);
   const { busy, error, submit } = useSubmit();
   const [init] = useState(() => {
     const date = preset.date ?? bizToday();
     const wanted = preset.start_time ?? defaultStart(date);
-    const list = startOptions(win(), slot, minDur);
+    const list = startOptions(win(), slot);
     return {
       date,
       start: list.some((o) => o.label === wanted) ? wanted : (list[0]?.label ?? wanted),
@@ -150,9 +156,11 @@ function BookingDialog({ close, preset, onDone }) {
   const [startNow, setStartNow] = useState(init.startNow);
   const [date, setDate] = useState(init.date);
   const [start, setStart] = useState(init.start);
-  const [duration, setDuration] = useState(minDur);
+  const [duration, setDuration] = useState(() => minDurationFor(s.booking, init.date, startRelOf(init.start)));
+  // Friday and Saturday from 18:00 the minimum is longer (2 h by default).
+  const minDur = minDurationFor(s.booking, date, startRelOf(start));
   const [notes, setNotes] = useState('');
-  const [auth, setAuth] = useState(false);
+  const [depositMethod, setDepositMethod] = useState(s.payment_methods[0] ?? '');
   const [quote, setQuote] = useState(null);
   const [quoteError, setQuoteError] = useState(null);
   const [loading, setLoading] = useState(() => Boolean(preset.member));
@@ -166,7 +174,7 @@ function BookingDialog({ close, preset, onDone }) {
   const quoteTimer = useRef(null);
   const searchTimer = useRef(null);
   const latest = useRef(null);
-  latest.current = { member, extraMembers, roomId, startNow, date, start, duration, notes, auth };
+  latest.current = { member, extraMembers, roomId, startNow, date, start, duration, notes, depositMethod };
 
   const payload = () => {
     const v = latest.current;
@@ -182,7 +190,7 @@ function BookingDialog({ close, preset, onDone }) {
       start_time: v.start,
       duration_min: Number(v.duration),
       notes: v.notes,
-      authorize_off_hours: v.auth,
+      deposit_method: v.depositMethod, // used only when a deposit is due (3 h or more with paid time)
     };
   };
 
@@ -298,11 +306,16 @@ function BookingDialog({ close, preset, onDone }) {
     else runSearch('');
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Raises the duration to the minimum of the chosen day and time when it falls short.
+  const fitDuration = (nextDate, nextStart) => {
+    const min = minDurationFor(s.booking, nextDate, startRelOf(nextStart));
+    if (Number(duration) < min) setDuration(min);
+  };
+
   const onStart = (e) => {
     const next = e.target.value;
     setStart(next);
-    const list = durationOptions(w, slot, minDur, next);
-    if (!list.some((o) => o.d === Number(duration))) setDuration(list[0]?.d ?? 0);
+    fitDuration(date, next);
     requestQuote();
   };
 
@@ -327,12 +340,12 @@ function BookingDialog({ close, preset, onDone }) {
   if (!member) quoteBox = <p className="subtle">Choisissez un membre ayant une carte active et du crédit disponible pour calculer la séance.</p>;
   else if (loading && !quote) quoteBox = <p className="subtle">Calcul en cours…</p>;
   else if (quoteError) quoteBox = <Notice kind="danger">{quoteError}</Notice>;
-  else if (quote) quoteBox = <QuotePanel q={quote} s={s} />;
+  else if (quote) quoteBox = <QuotePanel q={quote} s={s} now={startNow && date === bizToday()} />;
+  const deposit = quote && !quoteError ? quote.deposit_amount : 0;
+  const goingIn = startNow && date === bizToday();
 
   const ready = Boolean(member && quote && !quoteError);
-  const showOff = ready && quote.off_hours && quote.can_authorize_off_hours;
-  const canSubmit = ready && !(quote.conflicts.length > 0 || quote.tariff_blocked
-    || (quote.off_hours && (!quote.can_authorize_off_hours || !auth)));
+  const canSubmit = ready && !(quote.conflicts.length > 0 || quote.tariff_blocked);
 
   const roomsList = quote?.rooms_availability ?? activeRooms.map((rm) => ({ ...rm, available: true, conflicts: [] }));
   const currentRoom = roomsList.find((rm) => rm.id === Number(roomId)) ?? activeRooms[0];
@@ -495,30 +508,33 @@ function BookingDialog({ close, preset, onDone }) {
 
         <div className="form-row">
           <label className="field"><span>Journée</span>
-            <input type="date" name="date" value={date} required onChange={(e) => { setDate(e.target.value); requestQuote(); }} /></label>
+            <input type="date" name="date" value={date} required onChange={(e) => { setDate(e.target.value); fitDuration(e.target.value, start); requestQuote(); }} /></label>
           <label className="field"><span>Début</span>
             <select name="start_time" value={start} onChange={onStart}>
-              {startOptions(w, slot, minDur).map((o) => <option key={o.label} value={o.label}>{`${o.label}${o.note}`}</option>)}
+              {startOptions(w, slot).map((o) => <option key={o.label} value={o.label}>{`${o.label}${o.note}`}</option>)}
             </select></label>
           <label className="field"><span>Durée</span>
             <select name="duration_min" value={duration} onChange={(e) => { setDuration(Number(e.target.value)); requestQuote(); }}>
-              {durationOptions(w, slot, minDur, start).map((o) => (
-                <option key={o.d} value={o.d}>{`${fmtDuration(o.d)}${o.late ? ` · après ${s.hours.close}` : ''}`}</option>
-              ))}
+              {durationOptions(slot, minDur).map((o) => <option key={o.d} value={o.d}>{fmtDuration(o.d)}</option>)}
             </select></label>
         </div>
-        <p className="subtle">{`Créneaux de ${slot} min, ${fmtDuration(minDur)} minimum. Horaires habituels ${s.hours.open} – ${s.hours.close} ; fin possible jusqu’à ${s.hours.max_end} (lendemain) avec autorisation.`}</p>
+        <p className="subtle">{`Réservable à toute heure, par créneaux de ${slot} min. Minimum ${fmtDuration(s.booking.min_duration_min)}, ${fmtDuration(s.booking.weekend_min_duration_min ?? s.booking.min_duration_min)} le vendredi et le samedi à partir de 18 h.`}</p>
         <label className="field"><span>Remarque (facultatif)</span>
           <input name="notes" maxLength={300} value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
         <div id="bk-quote" aria-live="polite">{quoteBox}</div>
-        <label className="check" id="bk-off" hidden={!showOff}>
-          <input type="checkbox" name="authorize_off_hours" checked={auth} onChange={(e) => setAuth(e.target.checked)} />
-          <span>J’autorise explicitement le dépassement des horaires habituels (autorisation enregistrée à mon nom).</span></label>
+        {deposit ? (
+          <label className="field"><span>{goingIn ? 'Encaissé maintenant par' : 'Acompte encaissé maintenant par'}</span>
+            <select name="deposit_method" value={depositMethod} onChange={(e) => setDepositMethod(e.target.value)}>
+              {s.payment_methods.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select></label>
+        ) : null}
         <FormError error={error} />
         <div className="modal-actions">
           <button type="button" className="btn" onClick={close}>Annuler</button>
           <button type="submit" className="btn btn-primary" id="bk-submit" disabled={busy || !canSubmit} aria-busy={busy}>
-            {startNow && date === bizToday() ? 'Installer dans la salle' : 'Confirmer la réservation'}
+            {deposit
+              ? (goingIn ? `Encaisser ${money(quote.supplement_amount)} et installer` : `Encaisser l’acompte (${money(deposit)}) et réserver`)
+              : (goingIn ? 'Installer dans la salle' : 'Confirmer la réservation')}
           </button>
         </div>
       </form>
@@ -649,7 +665,6 @@ function ExtendDialog({ close, r, onDone, options, endRel }) {
   const [key] = useState(newKey);
   const { busy, error, submit } = useSubmit();
   const [minutes, setMinutes] = useState(options[0]);
-  const [auth, setAuth] = useState(false);
   const [quote, setQuote] = useState(null);
   const [quoteError, setQuoteError] = useState(null);
   const seq = useRef(0);
@@ -676,9 +691,7 @@ function ExtendDialog({ close, r, onDone, options, endRel }) {
   const onSubmit = (e) => {
     e.preventDefault();
     submit(async () => {
-      const detail = await api.post(`/api/reservations/${r.id}/extend`, {
-        minutes: Number(minutes), authorize_off_hours: auth,
-      }, key);
+      const detail = await api.post(`/api/reservations/${r.id}/extend`, { minutes: Number(minutes) }, key);
       close();
       toast(`Réservation prolongée jusqu’à ${detail.reservation.end_time}.`);
       onDone?.(detail);
@@ -691,11 +704,6 @@ function ExtendDialog({ close, r, onDone, options, endRel }) {
   else if (q) {
     const warnings = [];
     if (q.conflicts.length) warnings.push(<Notice key="conflicts" kind="danger">{`Créneau suivant occupé : ${conflictText(q.conflicts)}.`}</Notice>);
-    if (q.off_hours) {
-      warnings.push(<Notice key="off" kind="warn">{q.can_authorize_off_hours
-        ? `La nouvelle fin dépasse les horaires habituels (${s.hours.close}) : autorisation explicite nécessaire.`
-        : 'La nouvelle fin dépasse les horaires habituels : seul un administrateur peut l’autoriser.'}</Notice>);
-    }
     if (q.tariff_blocked) warnings.push(<Notice key="tariff" kind="danger">Le tarif de cette réservation n’est pas validé : prolongation payante impossible hors démonstration.</Notice>);
     box = (
       <>
@@ -714,9 +722,7 @@ function ExtendDialog({ close, r, onDone, options, endRel }) {
     );
   }
 
-  const offHidden = !q?.off_hours || !q.can_authorize_off_hours;
-  const blocked = Boolean(quoteError) || !q || q.conflicts.length > 0 || q.tariff_blocked
-    || (q.off_hours && (!q.can_authorize_off_hours || !auth));
+  const blocked = Boolean(quoteError) || !q || q.conflicts.length > 0 || q.tariff_blocked;
 
   return (
     <Modal title="Prolonger la réservation" onClose={close}>
@@ -729,9 +735,6 @@ function ExtendDialog({ close, r, onDone, options, endRel }) {
             ))}
           </select></label>
         <div id="ex-quote" aria-live="polite">{box}</div>
-        <label className="check" id="ex-off" hidden={offHidden}>
-          <input type="checkbox" name="authorize_off_hours" checked={auth} onChange={(e) => setAuth(e.target.checked)} />
-          <span>J’autorise explicitement le dépassement des horaires habituels.</span></label>
         <FormError error={error} />
         <div className="modal-actions"><button type="button" className="btn" onClick={close}>Annuler</button>
           <button type="submit" className="btn btn-primary" id="ex-submit" disabled={busy || blocked} aria-busy={busy}>Confirmer la prolongation</button></div>
@@ -742,14 +745,14 @@ function ExtendDialog({ close, r, onDone, options, endRel }) {
 
 export function openExtendDialog(r, onDone) {
   const s = useStore.getState().settings;
-  const w = win();
   const step = s.booking.extension_step_min;
   const end = parts(r.end_ms);
   const endRel = daysBetween(r.biz_day, end.date) * 1440 + end.minutes;
+  // No closing time: up to 6 hours more at a time, within the 24 hours a session can last.
   const options = [];
-  for (let d = step; endRel + d <= w.maxEnd; d += step) options.push(d);
+  for (let d = step; d <= 6 * 60 && r.duration_min + d <= 1440; d += step) options.push(d);
   if (!options.length) {
-    toast(`Prolongation impossible : la fin maximale (${s.hours.max_end}) est atteinte.`, 'error');
+    toast('Prolongation impossible : une séance ne peut pas dépasser 24 heures.', 'error');
     return;
   }
   openDialog(ExtendDialog, { r, onDone, options, endRel });
@@ -767,24 +770,32 @@ export function openCancelReservationDialog(detail, onDone) {
   }, 0);
   const due = detail.charges.filter((c) => c.status === 'due');
   const paid = detail.charges.filter((c) => c.status === 'payee');
+  const deposit = paid.filter((c) => c.deposit).reduce((sum, c) => sum + c.amount, 0);
+  const otherPaid = paid.filter((c) => !c.deposit);
+  // A booking of 3 hours or more can no longer be cancelled on its day: only the absence is recorded.
+  const absence = r.late_cancellation;
   actionDialog({
-    title: 'Annuler la réservation',
+    title: absence ? 'Enregistrer l’absence du membre' : 'Annuler la réservation',
     danger: true,
-    confirmLabel: 'Annuler la réservation',
-    reasonLabel: 'Motif de l’annulation',
+    confirmLabel: absence ? 'Enregistrer l’absence' : 'Annuler la réservation',
+    reasonLabel: absence ? 'Motif de l’absence' : 'Motif de l’annulation',
     body: (
       <>
+        {absence ? <Notice kind="warn">Séance de 3 h ou plus : elle ne peut plus être annulée le jour même. Si le membre ne vient pas, enregistrez son absence ; seul l’acompte est perdu.</Notice> : null}
         <ul className="stack" style={{ paddingLeft: 18, margin: 0 }}>
           <li>{committed ? `${fmtDuration(committed)} de crédit seront libérées et redeviendront disponibles.` : 'Aucune heure incluse à libérer.'}</li>
           <li>{due.length ? `${due.length} ligne(s) non encaissée(s) seront annulées (les produits retournent en stock).` : 'Aucune ligne à annuler.'}</li>
-          {paid.length ? <li><strong>{`${paid.length} ligne(s) déjà encaissée(s)`}</strong> resteront en l’état : un remboursement éventuel est une action distincte réservée à un administrateur.</li> : null}
+          {deposit ? <li><strong>{`L’acompte de ${money(deposit)} reste acquis au club`}</strong> : il n’est pas remboursé.</li> : null}
+          {otherPaid.length ? <li><strong>{`${otherPaid.length} ligne(s) déjà encaissée(s)`}</strong> resteront en l’état : un remboursement éventuel est une action distincte réservée à un administrateur.</li> : null}
         </ul>
-        <p className="subtle">Les règles d’annulation tardive (frais, délai) restent à définir.</p>
+        {r.cancellable_until && !absence
+          ? <p className="subtle">{`Séance de 3 h ou plus : annulable jusqu’au ${dayLabel(r.biz_day, 'medium')} à 0 h (la veille à minuit).`}</p>
+          : null}
       </>
     ),
     run: async (v) => {
-      const res = await api.post(`/api/reservations/${r.id}/cancel`, { reason: v.reason }, key);
-      toast('Réservation annulée.');
+      const res = await api.post(`/api/reservations/${r.id}/cancel`, { reason: v.reason, no_show: absence }, key);
+      toast(absence ? 'Absence enregistrée : seul l’acompte est conservé.' : 'Réservation annulée.');
       onDone?.(res);
     },
   });
@@ -918,6 +929,8 @@ export async function quickStartReservation(r, onDone) {
     onDone?.();
   } catch (e) {
     toast(e.message, 'error');
+    // A booking secured by a deposit: take the balance first, then the arrival can be recorded.
+    if (e.code === 'SOLDE_REQUIS') openQuickPayReservation(r, onDone);
   }
 }
 

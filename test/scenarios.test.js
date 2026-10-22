@@ -129,37 +129,33 @@ test('5 bis. le crédit n’est jamais compté deux fois en accès simultané', 
   assert.deepEqual(included, [0, 120]);
 });
 
-test('6. prolongation traversant minuit avec autorisation explicite', async () => {
+test('6. pas d’horaires : prolongation au-delà de minuit et réservation le matin, sans autorisation', async () => {
   const e = await newMember('Émile');
   const d = ok(await book(e, day(4), '22:00', 90));
-  assert.equal(d.reservation.off_hours, false);
   const id = d.reservation.id;
-  const refused = await manager.post(`/api/reservations/${id}/extend`, { minutes: 120 });
-  assert.equal(refused.status, 409);
-  assert.equal(refused.data.error.code, 'AUTORISATION_REQUISE');
   const quote = ok(await manager.post(`/api/reservations/${id}/extend/quote`, { minutes: 120 }));
   assert.equal(quote.included_minutes, 30);
   assert.equal(quote.paid_minutes, 90);
   assert.equal(quote.supplement_delta, 40000 * UM);
-  assert.equal(quote.off_hours, true);
-  const ext = ok(await manager.post(`/api/reservations/${id}/extend`, { minutes: 120, authorize_off_hours: true }));
+  const ext = ok(await manager.post(`/api/reservations/${id}/extend`, { minutes: 120 }));
   assert.equal(ext.reservation.end_time, '01:30');
   assert.equal(ext.reservation.end_date, day(5));
   assert.equal(ext.reservation.biz_day, day(4));
   assert.equal(ext.reservation.duration_min, 210);
-  assert.equal(ext.reservation.off_hours, true);
-  assert.equal(ext.reservation.off_hours_authorized_by_name, 'Gérant Test');
+  assert.equal(ext.reservation.off_hours, false);
   assert.equal(ext.reservation.supplement_amount, 40000 * UM);
-  const tooLate = await manager.post(`/api/reservations/${id}/extend`, { minutes: 240, authorize_off_hours: true });
-  assert.equal(tooLate.status, 400);
-  assert.equal(tooLate.data.error.code, 'HORS_PLAGE');
-  ok(await admin.put('/api/settings', { manager_can_authorize_off_hours: false }));
-  const noRight = await manager.post(`/api/reservations/${id}/extend`, { minutes: 30, authorize_off_hours: true });
-  assert.equal(noRight.status, 403);
-  const byAdmin = ok(await admin.post(`/api/reservations/${id}/extend`, { minutes: 30, authorize_off_hours: true }));
-  assert.equal(byAdmin.reservation.end_time, '02:00');
-  assert.equal(byAdmin.reservation.off_hours_authorized_by_name, 'Admin Test');
-  ok(await admin.put('/api/settings', { manager_can_authorize_off_hours: true }));
+  // Until the morning, past the start of the next business day: still the same session.
+  const dawn = ok(await manager.post(`/api/reservations/${id}/extend`, { minutes: 300 }));
+  assert.equal(dawn.reservation.end_time, '06:30');
+  assert.equal(dawn.reservation.biz_day, day(4));
+  const tooLong = await manager.post(`/api/reservations/${id}/extend`, { minutes: 1440 });
+  assert.equal(tooLong.status, 400);
+  assert.equal(tooLong.data.error.code, 'DUREE_MAXIMALE');
+  // A morning booking, once refused outside opening hours, is accepted.
+  const f = await newMember('Fanny');
+  const morning = ok(await book(f, day(6), '08:00', 60));
+  assert.equal(morning.reservation.start_time, '08:00');
+  assert.equal(morning.reservation.biz_day, day(6));
 });
 
 test('7. expiration d’une carte : réservation refusée, puis acceptée après renouvellement', async () => {

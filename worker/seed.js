@@ -3,7 +3,8 @@
 // Accounts with known passwords are only created when the caller passes them (local development,
 // DEMO_ACCOUNTS=1). Online, an administrator loads the demonstration under their own account.
 import { AppError, conflict } from './errors.js';
-import { addDays, fmtHHMM, localParts, localToUtcMs } from '../shared/time.js';
+import { addDays, fmtHHMM, localParts, localToUtcMs, parseHHMM } from '../shared/time.js';
+import { minDurationFor } from '../shared/rules.js';
 
 export const DEMO_ACCOUNTS = [
   { login: 'proprietaire', name: 'Propriétaire A (démo)', role: 'admin', password: 'demo-proprio-2026' },
@@ -107,13 +108,14 @@ function fill(club, { accounts = null, actor = null }) {
   // single room: every booking goes to the first open one.
   const roomId = club.rooms()[0]?.id ?? 1;
 
+  // A booking on a Friday or Saturday evening is lengthened to that minimum (2 h by default).
   const book = (memberId, day, time, minutes, extra = {}) => {
     const start = startOf(day, time);
+    const startRel = time < s.hours.open ? parseHHMM(time) + 1440 : parseHHMM(time);
     club.at = Math.min(realNow - HOUR, start - 2 * DAY);
     return club.createReservation(manager, {
-      member_id: memberId, date: day, start_time: time, duration_min: minutes,
-      room_id: roomId, party_size: extra.partySize ?? 2,
-      authorize_off_hours: extra.offHours ?? false, notes: extra.notes ?? null,
+      member_id: memberId, date: day, start_time: time, duration_min: Math.max(minutes, minDurationFor(s.booking, day, startRel)),
+      room_id: roomId, party_size: extra.partySize ?? 2, notes: extra.notes ?? null,
     }).reservation;
   };
   const live = (r, items = [], payMethod = null) => {
@@ -147,37 +149,29 @@ function fill(club, { accounts = null, actor = null }) {
   club.at = cancelled.start_ms - DAY;
   club.cancelReservation(manager, cancelled.id, { reason: 'Empêchement du membre (démo)' });
 
-  // A session already running when the demonstration is loaded, so the room timer and the
-  // per-member breakdown show at once: started about 45 minutes ago (or at opening), two members
-  // present, each with cigars and a bottle. Skipped when the club is closed at load time; created
-  // before today's other bookings, which give way to it in the single room.
+  // A session already running when the demonstration is loaded, whatever the hour (the club has
+  // no opening hours), so the room timer and the per-member breakdown show at once: started about
+  // 45 minutes ago, two members present, each with cigars and a bottle. Created before today's
+  // other bookings, which give way to it in the single room.
   const win = club.window();
   const slot = s.booking.slot_min;
   const ago = localParts(realNow - 45 * 60000, tz);
   const startMin = ago.minutes - (ago.minutes % slot);
-  const starts = [
-    { date: startMin < win.open ? addDays(ago.date, -1) : ago.date, time: fmtHHMM(startMin) },
-    { date: localParts(realNow, tz).date, time: s.hours.open },
-  ];
+  const date = startMin < win.open ? addDays(ago.date, -1) : ago.date;
+  const time = fmtHHMM(startMin);
   const pairs = [[client1, client2], [client3, client5], [client4, client2], [client1, client5]];
   const inRoom = (() => {
-    for (const { date, time } of starts) {
-      const start = startOf(date, time);
-      if (start > realNow - 5 * 60000) continue;
-      for (const minutes of [120, 60]) {
-        if (start + minutes * 60000 <= realNow + 10 * 60000) continue;
-        for (const [holder, guest] of pairs) {
-          club.at = start - 30 * 60000;
-          try {
-            const r = club.createReservation(manager, {
-              member_id: holder, attendee_ids: [guest], date, start_time: time, duration_min: minutes,
-              room_id: roomId, party_size: 2, authorize_off_hours: true,
-            }).reservation;
-            return { r, holder, guest };
-          } catch (err) {
-            if (!(err instanceof AppError)) throw err; // slot out of hours or member without credit: next one
-          }
-        }
+    const start = startOf(date, time);
+    for (const [holder, guest] of pairs) {
+      club.at = start - 30 * 60000;
+      try {
+        const r = club.createReservation(manager, {
+          member_id: holder, attendee_ids: [guest], date, start_time: time, duration_min: 120,
+          room_id: roomId, party_size: 2,
+        }).reservation;
+        return { r, holder, guest };
+      } catch (err) {
+        if (!(err instanceof AppError)) throw err; // a member without credit or busy: try the next pair
       }
     }
     return null;
@@ -205,7 +199,7 @@ function fill(club, { accounts = null, actor = null }) {
   unlessTaken(() => live(book(client2, today, '12:00', 120, { partySize: 3 }), [[robusto, 1]], 'Carte bancaire'));
   unlessTaken(() => live(book(client5, today, '16:00', 90, { partySize: 4 }), [], null));
   unlessTaken(() => live(book(client1, today, '20:00', 60, { partySize: 5 }), [[champagne, 1]], null));
-  unlessTaken(() => book(client2, addDays(today, 1), '22:00', 210, { partySize: 6, offHours: true, notes: 'Soirée privée — dépassement autorisé (démo)' }));
+  unlessTaken(() => book(client2, addDays(today, 1), '22:00', 210, { partySize: 6, notes: 'Soirée privée jusque tard dans la nuit (démo)' }));
   unlessTaken(() => book(client5, addDays(today, 2), '14:00', 60, { partySize: 2 }));
   unlessTaken(() => book(client3, addDays(today, 2), '19:30', 90, { partySize: 4 }));
 

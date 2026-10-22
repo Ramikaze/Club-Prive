@@ -33,6 +33,7 @@ export const ACTION_LABELS = {
   'reservation.demarrer': 'Arrivée : réservation démarrée',
   'reservation.terminer': 'Réservation terminée',
   'reservation.annuler': 'Réservation annulée',
+  'reservation.absence': 'Absence du membre : réservation close',
   'reservation.consommation.ajouter': 'Consommation ajoutée',
   'paiement.enregistrer': 'Encaissement',
   'ligne.annuler': 'Ligne annulée',
@@ -80,7 +81,8 @@ export function auditSummary(a) {
     case 'reservation.terminer':
       return `${fmtDuration(d.minutes_consommees ?? 0)} consommées`;
     case 'reservation.annuler':
-      return `${d.motif ?? ''} ; ${fmtDuration(d.minutes_liberees ?? 0)} libérées`;
+    case 'reservation.absence':
+      return `${d.motif ?? ''} ; ${fmtDuration(d.minutes_liberees ?? 0)} libérées${d.acompte_conserve ? ` ; acompte de ${money(d.acompte_conserve)} conservé` : ''}`;
     case 'reservation.consommation.ajouter':
       return `${d.produit} × ${d.quantite} (${money(d.montant)}, ${ACCOUNT_LABEL[d.sous_compte] ?? ''})`;
     case 'paiement.enregistrer':

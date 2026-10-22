@@ -12,6 +12,7 @@ import {
 } from '../shared/time.js';
 import {
   ACCOUNTS, ACCOUNT_LABELS, bookingWindow, validateHours, placeInWindow, supplementAmount, supplementDetail, fmtDuration,
+  isWeekend, minDurationFor, DEPOSIT_FROM, depositFor, formatMoney,
 } from '../shared/rules.js';
 
 export const RES_STATUS = { reservee: 'Réservée', en_cours: 'En cours', terminee: 'Terminée', annulee: 'Annulée' };
@@ -41,10 +42,9 @@ export function defaultSettings() {
     club_name: 'Limen',
     currency: { label: 'FCFA', decimals: 0 },
     timezone: 'Africa/Brazzaville',
-    hours: { open: '10:00', close: '24:00', max_end: '05:00' },
-    booking: { slot_min: 30, min_duration_min: 60, extension_step_min: 30 },
+    hours: { open: '06:00' }, // start of the business day; the room can be booked at any hour
+    booking: { slot_min: 30, min_duration_min: 60, weekend_min_duration_min: 120, extension_step_min: 30 },
     overtime_tariff: { hour: 2500000, half: 1500000, validated: false },
-    manager_can_authorize_off_hours: true,
     annual_allocation_mode: 'activation',
     subscription_revenue_account: 'reservations',
     refunds_admin_only: true,
@@ -209,6 +209,8 @@ export class Club {
 
   window() { return bookingWindow(this.settings().hours); }
 
+  money(minor) { return formatMoney(minor, this.settings().currency); }
+
   bizDayOf(ms) {
     const s = this.settings();
     const lp = localParts(ms, s.timezone);
@@ -260,7 +262,7 @@ export class Club {
         return tz;
       }
       case 'hours': {
-        const h = { open: String(v?.open ?? ''), close: String(v?.close ?? ''), max_end: String(v?.max_end ?? '') };
+        const h = { open: String(v?.open ?? '') };
         const err = validateHours(h);
         if (err) throw invalid(err);
         return h;
@@ -269,9 +271,11 @@ export class Club {
         const slot = int(v?.slot_min, 'Pas des créneaux', { min: 15, max: 60 });
         if (![15, 30, 60].includes(slot)) throw invalid('Pas des créneaux : 15, 30 ou 60 minutes.');
         const min = int(v?.min_duration_min, 'Durée minimale', { min: slot, max: 720 });
+        const weekend = int(v?.weekend_min_duration_min ?? current.weekend_min_duration_min ?? min, 'Durée minimale le week-end', { min: slot, max: 720 });
         const step = int(v?.extension_step_min, 'Pas de prolongation', { min: slot, max: 240 });
-        if (min % slot || step % slot) throw invalid('La durée minimale et le pas de prolongation doivent être des multiples du pas des créneaux.');
-        return { slot_min: slot, min_duration_min: min, extension_step_min: step };
+        if (min % slot || weekend % slot || step % slot) throw invalid('Les durées minimales et le pas de prolongation doivent être des multiples du pas des créneaux.');
+        if (weekend < min) throw invalid('La durée minimale du week-end ne peut pas être plus courte que celle de la semaine.');
+        return { slot_min: slot, min_duration_min: min, weekend_min_duration_min: weekend, extension_step_min: step };
       }
       case 'overtime_tariff': {
         const hour = int(v?.hour, "Prix de l'heure supplémentaire", { min: 0 });
@@ -286,7 +290,6 @@ export class Club {
         }
         return out;
       }
-      case 'manager_can_authorize_off_hours':
       case 'refunds_admin_only':
       case 'demo_mode':
         return flag(v);
@@ -1165,6 +1168,10 @@ export class Club {
       included_minutes: r.included_minutes, paid_minutes: r.paid_minutes, supplement_amount: r.supplement_amount,
       tariff: { hour: r.tariff_hour, half: r.tariff_half, validated: !!r.tariff_validated },
       off_hours: !!r.off_hours, off_hours_authorized_by_name: r.off_hours_authorized_by_name ?? null,
+      // Bookings of 3 hours or more: deposit taken, and cancellable only until midnight before the day.
+      deposit_amount: r.deposit_amount ?? 0,
+      cancellable_until: r.duration_min >= DEPOSIT_FROM ? new Date(localToUtcMs(r.biz_day, '00:00', tz)).toISOString() : null,
+      late_cancellation: this.isLateForCancellation(r),
       notes: r.notes, created_at: r.created_at, created_by_name: r.created_by_name ?? null,
       started_at: r.started_at, finished_at: r.finished_at, cancelled_at: r.cancelled_at, cancel_reason: r.cancel_reason,
       due_amount: r.due_amount ?? 0, billed_amount: r.billed_amount ?? 0,
@@ -1218,7 +1225,8 @@ export class Club {
   }
 
   // Validates a request and computes credit use and supplement, without writing anything.
-  // `date` is the business day; a start time before opening means the following night.
+  // `date` is the business day; a start time before the day starts means the following night.
+  // The room can be booked at any hour: there are no opening hours.
   planReservation(input) {
     const s = this.settings();
     const win = this.window();
@@ -1228,20 +1236,21 @@ export class Club {
     const startMin = parseHHMM(input.start_time);
     if (startMin == null || startMin >= 1440) throw invalid('Heure de début invalide.');
     const duration = int(input.duration_min, 'Durée', { min: 1, max: 1440 });
-    const { slot_min: slot, min_duration_min: minDuration } = s.booking;
-    if (duration < minDuration) throw invalid(`Durée minimale d'une réservation : ${fmtDuration(minDuration)}.`, 'DUREE_MINIMALE');
+    const slot = s.booking.slot_min;
+    const calendarDate = startMin < win.open ? addDays(input.date, 1) : input.date;
+    // Friday and Saturday from 18:00 (the night included), a booking has the weekend minimum.
+    const startRel = startMin < win.open ? startMin + 1440 : startMin;
+    const minDuration = minDurationFor(s.booking, input.date, startRel);
+    if (duration < minDuration) {
+      throw invalid(isWeekend(input.date, startRel)
+        ? `Le vendredi et le samedi à partir de 18 h, une réservation dure au moins ${fmtDuration(minDuration)}.`
+        : `Durée minimale d'une réservation : ${fmtDuration(minDuration)}.`, 'DUREE_MINIMALE');
+    }
     if (duration % slot) throw invalid(`La durée doit être un multiple de ${slot} minutes.`, 'CRENEAU');
     if (startMin % slot) throw invalid(`Le début doit tomber sur un créneau de ${slot} minutes.`, 'CRENEAU');
-    const calendarDate = startMin < win.open ? addDays(input.date, 1) : input.date;
     const startMs = localToUtcMs(calendarDate, input.start_time, s.timezone);
     const endMs = startMs + duration * 60000;
     const place = placeInWindow(startMs, endMs, s.timezone, win);
-    if (!place.inWindow) {
-      throw invalid(
-        `Créneau impossible : la salle est ouverte à partir de ${s.hours.open} et toute occupation doit finir au plus tard à ${s.hours.max_end} (lendemain).`,
-        'HORS_PLAGE',
-      );
-    }
     const { sub, credit } = this.verifyMemberRoomAccess(member.id, place.bizDay, {
       requireRemainingCredit: flag(input.require_credit),
     });
@@ -1317,34 +1326,29 @@ export class Club {
       supplement_amount: p.supplement, supplement_detail: supplementDetail(p.paid),
       tariff: { hour: p.tariff.hour, half: p.tariff.half, validated: !!p.tariff.validated },
       tariff_blocked: p.paid > 0 && !p.tariff.validated && !s.demo_mode,
-      off_hours: p.place.offHours,
-      can_authorize_off_hours: actor.role === 'admin' || s.manager_can_authorize_off_hours,
+      deposit_amount: depositFor(p.duration, p.supplement),
+      balance_amount: p.supplement - depositFor(p.duration, p.supplement),
       conflicts: p.conflicts,
     };
-  }
-
-  authorizeOffHours(actor, requested) {
-    const s = this.settings();
-    if (!flag(requested)) {
-      throw conflict(
-        'AUTORISATION_REQUISE',
-        `Ce créneau dépasse les horaires habituels (${s.hours.open} – ${s.hours.close}). Cochez l'autorisation explicite de dépassement pour confirmer.`,
-      );
-    }
-    if (actor.role !== 'admin' && !s.manager_can_authorize_off_hours) {
-      throw forbidden('Seul un administrateur peut autoriser un dépassement des horaires habituels.');
-    }
-    return actor.id;
   }
 
   createReservation(actor, input) {
     const p = this.planReservation(input);
     const s = this.settings();
     if (p.conflicts.length) throw this.overlapError(p.conflicts, p.room.name);
-    const offBy = p.place.offHours ? this.authorizeOffHours(actor, input.authorize_off_hours) : null;
     if (p.paid > 0 && !p.tariff.validated && !s.demo_mode) {
       throw conflict('TARIF_NON_VALIDE', "Le tarif des heures supplémentaires n'a pas été validé par un administrateur.");
     }
+    // 3 hours or more with paid time: half of it is taken now, or the booking is not recorded.
+    const deposit = depositFor(p.duration, p.supplement);
+    const depositMethod = deposit ? text(input.deposit_method, "Moyen de paiement de l'acompte", { max: 40 }) : null;
+    if (deposit && !depositMethod) {
+      throw invalid(
+        `Une réservation de 3 h ou plus se confirme par un acompte de ${this.money(deposit)} (50 % du temps payant), à encaisser maintenant.`,
+        'ACOMPTE_REQUIS',
+      );
+    }
+    if (depositMethod && !s.payment_methods.includes(depositMethod)) throw invalid('Moyen de paiement non configuré.');
     const notes = text(input.notes, 'Remarque', { max: 300 });
     const startNow = flag(input.start_now);
     const initialStatus = startNow ? 'en_cours' : 'reservee';
@@ -1354,12 +1358,12 @@ export class Club {
     try {
       id = this.insert(
         `INSERT INTO reservations (member_id, subscription_id, room_id, party_size, biz_day, start_ms, end_ms, duration_min, status,
-           included_minutes, paid_minutes, supplement_amount, tariff_hour, tariff_half, tariff_validated,
-           off_hours, off_hours_authorized_by, notes, created_at, created_by, started_at, started_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           included_minutes, paid_minutes, supplement_amount, tariff_hour, tariff_half, tariff_validated, deposit_amount,
+           notes, created_at, created_by, started_at, started_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         p.member.id, p.sub.id, p.room.id, p.partySize, p.place.bizDay, p.startMs, p.endMs, p.duration, initialStatus,
-        p.included, p.paid, p.supplement, p.tariff.hour, p.tariff.half, p.tariff.validated ? 1 : 0,
-        p.place.offHours ? 1 : 0, offBy, notes, this.nowIso(), actor.id, startedAt, startedBy,
+        p.included, p.paid, p.supplement, p.tariff.hour, p.tariff.half, p.tariff.validated ? 1 : 0, deposit,
+        notes, this.nowIso(), actor.id, startedAt, startedBy,
       );
     } catch (err) {
       if (String(err.message).includes('CHEVAUCHEMENT')) throw this.overlapError(this.overlapping(p.startMs, p.endMs, null, p.room.id), p.room.name);
@@ -1373,20 +1377,29 @@ export class Club {
       );
       this.creditMove(actor, att.sub.id, id, 'engagement', att.included, `Présence en salle (${p.room.name})`);
     }
+    // Paid time is one line, or two when a deposit is due: the deposit (paid now) and the balance
+    // (paid before entering the room, or now as well when the member goes straight in).
+    const paidNow = [];
     if (p.supplement > 0) {
-      this.insertCharge(actor, {
+      const line = {
         account: 'reservations', kind: 'temps_supplementaire', member_id: p.member.id, reservation_id: id,
-        label: `Temps supplémentaire (${fmtDuration(p.paid)})`, quantity: 1, unit_price: p.supplement,
-        tariff_validated: p.tariff.validated ? 1 : 0,
-      });
+        quantity: 1, tariff_validated: p.tariff.validated ? 1 : 0,
+      };
+      if (deposit) {
+        paidNow.push(this.insertCharge(actor, { ...line, label: `Acompte 50 % — temps supplémentaire (${fmtDuration(p.paid)})`, unit_price: deposit, deposit: 1 }));
+        const balanceId = this.insertCharge(actor, { ...line, label: `Solde 50 % — temps supplémentaire (${fmtDuration(p.paid)})`, unit_price: p.supplement - deposit });
+        if (startNow) paidNow.push(balanceId);
+      } else {
+        this.insertCharge(actor, { ...line, label: `Temps supplémentaire (${fmtDuration(p.paid)})`, unit_price: p.supplement });
+      }
     }
     this.audit(actor, 'reservation.creer', 'reservation', id, {
       membre: `${p.member.first_name} ${p.member.last_name}`, salle: p.room.name, personnes: p.partySize,
       accompagnants: p.extraAttendees.map((a) => `${a.member.first_name} ${a.member.last_name}`),
       debut: new Date(p.startMs).toISOString(), duree: p.duration,
-      minutes_incluses: p.included, minutes_payantes: p.paid, supplement: p.supplement,
-      hors_horaires: p.place.offHours, autorise_par: offBy,
+      minutes_incluses: p.included, minutes_payantes: p.paid, supplement: p.supplement, acompte: deposit,
     });
+    if (paidNow.length) this.recordPayment(actor, { charge_ids: paidNow, method: depositMethod, reference: input.deposit_reference });
     return this.reservationDetail(id);
   }
 
@@ -1472,11 +1485,9 @@ export class Club {
     const step = s.booking.extension_step_min;
     const add = int(minutes, 'Prolongation', { min: 1, max: 1440 });
     if (add % step) throw invalid(`Prolongation par tranches de ${step} minutes.`, 'CRENEAU');
+    if (r.duration_min + add > 1440) throw invalid('Une séance ne peut pas dépasser 24 heures.', 'DUREE_MAXIMALE');
     const newEnd = r.end_ms + add * 60000;
     const place = placeInWindow(r.start_ms, newEnd, s.timezone, win);
-    if (!place.inWindow) {
-      throw invalid(`La prolongation dépasse l'heure maximale de fin (${s.hours.max_end}).`, 'HORS_PLAGE');
-    }
     const sub = this.get('SELECT * FROM subscriptions WHERE id = ?', r.subscription_id);
     const credit = this.credit(sub, r.biz_day);
     const addIncluded = sub.status === 'active' ? Math.min(credit.available, add) : 0;
@@ -1490,7 +1501,6 @@ export class Club {
     return {
       r, add, newEnd, place, credit, addIncluded, addPaid, newPaid, newSupplement,
       delta: newSupplement - r.supplement_amount, tariff,
-      offHours: place.endRel > win.close,
       conflicts,
     };
   }
@@ -1506,7 +1516,6 @@ export class Club {
       total_paid_minutes: p.newPaid, supplement_before: p.r.supplement_amount, supplement_after: p.newSupplement,
       supplement_delta: p.delta, tariff: p.tariff,
       tariff_blocked: p.addPaid > 0 && !p.tariff.validated && !s.demo_mode,
-      off_hours: p.offHours, can_authorize_off_hours: actor.role === 'admin' || s.manager_can_authorize_off_hours,
       conflicts: p.conflicts,
     };
   }
@@ -1515,16 +1524,15 @@ export class Club {
     const p = this.planExtension(id, input.minutes);
     const s = this.settings();
     if (p.conflicts.length) throw this.overlapError(p.conflicts, p.r.room_name);
-    const offBy = p.offHours ? this.authorizeOffHours(actor, input.authorize_off_hours) : p.r.off_hours_authorized_by;
     if (p.addPaid > 0 && !p.tariff.validated && !s.demo_mode) {
       throw conflict('TARIF_NON_VALIDE', "Le tarif des heures supplémentaires de cette réservation n'a pas été validé.");
     }
     try {
       this.run(
         `UPDATE reservations SET end_ms = ?, duration_min = duration_min + ?, included_minutes = included_minutes + ?,
-           paid_minutes = ?, supplement_amount = ?, off_hours = ?, off_hours_authorized_by = ?, updated_at = ?, updated_by = ?
+           paid_minutes = ?, supplement_amount = ?, updated_at = ?, updated_by = ?
          WHERE id = ?`,
-        p.newEnd, p.add, p.addIncluded, p.newPaid, p.newSupplement, p.offHours || p.r.off_hours ? 1 : 0, offBy,
+        p.newEnd, p.add, p.addIncluded, p.newPaid, p.newSupplement,
         this.nowIso(), actor.id, p.r.id,
       );
     } catch (err) {
@@ -1553,7 +1561,6 @@ export class Club {
     this.audit(actor, 'reservation.prolonger', 'reservation', p.r.id, {
       minutes: p.add, ancienne_fin: new Date(p.r.end_ms).toISOString(), nouvelle_fin: new Date(p.newEnd).toISOString(),
       minutes_incluses: p.addIncluded, minutes_payantes: p.addPaid, supplement_ajoute: p.delta,
-      hors_horaires: p.offHours, autorise_par: p.offHours ? offBy : null,
     });
     return this.reservationDetail(p.r.id);
   }
@@ -1561,6 +1568,13 @@ export class Club {
   startReservation(actor, id) {
     const r = this.reservationRow(id);
     if (r.status !== 'reservee') throw conflict('STATUT', `Seule une réservation « Réservée » peut démarrer (statut actuel : ${RES_STATUS[r.status]}).`);
+    if (r.deposit_amount > 0) {
+      // A booking secured by a deposit: its time is paid in full before entering the room.
+      const { due } = this.get(
+        "SELECT COALESCE(SUM(amount), 0) AS due FROM charges WHERE reservation_id = ? AND kind = 'temps_supplementaire' AND status = 'due'", r.id,
+      );
+      if (due > 0) throw conflict('SOLDE_REQUIS', `Le solde de ${this.money(due)} est à régler avant l'entrée en salle.`);
+    }
     this.run(
       "UPDATE reservations SET status = 'en_cours', started_at = ?, started_by = ?, updated_at = ?, updated_by = ? WHERE id = ?",
       this.nowIso(), actor.id, this.nowIso(), actor.id, r.id,
@@ -1595,24 +1609,48 @@ export class Club {
         ? 'Une réservation en cours ne peut pas être annulée : terminez-la.'
         : `Impossible d'annuler une réservation au statut « ${RES_STATUS[r.status]} ».`);
     }
-    const reason = text(input.reason, "Motif d'annulation", { required: true, min: 3, max: 300 });
+    // A booking of 3 hours or more can be cancelled until midnight before its business day. On the
+    // day, only the member's absence can be recorded; either way the deposit stays with the club,
+    // the balance is cancelled and the credit hours are released.
+    const late = this.isLateForCancellation(r);
+    const absence = flag(input.no_show);
+    if (late && !absence) {
+      throw conflict(
+        'ANNULATION_TARDIVE',
+        "Une réservation de 3 h ou plus ne peut être annulée que jusqu'à la veille à minuit. Si le membre ne vient pas, enregistrez son absence : seul l'acompte est perdu.",
+      );
+    }
+    if (absence && !late) throw invalid("L'absence s'enregistre le jour de la séance ; avant, annulez la réservation.");
+    const reason = text(input.reason, absence ? "Motif de l'absence" : "Motif d'annulation", { required: true, min: 3, max: 300 });
+    const what = absence ? 'Absence' : 'Annulation';
     const released = this.committedFor(r.id, r.subscription_id);
-    this.creditMove(actor, r.subscription_id, r.id, 'liberation', released, `Annulation : ${reason}`);
+    this.creditMove(actor, r.subscription_id, r.id, 'liberation', released, `${what} : ${reason}`);
     for (const att of this.all('SELECT * FROM reservation_attendees WHERE reservation_id = ?', r.id)) {
       const attReleased = this.committedFor(r.id, att.subscription_id);
-      this.creditMove(actor, att.subscription_id, r.id, 'liberation', attReleased, `Annulation : ${reason}`);
+      this.creditMove(actor, att.subscription_id, r.id, 'liberation', attReleased, `${what} : ${reason}`);
     }
     const due = this.all("SELECT * FROM charges WHERE reservation_id = ? AND status = 'due'", r.id);
-    for (const c of due) this.voidCharge(actor, c, `Annulation de la réservation : ${reason}`);
+    for (const c of due) this.voidCharge(actor, c, `${what} de la réservation : ${reason}`);
     const paid = this.all("SELECT * FROM charges WHERE reservation_id = ? AND status = 'payee'", r.id);
+    const depositKept = paid.filter((c) => c.deposit).reduce((sum, c) => sum + c.amount, 0);
     this.run(
       "UPDATE reservations SET status = 'annulee', cancelled_at = ?, cancelled_by = ?, cancel_reason = ?, updated_at = ?, updated_by = ? WHERE id = ?",
-      this.nowIso(), actor.id, reason, this.nowIso(), actor.id, r.id,
+      this.nowIso(), actor.id, absence ? `Absence : ${reason}` : reason, this.nowIso(), actor.id, r.id,
     );
-    this.audit(actor, 'reservation.annuler', 'reservation', r.id, {
+    this.audit(actor, absence ? 'reservation.absence' : 'reservation.annuler', 'reservation', r.id, {
       motif: reason, minutes_liberees: released, lignes_annulees: due.length, lignes_deja_encaissees: paid.length,
+      acompte_conserve: depositKept,
     });
-    return { ...this.reservationDetail(r.id), released_minutes: released, paid_lines_to_review: paid.length };
+    return {
+      ...this.reservationDetail(r.id), released_minutes: released, deposit_kept: depositKept,
+      paid_lines_to_review: paid.filter((c) => !c.deposit).length,
+    };
+  }
+
+  // A booking of 3 hours or more can be cancelled until midnight before its business day.
+  isLateForCancellation(r) {
+    if (r.duration_min < DEPOSIT_FROM) return false;
+    return this.nowMs() >= localToUtcMs(r.biz_day, '00:00', this.settings().timezone);
   }
 
   reservationDetail(id) {
@@ -1674,11 +1712,11 @@ export class Club {
   insertCharge(actor, c) {
     return this.insert(
       `INSERT INTO charges (account, kind, member_id, reservation_id, subscription_id, product_id, label, quantity,
-         unit_price, amount, status, tariff_validated, created_at, created_by, consumer_member_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'due', ?, ?, ?, ?)`,
+         unit_price, amount, status, tariff_validated, created_at, created_by, consumer_member_id, deposit)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'due', ?, ?, ?, ?, ?)`,
       c.account, c.kind, c.member_id, c.reservation_id ?? null, c.subscription_id ?? null, c.product_id ?? null,
       c.label, c.quantity, c.unit_price, c.quantity * c.unit_price, c.tariff_validated ?? 1, this.nowIso(), actor.id,
-      c.consumer_member_id ?? null,
+      c.consumer_member_id ?? null, c.deposit ? 1 : 0,
     );
   }
 
@@ -1704,6 +1742,7 @@ export class Club {
       reservation_id: c.reservation_id, subscription_id: c.subscription_id, product_id: c.product_id,
       label: c.label, quantity: c.quantity, unit_price: c.unit_price, amount: c.amount,
       status: c.status, status_label: CHARGE_STATUS[c.status], tariff_validated: !!c.tariff_validated,
+      deposit: !!c.deposit,
       created_at: c.created_at, created_by_name: c.created_by_name ?? null,
       cancelled_at: c.cancelled_at, cancel_reason: c.cancel_reason, cancelled_by_name: c.cancelled_by_name ?? null,
       payment_id: c.payment_id ?? null, paid_at: c.paid_at ?? null, payment_method: c.payment_method ?? null,
