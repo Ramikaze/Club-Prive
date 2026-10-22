@@ -1,29 +1,64 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
-import { Chip, DemoChip, Empty, Loaded, PageHead } from '../components/ui/ui.jsx';
+import { Chip, DemoChip, Empty, Loaded, PageHead, Segmented } from '../components/ui/ui.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import { api, qs } from '../lib/api.js';
 import { fmtDuration, subStateLabel } from '../lib/format.js';
 import { useLoad } from '../lib/hooks.js';
-import { openMemberDialog } from '../dialogs/index.js';
+import {
+  openBookingDialog, openMemberDialog, openDeactivateMemberDialog, openReactivateMemberDialog, memberRoomEligibility,
+} from '../dialogs/index.js';
 
 const creditCell = (sub) => (sub?.credit ? fmtDuration(sub.credit.available) : '—');
+const STATUTS = [['actifs', 'Actifs'], ['desactives', 'Désactivés']];
 
-function MembersTable({ items }) {
-  if (!items.length) return <section className="card"><Empty icon="users">Aucun membre ne correspond à la recherche.</Empty></section>;
+function MembersTable({ items, onBook, onDeactivate, onReactivate, statut }) {
+  if (!items.length) {
+    return (
+      <section className="card">
+        <Empty icon="users">{statut === 'desactives' ? 'Aucun membre désactivé.' : 'Aucun membre ne correspond à la recherche.'}</Empty>
+      </section>
+    );
+  }
   return (
     <section className="card"><div className="table-wrap"><table className="table stack-sm">
-      <thead><tr><th>Membre</th><th>Téléphone</th><th>Formule</th><th>État</th><th className="num">Crédit disponible</th></tr></thead>
-      <tbody>{items.map((m) => (
-        <tr key={m.id}>
-          <td data-label="Membre"><Link to={`/membres/${m.id}`}><strong>{m.name}</strong></Link> <span className="subtle">{m.member_no}</span> <DemoChip on={m.is_demo} /></td>
-          <td data-label="Téléphone" className="nowrap">{m.phone}</td>
-          <td data-label="Formule">{subStateLabel(m.subscription)}</td>
-          <td data-label="État"><Chip group="sub" value={m.subscription.state} /></td>
-          <td data-label="Crédit disponible" className="num">{creditCell(m.subscription)}</td>
-        </tr>
-      ))}</tbody>
+      <thead><tr><th>Membre</th><th>Téléphone</th><th>Formule</th><th>État</th><th className="num">Crédit disponible</th><th><span className="sr-only">Actions</span></th></tr></thead>
+      <tbody>{items.map((m) => {
+        const elig = memberRoomEligibility(m);
+        return (
+          <tr key={m.id}>
+            <td data-label="Membre"><Link to={`/membres/${m.id}`}><strong>{m.name}</strong></Link> <span className="subtle">{m.member_no}</span> <DemoChip on={m.is_demo} />
+              {m.active === false && <> <span className="chip chip-danger">désactivé</span></>}</td>
+            <td data-label="Téléphone" className="nowrap">{m.phone}</td>
+            <td data-label="Formule">{subStateLabel(m.subscription)}</td>
+            <td data-label="État"><Chip group="sub" value={m.subscription.state} /></td>
+            <td data-label="Crédit disponible" className="num">{creditCell(m.subscription)}</td>
+            <td className="actions">
+              <button
+                type="button"
+                className="btn btn-sm"
+                aria-disabled={!elig.ok}
+                title={elig.ok ? `Réserver une salle pour ${m.name}` : `Accès salle impossible : ${elig.reason}`}
+                onClick={() => (elig.ok ? onBook(m) : toast(`Accès salle refusé pour ${m.name} : ${elig.reason}.`, 'error'))}
+              >
+                <Icon name="calendar" /> Réserver
+                {elig.ok ? null : <span className="sr-only"> — indisponible : {elig.reason}</span>}
+              </button>
+              <Link className="btn btn-sm btn-ghost" to={`/membres/${m.id}`}>Fiche</Link>
+              {m.active === false ? (
+                <button type="button" className="btn btn-sm" onClick={() => onReactivate(m)} title={`Réactiver ${m.name}`}>
+                  <Icon name="undo" /> Réactiver
+                </button>
+              ) : (
+                <button type="button" className="btn btn-sm btn-danger" onClick={() => onDeactivate(m)} title={`Désactiver ${m.name} (historique conservé)`}>
+                  <Icon name="ban" /> Désactiver
+                </button>
+              )}
+            </td>
+          </tr>
+        );
+      })}</tbody>
     </table></div></section>
   );
 }
@@ -33,6 +68,7 @@ function MemberSearch({ initialQ, setQuery }) {
   const state = useLoad(() => api.get(`/api/members${qs({ q: initialQ })}`), []);
   const [text, setText] = useState(initialQ);
   const [found, setFound] = useState(null); // { q, items } once the search box has been used
+  const [statut, setStatut] = useState('actifs');
   const seq = useRef(0);
   const timer = useRef(null);
 
@@ -40,6 +76,17 @@ function MemberSearch({ initialQ, setQuery }) {
     clearTimeout(timer.current);
     seq.current += 1;
   }, []);
+
+  const refreshList = async (s = statut) => {
+    const v = text.trim();
+    const n = (seq.current += 1);
+    try {
+      const items = await api.get(`/api/members${qs({ q: v, statut: s })}`);
+      if (n === seq.current) setFound({ q: v, items });
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  };
 
   const onInput = (e) => {
     const value = e.target.value;
@@ -50,13 +97,26 @@ function MemberSearch({ initialQ, setQuery }) {
       setQuery(v);
       const n = (seq.current += 1);
       try {
-        const items = await api.get(`/api/members${qs({ q: v })}`);
+        const items = await api.get(`/api/members${qs({ q: v, statut })}`);
         if (n === seq.current) setFound({ q: v, items });
       } catch (err) {
         toast(err.message, 'error');
       }
     }, 220);
   };
+
+  const onStatut = (s) => {
+    setStatut(s);
+    refreshList(s);
+  };
+
+  const onBook = (m) => openBookingDialog(
+    { member: { id: m.id, name: m.name, member_no: m.member_no, subscription: m.subscription }, lockMember: true },
+    (det) => navigate(`/reservations/${det.reservation.id}`),
+  );
+
+  const onDeactivate = (m) => openDeactivateMemberDialog(m, () => refreshList());
+  const onReactivate = (m) => openReactivateMemberDialog(m, () => refreshList());
 
   return (
     <Loaded state={state}>{(list) => {
@@ -65,16 +125,19 @@ function MemberSearch({ initialQ, setQuery }) {
       return (
         <>
           <PageHead
-            title="Membres et cartes"
-            lead={`${items.length} membre(s)${q ? ' trouvé(s)' : ''}. La carte de membre est nécessaire pour accéder au club.`}
+            title="Membres"
+            lead={`${items.length} membre(s)${statut === 'desactives' ? ' désactivé(s)' : ''}${q ? ' trouvé(s)' : ''}`}
             actions={<button type="button" className="btn btn-primary" onClick={() => openMemberDialog(null, (m) => navigate(`/membres/${m.id}`))}><Icon name="plus" /> Nouveau membre</button>}
             tour="members"
           />
           <form className="toolbar" role="search" onSubmit={(e) => e.preventDefault()}>
             <div className="search" style={{ flex: 1, minWidth: 220 }}><Icon name="search" />
               <input type="search" name="q" value={text} onChange={onInput} placeholder="Nom, téléphone, n° de membre ou de carte" aria-label="Rechercher un membre" autoComplete="off" /></div>
+            <Segmented label="Statut des membres" value={statut} options={STATUTS} onChange={onStatut} />
           </form>
-          <div id="member-results"><MembersTable items={items} /></div>
+          <div id="member-results">
+            <MembersTable items={items} onBook={onBook} onDeactivate={onDeactivate} onReactivate={onReactivate} statut={statut} />
+          </div>
         </>
       );
     }}</Loaded>

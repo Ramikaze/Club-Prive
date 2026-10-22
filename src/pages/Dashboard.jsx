@@ -4,22 +4,56 @@ import { useLoad } from '../lib/hooks.js';
 import { money, fmtDuration, dayLabel } from '../lib/format.js';
 import { useIsAdmin } from '../store/useStore.js';
 import Icon from '../components/ui/Icon.jsx';
+import { TimeInRoom, isRunning } from '../components/ui/SessionTimer.jsx';
 import { Chip, AccountTag, Empty, Loaded, PageHead, Segmented } from '../components/ui/ui.jsx';
-import { openBookingDialog } from '../dialogs/index.js';
+import {
+  openBookingDialog,
+  openMemberDialog,
+  openConsumptionDialog,
+  openQuickPayReservation,
+  quickStartReservation,
+  quickFinishReservation,
+} from '../dialogs/index.js';
 
 const PERIODS = [['jour', 'Jour'], ['semaine', '7 jours'], ['mois', 'Mois']];
 
-function ResItem({ r, withDay = false }) {
-  const meta = `${fmtDuration(r.duration_min)}${r.off_hours ? ' · hors horaires' : ''}${r.due_amount ? ` · reste ${money(r.due_amount)}` : ''}`;
+function TodaySessionRow({ r, onReload }) {
   return (
-    <Link className="list-item" to={`/reservations/${r.id}`}>
-      <span className="time">{withDay && <>{dayLabel(r.biz_day, 'medium')}<br /></>}{r.start_time} – {r.end_time}</span>
-      <div className="grow">
-        <div className="title">{r.member_name}</div>
-        <div className="meta">{meta}</div>
+    <div className="list-item list-item-interactive">
+      <Link className="list-item-main" to={`/reservations/${r.id}`}>
+        <span className="time">{r.start_time} – {r.end_time}</span>
+        <div className="grow">
+          <div className="title">{r.member_name}</div>
+          <div className="meta">
+            {r.room_name || 'Salon Principal'} · {r.party_size || 1} pers.
+            {r.due_amount ? ` · à régler ${money(r.due_amount)}` : ''}
+          </div>
+        </div>
+      </Link>
+      <div className="res-row-actions">
+        {r.status === 'reservee' && (
+          <button type="button" className="btn btn-sm btn-primary" onClick={() => quickStartReservation(r, onReload)}>
+            Arrivée
+          </button>
+        )}
+        {(r.status === 'reservee' || r.status === 'en_cours') && (
+          <button type="button" className="btn btn-sm" onClick={() => openConsumptionDialog(r, onReload)}>
+            + Conso
+          </button>
+        )}
+        {r.due_amount > 0 && (
+          <button type="button" className="btn btn-sm" onClick={() => openQuickPayReservation(r, onReload)}>
+            {money(r.due_amount)}
+          </button>
+        )}
+        {r.status === 'en_cours' && (
+          <button type="button" className="btn btn-sm btn-ghost" onClick={() => quickFinishReservation(r, onReload)}>
+            Libérer
+          </button>
+        )}
+        <Chip group="res" value={r.status} />
       </div>
-      <Chip group="res" value={r.status} />
-    </Link>
+    </div>
   );
 }
 
@@ -33,12 +67,10 @@ function RevenueBlock({ sum }) {
           <div className="bar-track" aria-hidden="true">
             <div className={`bar-fill ${a.account}`} style={{ width: `${Math.max(0, Math.round((a.net / max) * 100))}%` }} />
           </div>
-          <div className="subtle">Facturé {money(a.billed)} · reste à payer {money(a.outstanding)}{a.refunded ? ` · remboursé ${money(a.refunded)}` : ''}</div>
         </div>
       ))}
-      <div className="bar-row">
+      <div className="bar-row" style={{ paddingTop: 8, borderTop: '1px solid var(--border)' }}>
         <div className="top"><strong>Total encaissé net</strong><span className="amount">{money(sum.total.net)}</span></div>
-        <div className="subtle">Encaissé {money(sum.total.collected)} − remboursé {money(sum.total.refunded)}</div>
       </div>
     </div>
   );
@@ -55,146 +87,190 @@ export default function Dashboard() {
   return (
     <Loaded state={state}>
       {(d) => {
+        const reload = state.reload;
         const revenue = period === 'semaine' ? d.revenue.week : period === 'mois' ? d.revenue.month : d.cash_today;
         const active = d.today.filter((r) => r.status !== 'annulee');
         const totalMin = active.reduce((sum, r) => sum + r.duration_min, 0);
-        const current = d.current[0];
-        const next = d.upcoming[0];
-        const nextText = next
-          ? `Prochaine arrivée : ${next.member_name}, ${next.biz_day === d.biz_day ? '' : `${dayLabel(next.biz_day, 'medium')} `}${next.start_time}`
-          : 'Aucune réservation à venir';
-        const book = () => openBookingDialog({ date: d.biz_day }, (det) => navigate(`/reservations/${det.reservation.id}`));
+        const roomsStatus = d.rooms_status ?? [];
+        const occupiedCount = roomsStatus.filter((rm) => rm.occupied).length;
+        const freeCount = roomsStatus.length - occupiedCount;
+        const totalGuestsNow = roomsStatus.reduce((sum, rm) => sum + (rm.current?.party_size || 0), 0);
+        const book = () => openBookingDialog({ date: d.biz_day }, () => reload());
+        const newMember = () => openMemberDialog(null, (m) => navigate(`/membres/${m.id}`));
+
+        const humidorAlerts = (d.lounge?.summary?.alerts ?? 0) + (d.lounge?.summary?.checks_due ?? 0);
+        const memberAlerts = d.expiring.length + d.expired.length;
+        const totalAlerts = d.to_close.length + humidorAlerts + d.stock_alerts.length + memberAlerts;
 
         return (
           <>
             <PageHead
-              title="Tableau de bord"
+              title="Accueil"
               lead={dayLabel(d.biz_day, 'title')}
               tour="dashboard"
               actions={(
                 <>
-                  <Link className="btn" to="/agenda"><Icon name="calendar" /> Agenda</Link>
+                  <button type="button" className="btn" onClick={newMember}><Icon name="plus" /> Nouveau membre</button>
                   <button type="button" className="btn btn-primary" onClick={book}><Icon name="plus" /> Réservation</button>
                 </>
               )}
             />
 
-            <section className="kpis" aria-label="Situation du club">
-              <div className={`kpi ${current ? 'accent status-busy' : ''}`}>
-                <div className="label">Salle en ce moment</div>
-                <div className="value">{current ? 'Occupée' : 'Libre'}</div>
+            <section className="kpis" aria-label="Synthèse du club">
+              <Link className={`kpi kpi-link ${occupiedCount > 0 ? 'accent' : ''}`} to="/salles">
+                <div className="label">Salles disponibles</div>
+                <div className="value">{freeCount} / {roomsStatus.length}</div>
                 <div className="hint">
-                  {current
-                    ? <><Link to={`/reservations/${current.id}`}>{current.member_name}</Link> jusqu’à {current.end_time}</>
-                    : nextText}
+                  {occupiedCount > 0 ? `${occupiedCount} occupée(s) · ${totalGuestsNow} pers. présentes` : 'Toutes les salles sont libres'}
                 </div>
-              </div>
-              <div className="kpi">
-                <div className="label">Réservations du jour</div>
+              </Link>
+              <Link className="kpi kpi-link" to="/agenda">
+                <div className="label">Séances du jour</div>
                 <div className="value">{active.length}</div>
-                <div className="hint">{fmtDuration(totalMin)} de privatisation</div>
-              </div>
-              <div className="kpi">
+                <div className="hint">{active.length ? `${fmtDuration(totalMin)} réservées` : 'Aucune séance aujourd’hui'}</div>
+              </Link>
+              <Link className="kpi kpi-link" to="/caisse">
                 <div className="label">Encaissé aujourd’hui</div>
                 <div className="value">{money(d.cash_today.total.net)}</div>
-                <div className="hint">{d.cash_today.methods.map((x) => `${x.method} ${money(x.total)}`).join(' · ') || 'Aucun encaissement'}</div>
-              </div>
-              <div className="kpi">
+                <div className="hint">{d.cash_today.methods.length ? `${d.cash_today.methods.length} mode(s) de règlement` : 'Aucun règlement ce jour'}</div>
+              </Link>
+              <Link className="kpi kpi-link" to="/caisse">
                 <div className="label">Reste à encaisser</div>
                 <div className="value">{money(d.outstanding_total)}</div>
-                <div className="hint"><Link to="/caisse">Voir les lignes ouvertes</Link></div>
-              </div>
-            </section>
-
-            <section className="service-priorities" aria-label="Priorités de service">
-              <div className="service-priority-title"><Icon name="humidor" /><div><h2>Cave & casiers</h2><p className="subtle">À vérifier pendant le service</p></div></div>
-              <div className="service-priority-links">
-                {d.lounge.summary.alerts > 0 && <Link className="priority-link danger" to="/lounge"><strong>{d.lounge.summary.alerts}</strong> cave(s) hors seuils <Icon name="right" /></Link>}
-                {d.lounge.summary.checks_due > 0 && <Link className="priority-link" to="/lounge"><strong>{d.lounge.summary.checks_due}</strong> contrôle(s) à faire <Icon name="right" /></Link>}
-                {d.lounge.summary.expiring > 0 && <Link className="priority-link" to="/lounge?vue=casiers&statut=a_renouveler"><strong>{d.lounge.summary.expiring}</strong> casier(s) à renouveler <Icon name="right" /></Link>}
-                {!d.lounge.summary.humidors && <Link className="priority-link" to="/lounge">Configurer le suivi de la cave <Icon name="right" /></Link>}
-                {d.lounge.summary.humidors > 0 && !d.lounge.summary.alerts && !d.lounge.summary.checks_due && !d.lounge.summary.expiring && <Link className="priority-link ok" to="/lounge"><Icon name="check" /> Contrôles à jour <Icon name="right" /></Link>}
-              </div>
+                <div className="hint">{d.outstanding_total > 0 ? 'Notes ouvertes à régler' : 'Toutes les notes sont soldées'}</div>
+              </Link>
             </section>
 
             <div className="grid-2">
-              <section className="card">
-                <div className="card-head">
-                  <h2>Réservations du jour</h2>
-                  <Link className="subtle" to={`/agenda?date=${d.biz_day}`}>Ouvrir l’agenda</Link>
-                </div>
-                {d.today.length
-                  ? <div className="list">{d.today.map((r) => <ResItem key={r.id} r={r} />)}</div>
-                  : <Empty icon="calendar">Aucune réservation aujourd’hui.</Empty>}
-              </section>
-
-              <section className="card">
-                <div className="card-head">
-                  <h2>Recettes par activité</h2>
-                  {admin
-                    ? <Segmented value={period} options={PERIODS} label="Période" onChange={(k) => setSearchParams({ periode: k })} />
-                    : <span className="subtle">Caisse du jour</span>}
-                </div>
-                <RevenueBlock sum={revenue} />
-              </section>
-
-              {d.to_close.length > 0 && (
-                <section className="card">
-                  <div className="card-head"><h2>À clôturer</h2><span className="chip chip-warn">{d.to_close.length}</span></div>
-                  <p className="subtle" style={{ marginBottom: '6px' }}>Horaire dépassé : terminez la réservation pour consommer le crédit, ou vérifiez la note.</p>
-                  <div className="list">{d.to_close.map((r) => <ResItem key={r.id} r={r} withDay />)}</div>
+              <div className="stack-cards">
+                <section className="card" data-tour="live-rooms">
+                  <div className="card-head">
+                    <h2>État des salles en direct</h2>
+                    <Link className="btn btn-sm" to="/salles"><Icon name="rooms" /> Gérer les salles</Link>
+                  </div>
+                  <div className="list">
+                    {roomsStatus.map((rm) => {
+                      const r = rm.current;
+                      return (
+                        <div key={rm.id} className="list-item list-item-interactive">
+                          <Link className="list-item-main" to="/salles">
+                            <div className="grow">
+                              <div className="title">
+                                {rm.name}{' '}
+                                <span className="subtle" style={{ fontWeight: 400 }}>· jusqu’à {rm.capacity} pers.</span>
+                              </div>
+                              <div className="meta">
+                                {r
+                                  ? <>{`${r.member_name} · ${r.party_size || 1} pers. · ${r.start_time} – ${r.end_time}${r.items_summary ? ` · ${r.items_summary}` : ''}`}{isRunning(r) && <> · <TimeInRoom reservation={r} /></>}</>
+                                  : (rm.next ? `Prochaine : ${rm.next.start_time} (${rm.next.member_name})` : 'Immédiatement disponible')}
+                              </div>
+                            </div>
+                          </Link>
+                          <div className="res-row-actions">
+                            {r ? (
+                              <>
+                                <button type="button" className="btn btn-sm btn-primary" onClick={() => openConsumptionDialog(r, reload)}>
+                                  <Icon name="plus" /> Bouteille / Cigare
+                                </button>
+                                <span className="chip chip-warn">Occupée</span>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  className="btn btn-sm"
+                                  onClick={() => openBookingDialog({ date: d.biz_day, room_id: rm.id, start_now: true }, reload)}
+                                >
+                                  Installer
+                                </button>
+                                <span className="chip chip-ok">Disponible</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </section>
-              )}
 
-              <section className="card">
-                <div className="card-head"><h2>Prochaines arrivées</h2></div>
-                {d.upcoming.length
-                  ? <div className="list">{d.upcoming.map((r) => <ResItem key={r.id} r={r} withDay />)}</div>
-                  : <Empty icon="clock">Aucune arrivée prévue.</Empty>}
-              </section>
-
-              <section className="card">
-                <div className="card-head"><h2>Abonnements à surveiller</h2></div>
-                {d.expiring.length || d.expired.length ? (
-                  <div className="list">
-                    {d.expiring.map((x) => (
-                      <Link key={`e${x.id}`} className="list-item" to={`/membres/${x.member_id}`}>
-                        <div className="grow">
-                          <div className="title">{x.member_name}</div>
-                          <div className="meta">{x.plan_name} · fin le {dayLabel(x.end_date, 'short')}</div>
-                        </div>
-                        <span className="chip chip-warn">{x.days_left === 0 ? 'dernier jour' : `${x.days_left} j`}</span>
-                      </Link>
-                    ))}
-                    {d.expired.map((x) => (
-                      <Link key={`x${x.id}`} className="list-item" to={`/membres/${x.member_id}`}>
-                        <div className="grow">
-                          <div className="title">{x.member_name}</div>
-                          <div className="meta">{x.plan_name} · expirée le {dayLabel(x.end_date, 'short')}</div>
-                        </div>
-                        <span className="chip chip-danger">expirée</span>
-                      </Link>
-                    ))}
+                <section className="card">
+                  <div className="card-head">
+                    <h2>Programme d’aujourd’hui</h2>
+                    <Link className="btn btn-sm btn-ghost" to={`/agenda?date=${d.biz_day}`}>Ouvrir l’agenda</Link>
                   </div>
-                ) : <Empty icon="check">Aucun abonnement n’arrive à expiration.</Empty>}
-              </section>
+                  {active.length
+                    ? <div className="list">{active.map((r) => <TodaySessionRow key={r.id} r={r} onReload={reload} />)}</div>
+                    : <Empty icon="calendar">Aucune réservation prévue aujourd’hui.</Empty>}
+                </section>
+              </div>
 
-              <section className="card">
-                <div className="card-head"><h2>Alertes de stock</h2><Link className="subtle" to="/produits">Produits</Link></div>
-                {d.stock_alerts.length ? (
-                  <div className="list">
-                    {d.stock_alerts.map((p) => (
-                      <Link key={p.id} className="list-item" to="/produits">
-                        <div className="grow">
-                          <div className="title">{p.name}</div>
-                          <div className="meta">{p.category === 'cigare' ? 'Cigare' : 'Bouteille'} · seuil {p.low_stock_threshold}</div>
-                        </div>
-                        <span className={`chip ${p.stock_qty === 0 ? 'chip-danger' : 'chip-warn'}`}>{p.stock_qty === 0 ? 'rupture' : `${p.stock_qty} en stock`}</span>
-                      </Link>
-                    ))}
+              <div className="stack-cards">
+                <section className="card">
+                  <div className="card-head">
+                    <h2>Points d’attention</h2>
+                    <span className={`chip ${totalAlerts > 0 ? 'chip-warn' : 'chip-ok'}`}>
+                      {totalAlerts > 0 ? `${totalAlerts} à vérifier` : 'Tout est en ordre'}
+                    </span>
                   </div>
-                ) : <Empty icon="check">Aucun produit sous le seuil d’alerte.</Empty>}
-              </section>
+                  <div className="list">
+                    {d.to_close.length > 0 && (
+                      <Link className="list-item" to="/agenda?vue=liste">
+                        <div className="grow">
+                          <div className="title">Séances dont l’horaire est dépassé</div>
+                          <div className="meta">{d.to_close.map((r) => r.member_name).join(', ')}</div>
+                        </div>
+                        <span className="chip chip-warn">{d.to_close.length} à clôturer</span>
+                      </Link>
+                    )}
+                    {d.stock_alerts.length > 0 && (
+                      <Link className="list-item" to="/produits">
+                        <div className="grow">
+                          <div className="title">Cigares & bouteilles à réapprovisionner</div>
+                          <div className="meta">{d.stock_alerts.slice(0, 3).map((p) => p.name).join(', ')}{d.stock_alerts.length > 3 ? '…' : ''}</div>
+                        </div>
+                        <span className="chip chip-danger">{d.stock_alerts.length} produit(s)</span>
+                      </Link>
+                    )}
+                    {humidorAlerts > 0 && (
+                      <Link className="list-item" to="/lounge">
+                        <div className="grow">
+                          <div className="title">Caves à cigares (humidité / température)</div>
+                          <div className="meta">Contrôle ou ajustement requis</div>
+                        </div>
+                        <span className="chip chip-warn">{humidorAlerts} cave(s)</span>
+                      </Link>
+                    )}
+                    {memberAlerts > 0 && (
+                      <Link className="list-item" to="/membres">
+                        <div className="grow">
+                          <div className="title">Abonnements à renouveler</div>
+                          <div className="meta">{d.expired.length} expiré(s) · {d.expiring.length} arrivant à échéance</div>
+                        </div>
+                        <span className="chip chip-info">{memberAlerts} membre(s)</span>
+                      </Link>
+                    )}
+                    {totalAlerts === 0 && (
+                      <div className="list-item">
+                        <div className="grow">
+                          <div className="title">Aucune alerte en cours</div>
+                          <div className="meta">Salles, stocks de cigares et bouteilles, caves et abonnements sont à jour.</div>
+                        </div>
+                        <span className="chip chip-ok"><Icon name="check" /> Parfait</span>
+                      </div>
+                    )}
+                  </div>
+                </section>
+
+                <section className="card">
+                  <div className="card-head">
+                    <h2>Recettes par activité</h2>
+                    {admin
+                      ? <Segmented value={period} options={PERIODS} label="Période" onChange={(k) => setSearchParams({ periode: k })} />
+                      : <span className="subtle">Caisse du jour</span>}
+                  </div>
+                  <RevenueBlock sum={revenue} />
+                </section>
+              </div>
             </div>
           </>
         );

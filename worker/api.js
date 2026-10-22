@@ -192,10 +192,13 @@ export function createApi({ db, env = {} }) {
   add('GET', '/api/dashboard', {}, (ctx) => club.dashboard(ctx.user));
 
   // Members, subscriptions, cards
-  add('GET', '/api/members', {}, (ctx) => club.listMembers(ctx.query.q));
+  add('GET', '/api/members', {}, (ctx) => club.listMembers(ctx.query.q, ctx.query.statut));
   add('POST', '/api/members', {}, (ctx) => club.createMember(ctx.user, ctx.body));
   add('GET', '/api/members/:id', {}, (ctx) => club.memberDetail(ctx.params.id));
   add('PUT', '/api/members/:id', {}, (ctx) => club.updateMember(ctx.user, ctx.params.id, ctx.body));
+  // Members are deactivated, never deleted: their payments and transactions stay in the books.
+  add('POST', '/api/members/:id/deactivate', {}, (ctx) => club.deactivateMember(ctx.user, ctx.params.id, ctx.body));
+  add('POST', '/api/members/:id/reactivate', {}, (ctx) => club.reactivateMember(ctx.user, ctx.params.id));
   add('POST', '/api/members/:id/subscriptions', {}, (ctx) => club.activateSubscription(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/subscriptions/:id/cancel', ADMIN, (ctx) => club.cancelSubscription(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/subscriptions/:id/adjust', ADMIN, (ctx) => club.adjustCredit(ctx.user, ctx.params.id, ctx.body));
@@ -204,11 +207,29 @@ export function createApi({ db, env = {} }) {
   add('GET', '/api/cards/lookup', {}, (ctx) => club.lookupCard(ctx.query.code));
   add('GET', '/api/cards/:id', {}, (ctx) => club.cardView(ctx.params.id));
 
+  // Rooms
+  add('GET', '/api/rooms', {}, (ctx) => club.rooms({ includeInactive: ctx.query.all === '1' }));
+  add('POST', '/api/rooms', ADMIN, (ctx) => {
+    const room = club.createRoom(ctx.user, ctx.body);
+    return { room, bundle: club.bundle(ctx.user) };
+  });
+  add('PUT', '/api/rooms/:id', ADMIN, (ctx) => {
+    const room = club.updateRoom(ctx.user, ctx.params.id, ctx.body);
+    return { room, bundle: club.bundle(ctx.user) };
+  });
+  add('DELETE', '/api/rooms/:id', ADMIN, (ctx) => {
+    const res = club.deleteRoom(ctx.user, ctx.params.id);
+    return { ...res, bundle: club.bundle(ctx.user) };
+  });
+
   // Reservations
   add('GET', '/api/reservations', {}, (ctx) => club.listReservations(ctx.query));
   add('POST', '/api/reservations/quote', READONLY, (ctx) => club.quoteReservation(ctx.user, ctx.body));
   add('POST', '/api/reservations', {}, (ctx) => club.createReservation(ctx.user, ctx.body));
   add('GET', '/api/reservations/:id', {}, (ctx) => club.reservationDetail(ctx.params.id));
+  add('PUT', '/api/reservations/:id/occupancy', {}, (ctx) => club.updateReservationOccupancy(ctx.user, ctx.params.id, ctx.body));
+  add('POST', '/api/reservations/:id/attendees', {}, (ctx) => club.addReservationAttendee(ctx.user, ctx.params.id, ctx.body));
+  add('DELETE', '/api/reservations/:id/attendees/:memberId', {}, (ctx) => club.removeReservationAttendee(ctx.user, ctx.params.id, ctx.params.memberId));
   add('POST', '/api/reservations/:id/extend/quote', READONLY, (ctx) => club.quoteExtension(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/reservations/:id/extend', {}, (ctx) => club.extendReservation(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/reservations/:id/start', {}, (ctx) => club.startReservation(ctx.user, ctx.params.id));
@@ -253,21 +274,13 @@ export function createApi({ db, env = {} }) {
   add('POST', '/api/products/:id/stock', {}, (ctx) => club.stockOperation(ctx.user, ctx.params.id, ctx.body));
   add('GET', '/api/stock-movements', {}, (ctx) => club.stockMovements(ctx.query));
 
-  // Lounge: conservation checks and members' private lockers.
+  // Lounge: conservation checks of the humidors.
   add('GET', '/api/lounge', {}, () => club.loungeOverview());
   add('POST', '/api/humidors', ADMIN, (ctx) => club.createHumidor(ctx.user, ctx.body));
   add('GET', '/api/humidors/:id', {}, (ctx) => club.humidorDetail(ctx.params.id));
   add('PUT', '/api/humidors/:id', ADMIN, (ctx) => club.updateHumidor(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/humidors/:id/readings', {}, (ctx) => club.recordHumidorReading(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/humidor-readings/:id/void', ADMIN, (ctx) => club.voidHumidorReading(ctx.user, ctx.params.id, ctx.body));
-  add('POST', '/api/lockers', ADMIN, (ctx) => club.createLocker(ctx.user, ctx.body));
-  add('GET', '/api/lockers/:id', {}, (ctx) => club.lockerDetail(ctx.params.id));
-  add('PUT', '/api/lockers/:id/availability', ADMIN, (ctx) => club.setLockerAvailability(ctx.user, ctx.params.id, ctx.body));
-  add('POST', '/api/lockers/:id/assign', {}, (ctx) => club.assignLocker(ctx.user, ctx.params.id, ctx.body));
-  add('POST', '/api/locker-assignments/:id/renew', {}, (ctx) => club.renewLocker(ctx.user, ctx.params.id, ctx.body));
-  add('POST', '/api/locker-assignments/:id/release', {}, (ctx) => club.releaseLocker(ctx.user, ctx.params.id, ctx.body));
-  add('POST', '/api/locker-assignments/:id/items', {}, (ctx) => club.depositLockerItems(ctx.user, ctx.params.id, ctx.body));
-  add('POST', '/api/locker-items/:id/withdraw', {}, (ctx) => club.withdrawLockerItems(ctx.user, ctx.params.id, ctx.body));
 
   function match(method, pathname) {
     let pathMatched = false;

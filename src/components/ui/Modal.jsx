@@ -1,19 +1,28 @@
 // Dialogs. openDialog(Component, props) can be called from anywhere (a page, another dialog);
 // the component receives `close` and renders a <Modal>. Escape and the backdrop close the top
 // dialog; Tab stays inside it; focus returns to where it was.
-import { useEffect, useId, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useId, useRef, useState } from 'react';
 import { create } from 'zustand';
 import Icon from './Icon.jsx';
 import { FormError } from './ui.jsx';
 import { useSubmit } from '../../lib/hooks.js';
 
 const useDialogs = create(() => ({ stack: [] }));
+const Closing = createContext(false);
+const EXIT_MS = 160; // matches the exit animation in app.css
 let seq = 0;
 
 export function openDialog(Component, props = {}) {
   const id = (seq += 1);
-  const close = () => useDialogs.setState((s) => ({ stack: s.stack.filter((d) => d.id !== id) }));
-  useDialogs.setState((s) => ({ stack: [...s.stack, { id, Component, props, close }] }));
+  const remove = () => useDialogs.setState((s) => ({ stack: s.stack.filter((d) => d.id !== id) }));
+  // The window plays its exit before it is removed; closing it twice does nothing.
+  const close = () => {
+    const entry = useDialogs.getState().stack.find((d) => d.id === id);
+    if (!entry || entry.closing) return;
+    useDialogs.setState((s) => ({ stack: s.stack.map((d) => (d.id === id ? { ...d, closing: true } : d)) }));
+    setTimeout(remove, EXIT_MS);
+  };
+  useDialogs.setState((s) => ({ stack: [...s.stack, { id, Component, props, close, closing: false }] }));
   return close;
 }
 
@@ -21,13 +30,16 @@ export const closeAllDialogs = () => useDialogs.setState({ stack: [] });
 
 export function DialogRoot() {
   const stack = useDialogs((s) => s.stack);
-  return stack.map(({ id, Component, props, close }) => <Component key={id} {...props} close={close} />);
+  return stack.map(({ id, Component, props, close, closing }) => (
+    <Closing.Provider key={id} value={closing}><Component {...props} close={close} /></Closing.Provider>
+  ));
 }
 
 const open = [];
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled])';
 
 export function Modal({ title, size = '', onClose, children }) {
+  const closing = useContext(Closing);
   const titleId = useId();
   const backdrop = useRef(null);
   const body = useRef(null);
@@ -65,12 +77,14 @@ export function Modal({ title, size = '', onClose, children }) {
     return () => {
       document.removeEventListener('keydown', onKey);
       open.splice(open.indexOf(el), 1);
-      if (previous && document.contains(previous)) previous.focus?.();
+      // A window removed after its exit animation must not pull focus out of one opened since.
+      if (!open.length && previous && document.contains(previous)) previous.focus?.();
     };
   }, []);
 
   return (
-    <div className="modal-backdrop" ref={backdrop} onMouseDown={(e) => { if (e.target === backdrop.current) onClose(); }}>
+    <div className="modal-backdrop" ref={backdrop} data-closing={closing || undefined}
+      onMouseDown={(e) => { if (e.target === backdrop.current) onClose(); }}>
       <div className={`modal ${size}`} role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <div className="modal-head">
           <h2 id={titleId}>{title}</h2>

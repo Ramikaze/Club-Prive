@@ -8,10 +8,19 @@ export const useStore = create((set) => ({
   me: null,
   settings: null,
   plans: [],
+  rooms: [],
   accounts: [],
   setBundle: (bundle) => {
     document.title = `${bundle.settings.club_name} — Gestion`;
-    set({ status: 'ready', me: bundle.user, settings: bundle.settings, plans: bundle.plans, accounts: bundle.accounts, bootError: null });
+    set({
+      status: 'ready',
+      me: bundle.user,
+      settings: bundle.settings,
+      plans: bundle.plans,
+      rooms: bundle.rooms ?? [],
+      accounts: bundle.accounts,
+      bootError: null,
+    });
   },
   signOut: () => {
     document.title = 'Connexion — Club Privé';
@@ -23,3 +32,5 @@ export const useStore = create((set) => ({
 export const isAdminNow = () => useStore.getState().me?.role === 'admin';
 export const useIsAdmin = () => useStore((s) => s.me?.role === 'admin');
 export const useSettings = () => useStore((s) => s.settings);
+export const useRooms = () => useStore((s) => s.rooms);
+

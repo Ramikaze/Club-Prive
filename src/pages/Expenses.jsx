@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import Icon from '../components/ui/Icon.jsx';
 import { Modal, openDialog, actionDialog } from '../components/ui/Modal.jsx';
-import { AccountTag, Chip, DemoChip, Empty, FormError, Loaded, Notice, PageHead, Segmented } from '../components/ui/ui.jsx';
+import { AccountTag, CashTabs, Chip, DemoChip, Empty, FormError, Loaded, Notice, PageHead, Segmented } from '../components/ui/ui.jsx';
 import PeriodPicker, { usePeriod } from '../components/ui/PeriodPicker.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import { api, newKey, qs } from '../lib/api.js';
@@ -200,8 +200,9 @@ export default function Expenses() {
 
   return (
     <>
+      <CashTabs />
       <PageHead
-        title={isAdmin ? 'Dépenses et entrées' : 'Dépenses du jour'}
+        title={isAdmin ? 'Dépenses & mouvements' : 'Dépenses du jour'}
         lead={isAdmin
           ? 'Dépenses, entrées diverses et transferts entre caisses et comptes.'
           : 'Achats et factures réglés aujourd’hui depuis la caisse ou un compte.'}

@@ -353,51 +353,105 @@ const V2 = [
     void_reason TEXT
   )`,
   'CREATE INDEX humidor_readings_latest ON humidor_readings(humidor_id, measured_at DESC, id DESC)',
-  `CREATE TABLE lockers (
-    id INTEGER PRIMARY KEY,
-    code TEXT NOT NULL UNIQUE COLLATE NOCASE,
-    humidor_id INTEGER NOT NULL REFERENCES humidors(id),
-    notes TEXT,
-    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
-    created_at TEXT NOT NULL,
-    created_by INTEGER REFERENCES users(id)
-  )`,
-  `CREATE TABLE locker_assignments (
-    id INTEGER PRIMARY KEY,
-    locker_id INTEGER NOT NULL REFERENCES lockers(id),
-    member_id INTEGER NOT NULL REFERENCES members(id),
-    start_date TEXT NOT NULL,
-    end_date TEXT NOT NULL CHECK (end_date >= start_date),
-    notes TEXT,
-    created_at TEXT NOT NULL,
-    created_by INTEGER REFERENCES users(id),
-    released_at TEXT,
-    released_by INTEGER REFERENCES users(id),
-    release_reason TEXT
-  )`,
-  'CREATE UNIQUE INDEX locker_one_occupant ON locker_assignments(locker_id) WHERE released_at IS NULL',
-  'CREATE INDEX locker_member ON locker_assignments(member_id)',
-  `CREATE TABLE locker_items (
-    id INTEGER PRIMARY KEY,
-    assignment_id INTEGER NOT NULL REFERENCES locker_assignments(id),
-    name TEXT NOT NULL COLLATE NOCASE,
-    quantity INTEGER NOT NULL CHECK (quantity >= 0),
-    UNIQUE (assignment_id, name)
-  )`,
-  `CREATE TABLE locker_movements (
-    id INTEGER PRIMARY KEY,
-    item_id INTEGER NOT NULL REFERENCES locker_items(id),
-    kind TEXT NOT NULL CHECK (kind IN ('depot', 'retrait')),
-    quantity INTEGER NOT NULL CHECK (quantity > 0),
-    stock_after INTEGER NOT NULL CHECK (stock_after >= 0),
-    notes TEXT,
-    created_at TEXT NOT NULL,
-    created_by INTEGER REFERENCES users(id)
-  )`,
-  'CREATE INDEX locker_movements_item ON locker_movements(item_id, id DESC)',
 ];
 
-export const MIGRATIONS = [V1, V2];
+// Private lockers are not part of the product: databases created with the first v2 lose them.
+const V3 = [
+  'DROP TABLE IF EXISTS locker_movements',
+  'DROP TABLE IF EXISTS locker_items',
+  'DROP TABLE IF EXISTS locker_assignments',
+  'DROP TABLE IF EXISTS lockers',
+];
+
+const V4 = [
+  `CREATE TABLE rooms (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    capacity INTEGER NOT NULL DEFAULT 6 CHECK (capacity BETWEEN 1 AND 200),
+    description TEXT,
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    updated_at TEXT
+  )`,
+  'ALTER TABLE reservations ADD COLUMN room_id INTEGER REFERENCES rooms(id)',
+  'ALTER TABLE reservations ADD COLUMN party_size INTEGER NOT NULL DEFAULT 1 CHECK (party_size BETWEEN 1 AND 200)',
+  'CREATE INDEX reservations_room ON reservations(room_id, start_ms, end_ms)',
+  'DROP TRIGGER IF EXISTS reservations_no_overlap_insert',
+  'DROP TRIGGER IF EXISTS reservations_no_overlap_update',
+  `CREATE TRIGGER reservations_no_overlap_insert BEFORE INSERT ON reservations
+  WHEN NEW.status <> 'annulee'
+  BEGIN
+    SELECT RAISE(ABORT, 'CHEVAUCHEMENT') WHERE EXISTS (
+      SELECT 1 FROM reservations r
+      WHERE r.status <> 'annulee'
+        AND COALESCE(r.room_id, 1) = COALESCE(NEW.room_id, 1)
+        AND r.start_ms < NEW.end_ms AND NEW.start_ms < r.end_ms);
+  END`,
+  `CREATE TRIGGER reservations_no_overlap_update BEFORE UPDATE OF start_ms, end_ms, status, room_id ON reservations
+  WHEN NEW.status <> 'annulee'
+  BEGIN
+    SELECT RAISE(ABORT, 'CHEVAUCHEMENT') WHERE EXISTS (
+      SELECT 1 FROM reservations r
+      WHERE r.id <> NEW.id AND r.status <> 'annulee'
+        AND COALESCE(r.room_id, 1) = COALESCE(NEW.room_id, 1)
+        AND r.start_ms < NEW.end_ms AND NEW.start_ms < r.end_ms);
+  END`,
+  `CREATE TABLE IF NOT EXISTS reservation_attendees (
+    id INTEGER PRIMARY KEY,
+    reservation_id INTEGER NOT NULL REFERENCES reservations(id),
+    member_id INTEGER NOT NULL REFERENCES members(id),
+    subscription_id INTEGER NOT NULL REFERENCES subscriptions(id),
+    included_minutes INTEGER NOT NULL DEFAULT 0 CHECK (included_minutes >= 0),
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    UNIQUE (reservation_id, member_id)
+  )`,
+  'CREATE INDEX IF NOT EXISTS reservation_attendees_res ON reservation_attendees(reservation_id)',
+];
+
+// Early v4 databases did not yet have attendee rows. Bring both variants forward atomically.
+const V5 = [
+  'ALTER TABLE rooms ADD COLUMN archived_at TEXT',
+  `CREATE TABLE IF NOT EXISTS reservation_attendees (
+    id INTEGER PRIMARY KEY,
+    reservation_id INTEGER NOT NULL REFERENCES reservations(id),
+    member_id INTEGER NOT NULL REFERENCES members(id),
+    subscription_id INTEGER NOT NULL REFERENCES subscriptions(id),
+    included_minutes INTEGER NOT NULL DEFAULT 0 CHECK (included_minutes >= 0),
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    UNIQUE (reservation_id, member_id)
+  )`,
+  'CREATE INDEX IF NOT EXISTS reservation_attendees_res ON reservation_attendees(reservation_id)',
+  'CREATE INDEX reservation_attendees_member ON reservation_attendees(member_id, reservation_id)',
+];
+
+// Who consumed each bottle or cigar in a room. Billing stays with the reservation holder
+// (charges.member_id); NULL means the holder.
+const V6 = [
+  'ALTER TABLE charges ADD COLUMN consumer_member_id INTEGER REFERENCES members(id)',
+  'CREATE INDEX charges_consumer ON charges(consumer_member_id)',
+];
+
+// Members are deactivated, never deleted: payments, bookings and consumption stay in the books.
+const V7 = [
+  'ALTER TABLE members ADD COLUMN active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1))',
+  'ALTER TABLE members ADD COLUMN deactivated_at TEXT',
+  'ALTER TABLE members ADD COLUMN deactivated_by INTEGER REFERENCES users(id)',
+  'ALTER TABLE members ADD COLUMN deactivation_reason TEXT',
+];
+
+// The club has a single room. The two extra rooms created by default are retired when they were
+// never used; a room with reservations stays, so its history keeps its place.
+const V8 = [
+  `UPDATE rooms SET active = 0,
+     archived_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+   WHERE name IN ('Salon VIP', 'Petit Salon') AND created_by IS NULL AND archived_at IS NULL
+     AND NOT EXISTS (SELECT 1 FROM reservations r WHERE r.room_id = rooms.id)`,
+];
+
+export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8];
 
 export function migrate(db) {
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');

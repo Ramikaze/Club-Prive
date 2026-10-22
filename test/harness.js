@@ -70,6 +70,7 @@ export class Client {
   get(url) { return this.call('GET', url); }
   post(url, body, headers) { return this.call('POST', url, body, headers); }
   put(url, body) { return this.call('PUT', url, body); }
+  del(url, body) { return this.call('DELETE', url, body); }
 
   async login(login, password) {
     const r = await this.post('/api/login', { login, password });

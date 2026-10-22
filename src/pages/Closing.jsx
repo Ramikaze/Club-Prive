@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Icon from '../components/ui/Icon.jsx';
 import { Modal, openDialog, actionDialog } from '../components/ui/Modal.jsx';
-import { ErrorState, FormError, Loaded, Notice, PageHead, Skeleton } from '../components/ui/ui.jsx';
+import { AdminTabs, ErrorState, FormError, Loaded, Notice, PageHead, Skeleton } from '../components/ui/ui.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import { api, newKey, qs } from '../lib/api.js';
 import { money, monthTitle, dateTime } from '../lib/format.js';
@@ -133,9 +133,10 @@ export default function Closing() {
 
   return (
     <>
+      <AdminTabs />
       <PageHead
         title="Clôture mensuelle"
-        lead="Un mois clôturé n’accepte plus aucune opération datée de ce mois. La réouverture reste possible : elle exige un motif et reste dans l’historique."
+        lead="Verrouillage mensuel des écritures comptables."
         tour="closing"
       />
       <Loaded state={state}>

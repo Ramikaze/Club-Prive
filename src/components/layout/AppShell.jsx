@@ -14,21 +14,17 @@ import { ROLE_LABEL } from '../../lib/format.js';
 import { useStore } from '../../store/useStore.js';
 
 export const NAV = [
-  { group: 'Le club' },
-  { path: '/', label: 'Tableau de bord', short: 'Accueil', icon: 'home', tab: true },
+  { group: 'Opérations' },
+  { path: '/', label: 'Accueil', short: 'Accueil', icon: 'home', tab: true },
+  { path: '/salles', label: 'Salles', short: 'Salles', icon: 'rooms', tab: true },
   { path: '/agenda', label: 'Agenda', short: 'Agenda', icon: 'calendar', tab: true, also: ['/reservations'] },
-  { path: '/membres', label: 'Membres et cartes', short: 'Membres', icon: 'users', tab: true, also: ['/cartes'] },
-  { path: '/lounge', label: 'Cave & casiers', icon: 'humidor' },
-  { path: '/produits', label: 'Produits et stocks', short: 'Stocks', icon: 'box', tab: true },
-  { group: 'Finances' },
-  { path: '/caisse', label: 'Encaissements et sous-comptes', short: 'Caisse', icon: 'wallet', tab: true },
-  { path: '/depenses', label: 'Dépenses', icon: 'receipt' },
-  { path: '/tresorerie', label: 'Trésorerie', icon: 'bank', admin: true },
-  { path: '/grand-livre', label: 'Grand livre', icon: 'book', admin: true },
-  { path: '/cloture', label: 'Clôture mensuelle', icon: 'lock', admin: true },
+  { path: '/membres', label: 'Membres', short: 'Membres', icon: 'users', tab: true, also: ['/cartes'] },
+  { path: '/produits', label: 'Stocks & Cave', short: 'Stocks', icon: 'box', also: ['/lounge'] },
+  { path: '/caisse', label: 'Caisse', short: 'Caisse', icon: 'wallet', tab: true, also: ['/depenses'] },
   { group: 'Administration', admin: true },
-  { path: '/parametres', label: 'Paramètres', icon: 'settings', admin: true },
+  { path: '/parametres', label: 'Administration', short: 'Admin', icon: 'settings', admin: true, also: ['/tresorerie', '/grand-livre', '/cloture'] },
 ];
+
 
 const navFor = (pathname) => NAV.find((n) => n.path && (n.path === '/'
   ? pathname === '/'

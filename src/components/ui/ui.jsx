@@ -1,6 +1,6 @@
 // Small building blocks shared by every page: status chips, empty / loading / error states,
 // notices and the page header. Class names come from src/club.css.
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import Icon from './Icon.jsx';
 import { STATUS, ACCOUNT_LABEL } from '../../lib/format.js';
 
@@ -82,3 +82,59 @@ export function Segmented({ value, options, onChange, label }) {
     </div>
   );
 }
+
+export function RouteTabs({ items, label }) {
+  const { pathname } = useLocation();
+  return (
+    <nav className="section-tabs no-print" aria-label={label}>
+      {items.map(([path, text, icon]) => {
+        const active = pathname === path || pathname.startsWith(`${path}/`);
+        return (
+          <Link key={path} to={path} className={`section-tab ${active ? 'active' : ''}`} aria-current={active ? 'page' : undefined}>
+            {icon && <Icon name={icon} />}
+            <span>{text}</span>
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
+export function StocksTabs() {
+  return (
+    <RouteTabs
+      label="Rubriques Stocks et Cave"
+      items={[
+        ['/produits', 'Catalogue & Stocks', 'box'],
+        ['/lounge', 'Cave (conservation)', 'humidor'],
+      ]}
+    />
+  );
+}
+
+export function CashTabs() {
+  return (
+    <RouteTabs
+      label="Rubriques Caisse"
+      items={[
+        ['/caisse', 'Encaissements & Notes', 'wallet'],
+        ['/depenses', 'Dépenses & Mouvements', 'receipt'],
+      ]}
+    />
+  );
+}
+
+export function AdminTabs() {
+  return (
+    <RouteTabs
+      label="Rubriques Administration"
+      items={[
+        ['/parametres', 'Paramètres du club', 'settings'],
+        ['/tresorerie', 'Trésorerie & Bilans', 'bank'],
+        ['/grand-livre', 'Grand livre', 'book'],
+        ['/cloture', 'Clôture mensuelle', 'lock'],
+      ]}
+    />
+  );
+}
+

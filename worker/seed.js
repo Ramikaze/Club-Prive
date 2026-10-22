@@ -2,13 +2,14 @@
 // History is created through the same business methods as real use, with a backdated clock.
 // Accounts with known passwords are only created when the caller passes them (local development,
 // DEMO_ACCOUNTS=1). Online, an administrator loads the demonstration under their own account.
-import { conflict } from './errors.js';
-import { addDays, localToUtcMs } from '../shared/time.js';
+import { AppError, conflict } from './errors.js';
+import { addDays, fmtHHMM, localParts, localToUtcMs } from '../shared/time.js';
 
 export const DEMO_ACCOUNTS = [
   { login: 'proprietaire', name: 'Propriétaire A (démo)', role: 'admin', password: 'demo-proprio-2026' },
   { login: 'associe', name: 'Associé B (démo)', role: 'admin', password: 'demo-associe-2026' },
   { login: 'gerant', name: 'Gérant (démo)', role: 'gerant', password: 'demo-gerant-2026' },
+  { login: 'admin', name: 'Administrateur (local)', role: 'admin', password: 'admin-club-2026' },
 ];
 
 const HOUR = 3600000;
@@ -68,12 +69,12 @@ function fill(club, { accounts = null, actor = null }) {
   club.at = realNow - 30 * DAY;
   club.stockOperation(manager, whisky, { kind: 'entree', quantity: 4, reason: 'Livraison fournisseur (démo)' });
 
-  // Members (fictitious)
-  const member = (first, last, n, createdDaysAgo) => {
+  // Members: five fictitious clients, numbered in order (Client Test 1 to 5).
+  const member = (n, createdDaysAgo) => {
     club.at = realNow - createdDaysAgo * DAY;
     return club.createMember(manager, {
-      first_name: first, last_name: last, phone: `+000 01 00 00 ${String(n).padStart(2, '0')}`,
-      email: `${first.toLowerCase().normalize('NFD').replace(/[^a-z]/g, '')}@exemple.test`,
+      first_name: 'Client', last_name: `Test ${n}`, phone: `+000 01 00 00 ${String(n).padStart(2, '0')}`,
+      email: `client.test${n}@exemple.test`,
     }, { demo: true }).id;
   };
   const subscribe = (memberId, planId, startDay, payMethod) => {
@@ -84,34 +85,34 @@ function fill(club, { accounts = null, actor = null }) {
   };
   const card = (memberId, kind, code) => club.issueCard(manager, memberId, { kind, code });
 
-  const albert = member('Albert', 'Exemple', 1, 40);
-  const beatrice = member('Béatrice', 'Fictive', 2, 70);
-  const charles = member('Charles', 'Démo', 3, 35);
-  const diane = member('Diane', 'Test', 4, 60);
-  const emile = member('Émile', 'Essai', 5, 10);
-  member('Fanny', 'Modèle', 6, 1);
-  const gaston = member('Gaston', 'Placeholder', 7, 2);
+  const client1 = member(1, 70);
+  const client2 = member(2, 60);
+  const client3 = member(3, 35);
+  const client4 = member(4, 10);
+  const client5 = member(5, 2);
 
-  subscribe(albert, monthly, addDays(today, -10), 'Espèces');
-  card(albert, 'physique', 'CP-DEMO-0001');
-  card(albert, 'virtuelle');
-  subscribe(beatrice, annual, addDays(today, -60));
-  card(beatrice, 'virtuelle');
-  subscribe(charles, monthly, addDays(today, -26), 'MTN MoMo');
-  card(charles, 'physique', 'CP-DEMO-0003');
-  subscribe(diane, monthly, addDays(today, -50), 'Carte bancaire');
-  card(diane, 'physique', 'CP-DEMO-0004');
-  subscribe(emile, monthly, addDays(today, -6));
-  card(emile, 'virtuelle');
-  subscribe(gaston, annual, today);
-  card(gaston, 'virtuelle');
+  subscribe(client1, monthly, addDays(today, -10), 'Espèces');
+  card(client1, 'physique', 'CP-DEMO-0001');
+  card(client1, 'virtuelle');
+  subscribe(client2, annual, addDays(today, -60));
+  card(client2, 'virtuelle');
+  subscribe(client3, monthly, addDays(today, -26), 'MTN MoMo');
+  card(client3, 'physique', 'CP-DEMO-0003');
+  subscribe(client4, monthly, addDays(today, -6));
+  card(client4, 'virtuelle');
+  subscribe(client5, annual, today);
+  card(client5, 'virtuelle');
 
-  // Reservations, moved through their life cycle according to the real current time.
+  // Reservations, moved through their life cycle according to the real current time. The club has a
+  // single room: every booking goes to the first open one.
+  const roomId = club.rooms()[0]?.id ?? 1;
+
   const book = (memberId, day, time, minutes, extra = {}) => {
     const start = startOf(day, time);
     club.at = Math.min(realNow - HOUR, start - 2 * DAY);
     return club.createReservation(manager, {
       member_id: memberId, date: day, start_time: time, duration_min: minutes,
+      room_id: roomId, party_size: extra.partySize ?? 2,
       authorize_off_hours: extra.offHours ?? false, notes: extra.notes ?? null,
     }).reservation;
   };
@@ -135,23 +136,78 @@ function fill(club, { accounts = null, actor = null }) {
     }
   };
 
-  live(book(beatrice, addDays(today, -20), '18:00', 180), [[champagne, 1], [robusto, 2]], 'Carte bancaire');
-  live(book(albert, addDays(today, -8), '20:00', 60), [[whisky, 1]], 'Espèces');
-  live(book(emile, addDays(today, -3), '19:00', 120), [], null);
+  live(book(client2, addDays(today, -20), '18:00', 180, { partySize: 4 }), [[champagne, 1], [robusto, 2]], 'Carte bancaire');
+  live(book(client1, addDays(today, -8), '20:00', 60, { partySize: 2 }), [[whisky, 1]], 'Espèces');
+  live(book(client4, addDays(today, -3), '19:00', 120, { partySize: 2 }), [], null);
   // The example from the brief: 25 000 of room time + 40 000 bottle + 10 000 cigar = 75 000 in one payment.
-  live(book(emile, addDays(today, -1), '21:00', 60, { notes: 'Crédit épuisé : heure entièrement payante' }),
+  live(book(client4, addDays(today, -1), '21:00', 60, { partySize: 3, notes: 'Crédit épuisé : heure entièrement payante' }),
     [[whisky, 1], [robusto, 1]], 'Espèces');
-  live(book(charles, addDays(today, -1), '15:00', 150), [[corona, 2]], null);
-  const cancelled = book(beatrice, addDays(today, -2), '17:00', 120);
+  live(book(client3, addDays(today, -1), '15:00', 150, { partySize: 4 }), [[corona, 2]], null);
+  const cancelled = book(client2, addDays(today, -2), '17:00', 120, { partySize: 2 });
   club.at = cancelled.start_ms - DAY;
   club.cancelReservation(manager, cancelled.id, { reason: 'Empêchement du membre (démo)' });
 
-  live(book(beatrice, today, '12:00', 120), [[robusto, 1]], 'Carte bancaire');
-  live(book(gaston, today, '16:00', 90), [], null);
-  live(book(albert, today, '20:00', 60), [[champagne, 1]], null);
-  book(beatrice, addDays(today, 1), '22:00', 210, { offHours: true, notes: 'Soirée privée — dépassement autorisé (démo)' });
-  book(gaston, addDays(today, 2), '14:00', 60);
-  book(charles, addDays(today, 2), '19:30', 90);
+  // A session already running when the demonstration is loaded, so the room timer and the
+  // per-member breakdown show at once: started about 45 minutes ago (or at opening), two members
+  // present, each with cigars and a bottle. Skipped when the club is closed at load time; created
+  // before today's other bookings, which give way to it in the single room.
+  const win = club.window();
+  const slot = s.booking.slot_min;
+  const ago = localParts(realNow - 45 * 60000, tz);
+  const startMin = ago.minutes - (ago.minutes % slot);
+  const starts = [
+    { date: startMin < win.open ? addDays(ago.date, -1) : ago.date, time: fmtHHMM(startMin) },
+    { date: localParts(realNow, tz).date, time: s.hours.open },
+  ];
+  const pairs = [[client1, client2], [client3, client5], [client4, client2], [client1, client5]];
+  const inRoom = (() => {
+    for (const { date, time } of starts) {
+      const start = startOf(date, time);
+      if (start > realNow - 5 * 60000) continue;
+      for (const minutes of [120, 60]) {
+        if (start + minutes * 60000 <= realNow + 10 * 60000) continue;
+        for (const [holder, guest] of pairs) {
+          club.at = start - 30 * 60000;
+          try {
+            const r = club.createReservation(manager, {
+              member_id: holder, attendee_ids: [guest], date, start_time: time, duration_min: minutes,
+              room_id: roomId, party_size: 2, authorize_off_hours: true,
+            }).reservation;
+            return { r, holder, guest };
+          } catch (err) {
+            if (!(err instanceof AppError)) throw err; // slot out of hours or member without credit: next one
+          }
+        }
+      }
+    }
+    return null;
+  })();
+  if (inRoom) {
+    const { r, holder, guest } = inRoom;
+    club.at = r.start_ms;
+    club.startReservation(manager, r.id);
+    // Served within the elapsed time, so both members have cigars and a bottle even in a young session.
+    const served = [[10, holder, robusto, 1], [20, holder, whisky, 1], [25, guest, corona, 2], [35, guest, champagne, 1]];
+    served.forEach(([afterMin, consumer, productId, quantity], i) => {
+      club.at = r.start_ms + Math.min(afterMin * 60000, ((realNow - r.start_ms) * (i + 1)) / (served.length + 1));
+      club.addItem(manager, r.id, { product_id: productId, quantity, consumer_member_id: consumer });
+    });
+  }
+
+  // Today's and later bookings, skipped where the session in progress already holds the room.
+  const unlessTaken = (create) => {
+    try {
+      create();
+    } catch (err) {
+      if (!(err instanceof AppError)) throw err;
+    }
+  };
+  unlessTaken(() => live(book(client2, today, '12:00', 120, { partySize: 3 }), [[robusto, 1]], 'Carte bancaire'));
+  unlessTaken(() => live(book(client5, today, '16:00', 90, { partySize: 4 }), [], null));
+  unlessTaken(() => live(book(client1, today, '20:00', 60, { partySize: 5 }), [[champagne, 1]], null));
+  unlessTaken(() => book(client2, addDays(today, 1), '22:00', 210, { partySize: 6, offHours: true, notes: 'Soirée privée — dépassement autorisé (démo)' }));
+  unlessTaken(() => book(client5, addDays(today, 2), '14:00', 60, { partySize: 2 }));
+  unlessTaken(() => book(client3, addDays(today, 2), '19:30', 90, { partySize: 4 }));
 
   // Overheads and a bank deposit (fictitious), entered by the owner on their own day.
   const categoryId = (name) => (club.get("SELECT id FROM categories WHERE kind = 'depense' AND active = 1 AND name = ?", name)
@@ -189,14 +245,5 @@ function fill(club, { accounts = null, actor = null }) {
     club.at = realNow - i * DAY - HOUR;
     club.recordHumidorReading(manager, reserve.id, { humidity: 68 + (i % 3) * 0.5, temperature: 20 + (i % 2) * 0.4, notes: 'Contrôle de démonstration' });
     club.recordHumidorReading(manager, salon.id, { humidity: i === 0 ? 74 : 69, temperature: 21, notes: 'Contrôle de démonstration' });
-  }
-  club.at = realNow - 3 * DAY;
-  for (let n = 1; n <= 8; n += 1) {
-    const locker = club.createLocker(owner, { code: `A-${String(n).padStart(2, '0')}`, humidor_id: reserve.id });
-    if (n <= 3) {
-      const detail = club.assignLocker(manager, locker.id, { member_id: [albert, beatrice, charles][n - 1], end_date: addDays(today, n === 3 ? 3 : 30) });
-      club.depositLockerItems(manager, detail.assignment_id, { name: 'Collection personnelle (démo)', quantity: n * 6 });
-    }
-    if (n === 8) club.setLockerAvailability(owner, locker.id, { active: false, reason: 'Entretien du casier (démo)' });
   }
 }

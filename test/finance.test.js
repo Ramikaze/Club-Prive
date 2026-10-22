@@ -158,8 +158,9 @@ test('19. démonstration chargée par un administrateur, puis effacement des don
 
   ok(await admin.post('/api/admin/demo'));
   const members = ok(await admin.get('/api/members'));
-  assert.equal(members.length, 7);
+  assert.equal(members.length, 5);
   assert.ok(members.every((m) => m.is_demo));
+  assert.deepEqual(members.map((m) => m.name).sort(), ['Client Test 1', 'Client Test 2', 'Client Test 3', 'Client Test 4', 'Client Test 5']);
   assert.equal(ok(await admin.get('/api/products')).length, 7);
   const t = ok(await admin.get(`/api/treasury?from=${today}`));
   assert.ok(t.accounts.every((a) => a.closing >= 0), JSON.stringify(t.accounts));
@@ -176,10 +177,10 @@ test('20. en local, DEMO_ACCOUNTS=1 crée la démonstration et ses comptes', asy
     const gerant = new Client(local);
     const bundle = await gerant.login('gerant', 'demo-gerant-2026');
     assert.equal(bundle.user.role, 'gerant');
-    assert.equal(ok(await gerant.get('/api/members')).length, 7);
+    assert.equal(ok(await gerant.get('/api/members')).length, 5);
     await new Client(local).login('proprietaire', 'demo-proprio-2026');
     await local.restart(); // a second start does not seed twice
-    assert.equal(ok(await gerant.get('/api/members')).length, 7);
+    assert.equal(ok(await gerant.get('/api/members')).length, 5);
   } finally {
     local.destroy();
   }
