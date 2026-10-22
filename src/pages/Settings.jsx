@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
-import { AdminTabs, Empty, FormError, Loaded, Notice, PageHead, Segmented } from '../components/ui/ui.jsx';
+import { AdminTabs, Empty, FormError, Loaded, Notice, PageHead, PasswordField, Segmented } from '../components/ui/ui.jsx';
 import { Modal, actionDialog, openDialog } from '../components/ui/Modal.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import { api, newKey } from '../lib/api.js';
@@ -84,8 +84,8 @@ function UserDialog({ close, user, onDone }) {
         {editing
           ? <label className="check"><input type="checkbox" name="active" value="1" defaultChecked={user.active} /><span>Compte actif</span></label>
           : (
-            <label className="field"><span>Mot de passe provisoire</span><input type="password" name="password" required minLength={10} autoComplete="new-password" />
-              <span className="help">10 caractères minimum ; à communiquer à la personne, qui pourra le changer.</span></label>
+            <PasswordField label="Mot de passe provisoire" help="10 caractères minimum ; à communiquer à la personne, qui pourra le changer."
+              name="password" required minLength={10} autoComplete="new-password" />
           )}
         <FormError error={error} />
         <div className="modal-actions"><button type="button" className="btn" onClick={close}>Annuler</button>
@@ -105,7 +105,7 @@ function PasswordResetDialog({ close, user }) {
   return (
     <Modal title={`Nouveau mot de passe — ${user.name}`} onClose={close}>
       <form className="form-grid" onSubmit={onSubmit} noValidate>
-        <label className="field"><span>Mot de passe provisoire</span><input type="password" name="password" required minLength={10} autoComplete="new-password" /></label>
+        <PasswordField label="Mot de passe provisoire" name="password" required minLength={10} autoComplete="new-password" />
         <p className="subtle">Les sessions ouvertes de ce compte seront fermées.</p>
         <FormError error={error} />
         <div className="modal-actions"><button type="button" className="btn" onClick={close}>Annuler</button>

@@ -10,3 +10,6 @@
 
 /index.html
   Cache-Control: no-cache
+
+/login-smoke.*
+  Cache-Control: public, max-age=604800

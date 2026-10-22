@@ -1,8 +1,7 @@
 // Sign-in, and on a brand-new club the first installation: the first administrator account is
 // created with the installation code (SETUP_TOKEN secret on Cloudflare).
 import { useEffect, useRef, useState } from 'react';
-import { FormError, Notice, Skeleton } from '../components/ui/ui.jsx';
-import { startAmbientSmoke } from '../lib/ambientSmoke.js';
+import { FormError, Notice, PasswordField, Skeleton } from '../components/ui/ui.jsx';
 import { prefersReducedMotion } from '../lib/smoke.js';
 import { api } from '../lib/api.js';
 import { useSubmit } from '../lib/hooks.js';
@@ -25,8 +24,7 @@ function LoginForm({ onSignedIn }) {
       <div><h1>Connexion</h1><p className="muted">Espace réservé au personnel et aux propriétaires.</p></div>
       <label className="field"><span>Identifiant</span>
         <input autoComplete="username" autoCapitalize="none" spellCheck="false" required autoFocus value={v.login} onChange={set('login')} /></label>
-      <label className="field"><span>Mot de passe</span>
-        <input type="password" autoComplete="current-password" required value={v.password} onChange={set('password')} /></label>
+      <PasswordField label="Mot de passe" autoComplete="current-password" required value={v.password} onChange={set('password')} />
       <FormError error={error} />
       <button className="btn btn-primary btn-block" type="submit" disabled={busy} aria-busy={busy}>Se connecter</button>
     </form>
@@ -59,19 +57,16 @@ function SetupForm({ tokenConfigured, onSignedIn }) {
           (npx wrangler secret put SETUP_TOKEN), puis rechargez cette page.
         </Notice>
       )}
-      <label className="field"><span>Code d’installation</span>
-        <input type="password" autoComplete="off" required autoFocus value={v.setup_token} onChange={set('setup_token')} />
-        <span className="help">La valeur du secret SETUP_TOKEN, choisie lors de la mise en ligne.</span></label>
+      <PasswordField label="Code d’installation" help="La valeur du secret SETUP_TOKEN, choisie lors de la mise en ligne."
+        autoComplete="off" required autoFocus value={v.setup_token} onChange={set('setup_token')} />
       <label className="field"><span>Votre nom</span>
         <input autoComplete="name" required maxLength={80} value={v.name} onChange={set('name')} /></label>
       <label className="field"><span>Identifiant</span>
         <input autoComplete="username" autoCapitalize="none" spellCheck="false" required value={v.login} onChange={set('login')} />
         <span className="help">3 à 40 caractères : lettres, chiffres, point, tiret.</span></label>
-      <label className="field"><span>Mot de passe</span>
-        <input type="password" autoComplete="new-password" minLength={10} required value={v.password} onChange={set('password')} />
-        <span className="help">10 caractères minimum.</span></label>
-      <label className="field"><span>Confirmation</span>
-        <input type="password" autoComplete="new-password" required value={v.confirm} onChange={set('confirm')} /></label>
+      <PasswordField label="Mot de passe" help="10 caractères minimum."
+        autoComplete="new-password" minLength={10} required value={v.password} onChange={set('password')} />
+      <PasswordField label="Confirmation" autoComplete="new-password" required value={v.confirm} onChange={set('confirm')} />
       <FormError error={error} />
       <button className="btn btn-primary btn-block" type="submit" disabled={busy || !tokenConfigured} aria-busy={busy}>Créer le compte et entrer</button>
     </form>
@@ -93,7 +88,13 @@ export default function Login() {
       useStore.setState({ entering: true });
     }, prefersReducedMotion() ? 150 : LEAVE_MS);
   };
-  useEffect(() => startAmbientSmoke(smoke.current), []);
+  // Filmed cigar smoke in a seamless loop (Pexels « A Smoke in a Dark Room », free licence), muted;
+  // under reduced motion only its still frame shows.
+  useEffect(() => {
+    const video = smoke.current;
+    video.muted = true;
+    if (!prefersReducedMotion()) video.play().catch(() => {});
+  }, []);
   useEffect(() => {
     api.get('/api/setup').then((s) => {
       setSetup(s);
@@ -102,7 +103,7 @@ export default function Login() {
   }, []);
   return (
     <div className={`login-page${leaving ? ' is-leaving' : ''}`}>
-      <canvas ref={smoke} className="login-smoke" aria-hidden="true" />
+      <video ref={smoke} className="login-smoke" src="/login-smoke.mp4" poster="/login-smoke.jpg" muted loop playsInline preload="auto" aria-hidden="true" />
       <div className="login-stack">
         {setup?.instance_label && <p className="login-instance" role="note">{setup.instance_label} · site d’essai</p>}
         {!setup && <div className="login-card"><Skeleton /></div>}

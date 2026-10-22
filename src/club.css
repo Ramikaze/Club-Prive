@@ -407,6 +407,16 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .search { position: relative; }
 .search input { padding-left: 40px; }
 .search svg { position: absolute; left: 12px; top: 50%; width: 18px; height: 18px; transform: translateY(-50%); color: var(--text-3); }
+.password-input { position: relative; }
+.password-input input { padding-right: 48px; }
+.password-input input::-ms-reveal { display: none; } /* Edge draws its own eye otherwise */
+.password-eye {
+  position: absolute; top: 2px; right: 2px; bottom: 2px; width: 40px;
+  display: grid; place-items: center; border: 0; border-radius: 8px;
+  background: transparent; color: var(--text-3); cursor: pointer; transition: color 0.12s;
+}
+.password-eye:hover { color: var(--text); }
+.password-eye svg { width: 18px; height: 18px; }
 
 /* ------------------------------------------------------------------ notices */
 
@@ -638,8 +648,12 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .login-eyebrow { margin: 0; color: var(--bronze-text); font-size: 0.74rem; font-weight: 600; letter-spacing: 0.24em; text-transform: uppercase; }
 .login-stack { width: min(400px, 100%); display: grid; gap: 12px; justify-items: center; position: relative; z-index: 1; }
 
-/* Cigar smoke behind the card, drawn on a canvas by src/lib/ambientSmoke.js. */
-.login-smoke { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
+/* Cigar smoke behind the card: a filmed loop (public/login-smoke.mp4, smoke on black). Screen blending
+   drops the black, so the smoke floats over the brown background; sepia warms it towards bronze. */
+.login-smoke {
+  position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none;
+  object-fit: cover; mix-blend-mode: screen; filter: sepia(0.45) saturate(0.85) brightness(1.05); opacity: 0.9;
+}
 .login-instance {
   margin: 0; padding: 6px 14px; border-radius: 999px; background: var(--warn-soft); color: var(--warn);
   font-size: 0.85rem; font-weight: 600;
