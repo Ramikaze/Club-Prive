@@ -7,6 +7,7 @@ import { invalid, forbidden, notFound, conflict } from './errors.js';
 import { text, int, toId, flag, frDate } from './validate.js';
 import { ledgerMethods, DEFAULT_CATEGORIES } from './ledger.js';
 import { loungeMethods } from './lounge.js';
+import { seedDemo } from './seed.js';
 import {
   localParts, localToUtcMs, addDays, addMonths, daysBetween, monthsElapsed, isValidDate, isValidTimeZone, parseHHMM,
 } from '../shared/time.js';
@@ -36,6 +37,10 @@ const WIPE_ORDER = [
   'idempotency_keys', 'payment_allocations', 'refunds', 'stock_movements', 'credit_movements', 'charges', 'payments',
   'reservation_attendees', 'reservations', 'cards', 'subscriptions', 'members', 'products', 'ledger_entries', 'closed_periods', 'audit_log',
 ];
+
+// The fictitious author of the demo space's records: an administrator account of the demo database
+// only. Real accounts start at id 1, so it never stands for one of them.
+export const DEMO_AUTHOR_ID = 0;
 
 export function defaultSettings() {
   return {
@@ -2300,6 +2305,103 @@ export class Club {
     };
     const body = [header, ...rows].map((r) => r.map(cell).join(';')).join('\r\n');
     return { filename: `${t.name}.csv`, content: `\ufeff${body}\r\n` };
+  }
+
+  // ---------------------------------------------------------------- demo space
+
+  // The demo space is a second club (its own database, `demo` set) that copies the real club's
+  // configuration and holds fictitious data only. Its methods refuse to run on the real club: they
+  // rewrite accounts and wipe data.
+  assertDemo() {
+    if (!this.demo) throw conflict('MODE_DEMO_INACTIF', "Cette opération n'existe que dans l'espace démo.");
+  }
+
+  // What the demo space takes from the real club (this method runs on the real club). Accounts come
+  // as identities only, never a password hash. The treasury starting point stays out: the demo sets
+  // its own, with fictitious amounts. `demo_mode` is not a stored setting any more.
+  demoConfig() {
+    return {
+      users: this.all('SELECT id, login, name, role, active FROM users ORDER BY id'),
+      settings: this.all(
+        "SELECT key, value, updated_at, updated_by FROM settings WHERE key NOT IN ('demo_mode', 'opening_balances') ORDER BY key",
+      ),
+      plans: this.all('SELECT * FROM plans ORDER BY id'),
+      rooms: this.all('SELECT * FROM rooms ORDER BY id'),
+      categories: this.all('SELECT * FROM categories ORDER BY id'),
+    };
+  }
+
+  // The demo records and the copied settings point at accounts (created_by, updated_by...), so the
+  // real accounts exist here under the same ids. Identity only: the login is `u<id>` and the hash '!'
+  // is not the output of any password, so nobody can sign in to the demo space.
+  mirrorUsers(users) {
+    this.assertDemo();
+    for (const u of users) {
+      this.run(
+        `INSERT INTO users (id, login, name, role, password_hash, active, created_at) VALUES (?, ?, ?, ?, '!', ?, ?)
+         ON CONFLICT(id) DO UPDATE SET login = excluded.login, name = excluded.name, role = excluded.role,
+           password_hash = excluded.password_hash, active = excluded.active`,
+        u.id, `u${u.id}`, u.name, u.role, u.active ? 1 : 0, this.nowIso(),
+      );
+    }
+  }
+
+  // Replaces a table's rows by the given ones, ids included, column by column (the columns are those
+  // of the source rows, which only ever come from the real club's demoConfig).
+  replaceRows(table, rows) {
+    this.run(`DELETE FROM ${table}`);
+    for (const row of rows) {
+      const columns = Object.keys(row);
+      this.run(
+        `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`,
+        ...columns.map((column) => row[column]),
+      );
+    }
+  }
+
+  // Gets the demo space ready for a request. The first time (no `demo_seeded` mark) it copies the
+  // real club's configuration and fills the space with fictitious data, all in one transaction. After
+  // that only the accounts are mirrored again, so a new, renamed or deactivated account is followed at
+  // once, while the settings stay as copied until the next reset.
+  prepareDemo(config) {
+    this.assertDemo();
+    this.tx(() => {
+      // First, whatever the case: the rows copied below refer to these accounts.
+      this.mirrorUsers(config.users);
+      if (this.get("SELECT 1 AS x FROM meta WHERE key = 'demo_seeded'")) return;
+      // Nothing refers to these tables yet: the space is new, or resetDemo has just emptied it.
+      this.replaceRows('settings', config.settings);
+      this.replaceRows('plans', config.plans);
+      this.replaceRows('rooms', config.rooms);
+      this.replaceRows('categories', config.categories);
+      this.run(
+        `INSERT INTO users (id, login, name, role, password_hash, active, created_at)
+         VALUES (?, 'auteur.demo.0', 'Démonstration', 'admin', '!', 1, ?) ON CONFLICT(id) DO NOTHING`,
+        DEMO_AUTHOR_ID, this.nowIso(),
+      );
+      this.cachedSettings = null;
+      // The seed sells both plans, even if the real club has stopped offering one of them: that choice
+      // is put back once the data is in.
+      const withdrawn = config.plans.filter((p) => !p.active);
+      this.run('UPDATE plans SET active = 1');
+      seedDemo(this, { actor: this.get('SELECT * FROM users WHERE id = ?', DEMO_AUTHOR_ID) });
+      for (const p of withdrawn) this.run('UPDATE plans SET active = 0 WHERE id = ?', p.id);
+      this.run("INSERT INTO meta (key, value) VALUES ('demo_seeded', ?)", this.nowIso());
+    });
+  }
+
+  // Empties the demo space and fills it again from the real club's current configuration. The wipe
+  // and the refill commit together or not at all. The journal entry is written last: the wipe
+  // empties the journal.
+  resetDemo(config, actor) {
+    this.assertDemo();
+    this.tx(() => {
+      for (const table of WIPE_ORDER) this.run(`DELETE FROM ${table}`);
+      this.run("DELETE FROM meta WHERE key = 'demo_seeded'");
+      this.prepareDemo(config);
+      this.audit(actor, 'demo.remettre_a_neuf', null, null, null);
+    });
+    return { ok: true };
   }
 }
 

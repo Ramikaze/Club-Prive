@@ -34,6 +34,7 @@ function fill(club, { actor }) {
   if (!s.demo_mode) throw conflict('MODE_DEMO_INACTIF', "Les données fictives ne se chargent que dans l'espace démo.");
   const realNow = Date.now();
   const tz = s.timezone;
+  const slot = s.booking.slot_min;
   const owner = actor;
   const manager = actor;
   const today = club.bizToday();
@@ -102,16 +103,19 @@ function fill(club, { actor }) {
 
   // Reservations, moved through their life cycle according to the real current time. The club has a
   // single room: every booking goes to the first open one.
-  const roomId = club.rooms()[0]?.id ?? 1;
+  const room = club.rooms()[0];
+  const roomId = room?.id ?? 1;
 
-  // A booking on a Friday or Saturday evening is lengthened to that minimum (2 h by default).
+  // A booking on a Friday or Saturday evening is lengthened to that minimum (2 h by default). Whatever
+  // the club's settings, a duration is a whole number of slots (rounded down) and the party fits the room.
   const book = (memberId, day, time, minutes, extra = {}) => {
     const start = startOf(day, time);
     const startRel = time < s.hours.open ? parseHHMM(time) + 1440 : parseHHMM(time);
     club.at = Math.min(realNow - HOUR, start - 2 * DAY);
     return club.createReservation(manager, {
-      member_id: memberId, date: day, start_time: time, duration_min: Math.max(minutes, minDurationFor(s.booking, day, startRel)),
-      room_id: roomId, party_size: extra.partySize ?? 2, notes: extra.notes ?? null,
+      member_id: memberId, date: day, start_time: time,
+      duration_min: Math.max(Math.floor(minutes / slot) * slot, minDurationFor(s.booking, day, startRel)),
+      room_id: roomId, party_size: Math.min(extra.partySize ?? 2, room?.capacity ?? Infinity), notes: extra.notes ?? null,
     }).reservation;
   };
   const live = (r, items = [], payMethod = null) => {
@@ -150,7 +154,6 @@ function fill(club, { actor }) {
   // 45 minutes ago, two members present, each with cigars and a bottle. Created before today's
   // other bookings, which give way to it in the single room.
   const win = club.window();
-  const slot = s.booking.slot_min;
   const ago = localParts(realNow - 45 * 60000, tz);
   const startMin = ago.minutes - (ago.minutes % slot);
   const date = startMin < win.open ? addDays(ago.date, -1) : ago.date;
