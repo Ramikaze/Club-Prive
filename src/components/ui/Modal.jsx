@@ -51,7 +51,10 @@ export function Modal({ title, size = '', onClose, children }) {
     const el = backdrop.current;
     open.push(el);
     const first = body.current?.querySelector('[autofocus], input:not([type="hidden"]):not([disabled]), select, textarea, button[type="submit"]');
-    (first ?? body.current)?.focus?.();
+    // With no field to start in, the body of the window takes the focus (Escape and Tab work from there). It must not
+    // scroll a tall window, a phone's sheet for one, down under its own header.
+    if (first) first.focus?.();
+    else body.current?.focus?.({ preventScroll: true });
     const onKey = (e) => {
       if (open[open.length - 1] !== el) return;
       if (e.key === 'Escape') {

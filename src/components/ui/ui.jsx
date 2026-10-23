@@ -5,6 +5,7 @@ import { flushSync } from 'react-dom';
 import { Link, useLocation } from 'react-router-dom';
 import Icon from './Icon.jsx';
 import { STATUS, ACCOUNT_LABEL } from '../../lib/format.js';
+import { photoUrl } from '../../lib/photo.js';
 
 export function Chip({ group, value }) {
   const [label, kind] = STATUS[group]?.[value] ?? [value, 'neutral'];
@@ -17,6 +18,27 @@ export function Hypothesis({ title, label = 'Hypothèse' }) {
 
 export function DemoChip({ on }) {
   return on ? <span className="chip chip-demo" title="Donnée fictive de démonstration">démo</span> : null;
+}
+
+// The picture of a product on its light panel (.product-photo, app.css): a small square in a list, or large on the
+// product's sheet. A cigar or a bottle stands in when the product has no photo or the photo cannot be loaded.
+export function ProductPhoto({ product, large = false }) {
+  const url = photoUrl(product);
+  // The address that failed to load: a new photo has a new address, which is tried again.
+  const [failed, setFailed] = useState(null);
+  const shown = url !== null && failed !== url;
+  return (
+    <span className={`product-photo ${large ? 'product-photo-large' : 'product-photo-thumb'}${shown ? '' : ' is-empty'}`}>
+      {shown ? (
+        <img src={url} alt={product.name} loading={large ? undefined : 'lazy'} decoding="async" onError={() => setFailed(url)} />
+      ) : (
+        <span className="product-photo-none">
+          <Icon name={product.category === 'bouteille' ? 'bottle' : 'cigar'} />
+          {large && <span>{url === null ? 'Pas encore de photo' : 'Photo indisponible'}</span>}
+        </span>
+      )}
+    </span>
+  );
 }
 
 export function AccountTag({ account }) {

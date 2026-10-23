@@ -50,7 +50,7 @@ Ouvrir ensuite `http://localhost:5173`. Les appels `/api` sont transmis au serve
 - **Salles et salons** : capacités, disponibilités, participants, installation, consommations, fermeture temporaire et réouverture.
 - **Agenda** : vues jour, semaine et liste, devis, arrivées, prolongations, annulations et protection contre les chevauchements de salles et de membres.
 - **Cave** : plusieurs caves, seuils d’humidité et de température propres à chaque cave, fréquence des contrôles, relevés manuels horodatés, graphiques et journal exportable.
-- **Produits et caisse** : cigares et bouteilles, entrées de stock, ventes liées aux réservations, encaissements, remboursements et ventilation par activité.
+- **Produits et caisse** : cigares et bouteilles, avec leur photo (les administrateurs l’ajoutent, la changent ou la retirent depuis la fiche du produit), entrées de stock, ventes liées aux réservations, encaissements, remboursements et ventilation par activité.
 - **Administration** : dépenses, trésorerie, grand livre, clôtures mensuelles, rôles, journal d’audit, paramètres et exports Excel.
 - **Mode démo** : un espace d’entraînement aux données fictives, séparé du vrai club.
 
@@ -84,15 +84,15 @@ Le QR code d’une carte ouvre la fiche du membre après authentification du per
 
 ### Mode démo (entraînement)
 
-Le mode démo est un espace d’entraînement intégré au site : on y apprend l’application, ou on essaie une manipulation, sans risque pour le vrai club. Il a sa **propre base de données**, remplie de données entièrement fictives (membres « Client Test », produits, réservations, encaissements, relevés de cave). Il reprend les réglages du club : prix, formules, salles, moyens de paiement et catégories.
+Le mode démo est un espace d’entraînement intégré au site : on y apprend l’application, ou on essaie une manipulation, sans risque pour le vrai club. Il a sa **propre base de données**. On y retrouve le **catalogue réel du club** (les mêmes produits, avec leurs photos et un stock fictif de 10 pour chacun), à côté de données fictives : membres « Client Test », réservations, encaissements, relevés de cave et quelques produits d’exemple. Il reprend aussi les réglages du club : prix, formules, salles, moyens de paiement et catégories.
 
 - **Qui** : le gérant et les administrateurs, avec leur propre compte. Aucun compte à mot de passe connu n’existe en ligne.
 - **Entrer** : une fois connecté, cliquer sur le chapeau de diplômé orange « Mode démo (entraînement) », en bas du menu latéral ; sur téléphone, il se trouve dans le menu en haut à droite. La démo se crée et se remplit toute seule à la première entrée, et la visite guidée se propose à la première entrée dans un navigateur.
 - **Reconnaître la démo** : un cadre orange entoure l’écran, le mot « DÉMO » apparaît en filigrane, un bandeau rayé « MODE DÉMO » reste en haut de chaque page et le titre de l’onglet commence par « [DÉMO] ». Les fichiers exportés en démo commencent par `DEMO_`.
 - **Quitter** : le bouton « Quitter » du bandeau, ou « Quitter la démo » à la place du bouton d’entrée. Une page rechargée reste en démo ; se déconnecter ramène toujours au vrai site à la connexion suivante.
-- **Rien de réel n’est touché** : ce qui se fait en démo (réservations, encaissements, réglages, exports) reste dans la démo, et rien de ce qui se fait dans le vrai club n’y apparaît. Du vrai club, la démo ne copie que les réglages, ainsi que le nom et le rôle des comptes. Le vrai site n’est jamais en mode démo : un tarif non validé y est refusé, alors que la démo l’accepte.
+- **Rien de réel n’est touché** : ce qui se fait en démo (réservations, encaissements, réglages, exports) reste dans la démo, et rien de ce qui se fait dans le vrai club n’y apparaît. Du vrai club, la démo ne copie que les réglages, le nom et le rôle des comptes, et les produits en vente (sans leur stock, fictif en démo). Les photos restent dans le vrai club, qui les affiche aussi dans la démo ; elles se gèrent hors du mode démo. Le vrai site n’est jamais en mode démo : un tarif non validé y est refusé, alors que la démo l’accepte.
 - **Comptes** : la gestion des comptes (créer ou modifier un compte, changer un mot de passe) se fait hors du mode démo ; Paramètres le rappelle : « Les comptes se gèrent hors du mode démo. » L’effacement complet des données n’existe pas non plus en démo, qui a sa propre remise à neuf.
-- **Remettre la démo à neuf** (administrateurs) : dans Paramètres, onglet « Équipe & Système », carte « Espace démo ». Après confirmation, la démo est vidée puis remplie de nouveau de données fictives, avec les réglages actuels du vrai club. Il n’y a qu’une démo, la même pour tous : chacun y retrouve les essais des autres, jusqu’à la prochaine remise à neuf. C’est aussi le seul moment où un changement de réglage du vrai club passe dans la démo.
+- **Remettre la démo à neuf** (administrateurs) : dans Paramètres, onglet « Équipe & Système », carte « Espace démo ». Après confirmation, la démo est vidée puis remplie de nouveau de données fictives, avec les réglages et le catalogue actuels du vrai club. Il n’y a qu’une démo, la même pour tous : chacun y retrouve les essais des autres, jusqu’à la prochaine remise à neuf. C’est aussi le seul moment où un changement de réglage ou de produit du vrai club passe dans la démo.
 
 ## Architecture et validation
 
