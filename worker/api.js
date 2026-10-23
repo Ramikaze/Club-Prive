@@ -1,7 +1,7 @@
 // HTTP API on the Fetch standard (Request in, Response out): routing, sessions, role checks,
 // CSRF guard and idempotent writes. It runs inside the Durable Object that owns the club's database
 // (worker/index.js) and, unchanged, in the Node tests.
-// Each route may have an async `prepare` step (password hashing, token hashing) that runs first;
+// Each route may have an async `prepare` step (password hashing, token hashing) that runs before the handler;
 // the handler itself is synchronous and, for writes, runs in one transaction with the idempotency record.
 // A route whose credential is not in the body may also have a `guard`: the same kind of step, before the body is read.
 // The same API also serves the demo space (`demo: true`, a second Durable Object with its own database).
@@ -390,16 +390,17 @@ export function createApi({ db, env = {}, demo = false }) {
       if (writes) checkCsrf(request, url);
       const token = user ? null : (parseCookies(request.headers.get('cookie')).sid || null);
       const ctx = {
-        params, body: {}, token, tokenHash: token ? await sha256Hex(token) : null, user: null, demoConfig,
+        params, body: null, token, tokenHash: token ? await sha256Hex(token) : null, user: null, demoConfig,
         headers: request.headers,
         ip: request.headers.get('cf-connecting-ip') ?? 'local',
         query: Object.fromEntries(url.searchParams),
         setCookie: (value, maxAge) => cookies.push(cookieHeader(value, maxAge)),
       };
       // A credential that is not in the body is checked before the body is read, so that a caller without it
-      // makes the Worker read and parse nothing (the import door's body may be up to 300 KB).
+      // makes the Worker read and parse nothing (the import door's body may be up to 300 KB). The guard finds no
+      // body to look into: `ctx.body` is null until then.
       if (route.opts.guard) await route.opts.guard(ctx);
-      if (writes) ctx.body = await readJson(request, route.opts.maxBody);
+      ctx.body = writes ? await readJson(request, route.opts.maxBody) : {};
       if (!route.opts.public) {
         ctx.user = user ?? club.sessionUser(ctx.tokenHash);
         // A session's account is active by construction; the one handleDemo hands over may have been deactivated.

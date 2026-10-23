@@ -634,6 +634,20 @@ test('import : un produit de même nom mais d’une autre catégorie est refusé
   assert.equal(ok(await importWith(door, { item: { name: 'havane club', category: 'bouteille', price: 31000 } })).id, bottle.id);
 });
 
+test('import : quand une bouteille et un cigare portent le même nom, la fiche met à jour celui de sa catégorie, et le journal garde le nom enregistré', async () => {
+  const { server, admin } = await setup({ env: { IMPORT_TOKEN } });
+  const door = new Client(server);
+  const bottle = await newProduct(admin, { name: 'Havane Club', category: 'bouteille', reference: 'BOU-001', price: 30000 * UM });
+  const cigar = await newProduct(admin, { name: 'Havane Club', reference: 'CIG-001', price: 12000 * UM });
+
+  const r = ok(await importWith(door, { item: { name: ' HAVANE club ', category: 'cigare', price: 12500 } }));
+  assert.deepEqual([r.id, r.status], [cigar.id, 'updated']);
+  assert.equal(server.club.get('SELECT price FROM products WHERE id = ?', cigar.id).price, 12500 * UM);
+  assert.equal(server.club.get('SELECT price FROM products WHERE id = ?', bottle.id).price, 30000 * UM);
+  // The journal names the product as it is stored, not as the file spells it.
+  assert.equal(server.club.auditLog().find((a) => a.action === 'produit.importer').details.name, 'Havane Club');
+});
+
 test('import : le journal d’une mise à jour garde le prix et la description remplacés, dans les unités de « produit.modifier »', async () => {
   const { server, admin } = await setup({ env: { IMPORT_TOKEN } });
   const door = new Client(server);

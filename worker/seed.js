@@ -59,6 +59,7 @@ function fill(club, { actor, catalogue }) {
   club.copyCatalogue(catalogue, owner);
   // A fictitious product wants a reference of its series (CIG-DEMO-01...). A real product may hold it already, in
   // whatever case, and so may a fictitious one made before: it then takes the next free number of its series.
+  // Every reference below must end with its number.
   const freeReference = (wanted) => {
     const [, series, digits] = /^(.*?)(\d+)$/.exec(wanted);
     let number = Number(digits);

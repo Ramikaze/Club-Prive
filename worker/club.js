@@ -2332,11 +2332,12 @@ export class Club {
   // The import's one product: created, or updated when a real product already has this name (capitals, spaces
   // around it and the way an accent is written do not count). An update brings the price, the description if one
   // comes and the photo if one comes, and nothing else: a product the owner took off sale stays off sale, and its
-  // stock, reference, category and name stay what they are. A product of that name in another category is a
-  // mistake in the file, not something to update: the call is refused and nothing is written. The journal of an
-  // update keeps the price and the description it replaces (`avant`, as updateProduct's does). A new product is
-  // stored under its name in NFC, with a stock of 0 and the club's usual alert threshold. No account stands behind
-  // the import door, so the product and the journal have no author.
+  // stock, reference, category and name stay what they are. The product updated is the one of that name in the
+  // item's category; a name found in the other category alone is a mistake in the file, not something to update:
+  // the call is refused and nothing is written. The journal of an update names the product as it is stored and
+  // keeps the price and the description it replaces (`avant`, as updateProduct's does). A new product is stored
+  // under its name in NFC, with a stock of 0 and the club's usual alert threshold. No account stands behind the
+  // import door, so the product and the journal have no author.
   importCatalogItem(item) {
     if (item === null || typeof item !== 'object' || Array.isArray(item)) throw invalid('Fiche produit invalide.');
     const name = text(item.name, 'Nom du produit', { required: true, max: 80 }).normalize('NFC');
@@ -2346,11 +2347,13 @@ export class Club {
     const photo = item.photo === undefined || item.photo === null ? null : decodePhoto(item.photo);
 
     const sameName = (n) => n.trim().normalize('NFC').toLowerCase();
-    const found = this.all('SELECT id, name, category FROM products WHERE is_demo = 0 ORDER BY id').find((p) => sameName(p.name) === sameName(name));
-    if (found && found.category !== item.category) {
+    const named = this.all('SELECT id, name, category FROM products WHERE is_demo = 0 ORDER BY id').filter((p) => sameName(p.name) === sameName(name));
+    const found = named.find((p) => p.category === item.category);
+    if (!found && named.length) {
+      const [other] = named;
       throw conflict(
         'CATEGORIE_DIFFERENTE',
-        `Le produit « ${found.name} » existe déjà (catégorie ${found.category}) ; la fiche importée le range en ${item.category}. Rien n'a été modifié.`,
+        `Le produit « ${other.name} » existe déjà (catégorie ${other.category}) ; la fiche importée le range en ${item.category}. Rien n'a été modifié.`,
       );
     }
     const now = this.nowIso();
@@ -2376,7 +2379,7 @@ export class Club {
     }
     if (photo) this.storePhoto(id, photo, null);
     const status = found ? 'updated' : 'created';
-    this.audit(null, 'produit.importer', 'product', id, { name, reference, status, price, photo: !!photo, avant });
+    this.audit(null, 'produit.importer', 'product', id, { name: found ? found.name : name, reference, status, price, photo: !!photo, avant });
     return { id, reference, status, photo: !!this.get('SELECT 1 AS x FROM product_photos WHERE product_id = ?', id) };
   }
 
