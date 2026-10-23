@@ -317,7 +317,11 @@ test('13. tarifs non validés bloqués hors démonstration ; pas de recalcul apr
     const annual = plans.find((p) => p.code === 'ANNUELLE').id;
     const m = ok(await manager.post('/api/members', { first_name: 'Léa', last_name: 'Test', phone: '+000 00 00 00 00' }));
     assert.equal((await manager.post(`/api/members/${m.id}/subscriptions`, { plan_id: monthly })).data.error.code, 'TARIF_NON_VALIDE');
-    assert.equal((await manager.post(`/api/members/${m.id}/subscriptions`, { plan_id: annual })).data.error.code, 'TARIF_NON_DEFINI');
+    const noPrice = await manager.post(`/api/members/${m.id}/subscriptions`, { plan_id: annual });
+    assert.equal(noPrice.data.error.code, 'TARIF_NON_DEFINI');
+    // The real site's refusal says what to do, and does not send anyone to the demo.
+    assert.match(noPrice.data.error.message, /tant qu'un administrateur n'a pas fixé le prix dans Paramètres/);
+    assert.doesNotMatch(noPrice.data.error.message, /démo/i);
     ok(await admin.put('/api/settings', { overtime_tariff: { hour: 25000 * UM, half: 15000 * UM, validated: true } }));
     const now = ok(await book(k, day(9), '16:00', 60));
     assert.equal(now.reservation.supplement_amount, 25000 * UM);

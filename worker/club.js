@@ -917,7 +917,7 @@ export class Club {
       );
     }
     if (plan.price == null && !s.demo_mode) {
-      throw conflict('TARIF_NON_DEFINI', `Le prix de la formule « ${plan.name} » n'est pas défini : activation impossible hors mode démonstration.`);
+      throw conflict('TARIF_NON_DEFINI', `Le prix de la formule « ${plan.name} » n'est pas défini : activation impossible tant qu'un administrateur n'a pas fixé le prix dans Paramètres.`);
     }
     if (plan.price != null && !plan.price_validated && !s.demo_mode) {
       throw conflict('TARIF_NON_VALIDE', `Le prix de la formule « ${plan.name} » n'a pas été validé par un administrateur.`);
