@@ -137,16 +137,12 @@ export default function Login() {
     if (!prefersReducedMotion()) video.play().catch(() => {});
   }, []);
   useEffect(() => {
-    api.get('/api/setup').then((s) => {
-      setSetup(s);
-      if (s.instance_label) document.title = `[${s.instance_label}] Connexion — Limen`;
-    }).catch(() => setSetup({ needed: false }));
+    api.get('/api/setup').then(setSetup).catch(() => setSetup({ needed: false }));
   }, []);
   return (
     <div className={`login-page${leaving ? ' is-leaving' : ''}`}>
       <video ref={smoke} className="login-smoke" src="/login-smoke.mp4" poster="/login-smoke.jpg" muted loop playsInline preload="auto" aria-hidden="true" />
       <div className="login-stack">
-        {setup?.instance_label && <p className="login-instance" role="note">{setup.instance_label} · site d’essai</p>}
         {!setup && <div className="login-card"><Skeleton /></div>}
         {setup && (setup.needed
           ? <SetupForm tokenConfigured={setup.token_configured} onSignedIn={onSignedIn} />

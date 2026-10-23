@@ -16,6 +16,7 @@ export default function Ledger() {
   const account = ACCOUNT_LABEL[period.params.get('sous_compte')] ? period.params.get('sous_compte') : '';
   const configured = useStore((s) => s.settings.payment_methods);
   const excel = useBusy();
+  const csv = useBusy();
   const filters = { from, to, method, account };
   const state = useLoad(() => api.get(`/api/ledger/book${qs(filters)}`), [from, to, method, account]);
   const methods = [...new Set([...configured, ...(state.data?.methods ?? []), ...(method ? [method] : [])])];
@@ -29,7 +30,9 @@ export default function Ledger() {
         tour="ledger"
         actions={(
           <>
-            <a className="btn" href={`/api/export/grand-livre${qs(filters)}`} download><Icon name="download" /> CSV</a>
+            <button type="button" className="btn" disabled={csv.busy} aria-busy={csv.busy}
+              onClick={() => csv.run(() => api.download(`/api/export/grand-livre${qs(filters)}`))}>
+              <Icon name="download" /> CSV</button>
             <button type="button" className="btn" disabled={excel.busy} aria-busy={excel.busy}
               onClick={() => excel.run(() => downloadExcel([{ kind: 'grand-livre', params: filters }]))}>
               <Icon name="excel" /> Excel</button>
