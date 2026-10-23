@@ -46,8 +46,8 @@
   --tabbar-h: 64px;
   --sidebar-w: 254px;
   /* The demo space's own orange, the same in both themes (rules at the end of this file): --demo is the
-     frame, the watermark and the light stripe (3.1:1 against the cream page, 5.2:1 against the dark one);
-     --demo-deep is the fill under white text (4.6:1). */
+     frame and the watermark (3.1:1 against the cream page, 5.2:1 against the dark one); --demo-deep is
+     the fill of the entry button under white text (4.6:1). The banner has its own, brighter stripes. */
   --demo: #d46a00;
   --demo-deep: #b85c00;
   --demo-frame: 6px;
@@ -702,19 +702,20 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .demo-watermark { --mark: 0.2; } }
 @media (max-width: 899px) { .demo-watermark { left: 50%; } }
 
-/* White text needs a deep stripe under it: --demo-deep gives 4.6:1, --demo 3.6:1 (hence the shadow). On
-   wide screens the banner is the first thing under the top edge of the frame, so its content starts
-   below it; on phones the top bar is above it. */
+/* The mockup's bright stripes with dark text, the same in both themes: #2b1400 is 5.8:1 on #e07b00 and
+   8.4:1 on #f2a33a (white would be 3.0 and 2.1), and every letter crosses both stripes. The Quitter
+   button is white with #7a3e00 text (8.3:1). On wide screens the banner is the first thing under the top
+   edge of the frame, so its content starts below it; on phones the top bar is above it. */
 .banner-demo {
   padding-top: calc(6px + var(--demo-frame));
-  background: repeating-linear-gradient(135deg, var(--demo-deep) 0 10px, var(--demo) 10px 20px);
-  color: #fff; font-weight: 800; letter-spacing: 0.02em;
-  text-shadow: 0 1px 2px rgba(50, 20, 0, 0.5);
+  background: repeating-linear-gradient(135deg, #e07b00 0 10px, #f2a33a 10px 20px);
+  color: #2b1400; font-weight: 800; letter-spacing: 0.02em;
 }
 @media (max-width: 899px) { .banner-demo { padding-top: 6px; } }
-.banner-demo .btn { background: #fff; border-color: #fff; color: #7a3e00; font-weight: 700; text-shadow: none; }
+.banner-demo .btn { background: #fff; border-color: #fff; color: #7a3e00; font-weight: 700; }
 .banner-demo .btn:hover { background: #fff1de; }
-.banner-demo .btn:focus-visible { box-shadow: 0 0 0 2px #7a3e00, 0 0 0 4px #fff; }
+/* Two tones, the dark one outside: it stands out from both stripes (5.8:1 and 8.4:1). */
+.banner-demo .btn:focus-visible { box-shadow: 0 0 0 2px #fff, 0 0 0 4px #2b1400; }
 
 /* The way in and out: the one orange button, in the sidebar (always dark) and in the account menu. */
 .btn-demo, .side-user .btn-demo {
