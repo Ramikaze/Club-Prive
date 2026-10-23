@@ -2317,11 +2317,13 @@ export class Club {
   }
 
   // What the demo space takes from the real club (this method runs on the real club). Accounts come
-  // as identities only, never a password hash. The treasury starting point stays out: the demo sets
-  // its own, with fictitious amounts. `demo_mode` is not a stored setting any more.
+  // as identities only (id, name, role, active): neither a login nor a password hash leaves the real
+  // club, and the demo space has no use for them (it gives each account the login u<id>). The treasury
+  // starting point stays out: the demo sets its own, with fictitious amounts. `demo_mode` is not a
+  // stored setting any more.
   demoConfig() {
     return {
-      users: this.all('SELECT id, login, name, role, active FROM users ORDER BY id'),
+      users: this.all('SELECT id, name, role, active FROM users ORDER BY id'),
       settings: this.all(
         "SELECT key, value, updated_at, updated_by FROM settings WHERE key NOT IN ('demo_mode', 'opening_balances') ORDER BY key",
       ),
@@ -2333,14 +2335,18 @@ export class Club {
 
   // The demo records and the copied settings point at accounts (created_by, updated_by...), so the
   // real accounts exist here under the same ids. Identity only: the login is `u<id>` and the hash '!'
-  // is not the output of any password, so nobody can sign in to the demo space.
+  // is not the output of any password, so nobody can sign in to the demo space. This runs on every
+  // demo request: an account that already says the same is left alone (the WHERE of the update), so a
+  // request that changes nothing writes nothing.
   mirrorUsers(users) {
     this.assertDemo();
     for (const u of users) {
       this.run(
         `INSERT INTO users (id, login, name, role, password_hash, active, created_at) VALUES (?, ?, ?, ?, '!', ?, ?)
          ON CONFLICT(id) DO UPDATE SET login = excluded.login, name = excluded.name, role = excluded.role,
-           password_hash = excluded.password_hash, active = excluded.active`,
+           password_hash = excluded.password_hash, active = excluded.active
+         WHERE login IS NOT excluded.login OR name IS NOT excluded.name OR role IS NOT excluded.role
+           OR password_hash IS NOT excluded.password_hash OR active IS NOT excluded.active`,
         u.id, `u${u.id}`, u.name, u.role, u.active ? 1 : 0, this.nowIso(),
       );
     }

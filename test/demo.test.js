@@ -258,6 +258,18 @@ test('comptes de la démo : copies sans mot de passe, auteur fictif', async () =
   assert.deepEqual(demo.club.all('SELECT DISTINCT created_by FROM members').map((r) => r.created_by), [DEMO_AUTHOR_ID]);
 });
 
+test('configuration envoyée à la démo : les comptes ne portent que leur identité', async () => {
+  const { real } = await clubs();
+  const config = real.club.demoConfig();
+  assert.equal(config.users.length, 2);
+
+  // No login (the demo gives each account u<id>) and no password hash leave the real club.
+  assert.deepEqual(Object.keys(config.users[0]).sort(), ['active', 'id', 'name', 'role']);
+  for (const user of config.users) assert.deepEqual(Object.keys(user).sort(), ['active', 'id', 'name', 'role']);
+  const hash = real.club.userByLogin('proprietaire').password_hash;
+  assert.ok(hash && !JSON.stringify(config).includes(hash));
+});
+
 // ---------------------------------------------------------------------------- the demo space's API
 // The Worker's two steps for a request made in the demo space, called directly here, without the
 // routing: the real club vouches for the session and hands out the account and the configuration
@@ -444,6 +456,49 @@ test('en démo, un compte suit le vrai club : nouveau rôle, puis accès retiré
   const deactivated = await inDemo(demo, { user: ctx.user, config: real.club.demoConfig() }).get('/api/me');
   assert.equal(deactivated.status, 401);
   assert.equal(deactivated.data.error.code, 'NON_CONNECTE');
+});
+
+test('en démo, une requête qui ne change aucun compte n’écrit aucune ligne', async () => {
+  const { real, demo, admin } = await clubs();
+  // total_changes() counts every row this connection has written, triggers included.
+  const written = () => demo.club.get('SELECT total_changes() AS n').n;
+  const accounts = () => demo.club.all('SELECT * FROM users ORDER BY id');
+
+  // The same configuration prepared a second time: the accounts are not rewritten.
+  const config = real.club.demoConfig();
+  demo.club.prepareDemo(config);
+  const filled = written();
+  const rows = accounts();
+  demo.club.prepareDemo(config);
+  assert.equal(written(), filled);
+  assert.deepEqual(accounts(), rows);
+
+  // Same through the API: every demo request prepares the space again, and a read writes nothing.
+  const ctx = await contextOf(real, admin);
+  const asAdmin = () => inDemo(demo, { user: ctx.user, config: real.club.demoConfig() }); // the configuration as it is now
+  ok(await asAdmin().get('/api/me'));
+  ok(await asAdmin().get('/api/members'));
+  assert.equal(written(), filled);
+
+  // An account that changes is written, that one only, and once.
+  const manager = real.club.userByLogin('gerant');
+  ok(await admin.put(`/api/users/${manager.id}`, { role: 'admin' }));
+  ok(await asAdmin().get('/api/me'));
+  assert.equal(written(), filled + 1);
+  assert.equal(demo.club.userRow(manager.id).role, 'admin');
+  ok(await asAdmin().get('/api/me'));
+  assert.equal(written(), filled + 1);
+
+  // Every field is followed, the login and the hash stay what they were, the other accounts are left alone.
+  ok(await admin.put(`/api/users/${manager.id}`, { name: 'Gérante', role: 'gerant', active: false }));
+  ok(await asAdmin().get('/api/me'));
+  assert.equal(written(), filled + 2);
+  const followed = demo.club.userRow(manager.id);
+  assert.deepEqual(
+    [followed.name, followed.role, followed.active, followed.login, followed.password_hash],
+    ['Gérante', 'gerant', 0, `u${manager.id}`, '!'],
+  );
+  assert.deepEqual(accounts().filter((a) => a.id !== manager.id), rows.filter((a) => a.id !== manager.id));
 });
 
 test('en démo, le contrôle CSRF et l’idempotence sont ceux du vrai club', async () => {

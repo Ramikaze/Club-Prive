@@ -26,8 +26,9 @@ export class ClubDO extends DurableObject {
 }
 
 // The demo space: the same API on its own database. Its one entry point is the RPC below, which serves a
-// request as an account the real club has vouched for. There is deliberately no fetch(): nothing can reach
-// this object with a cookie to read, and no session is ever looked up here.
+// request as an account the real club has vouched for. There is deliberately no fetch(): no request can
+// reach this object by itself. The request handed to handleDemo still carries the browser's cookie, but
+// the API ignores it once an identity comes with the call: no session is ever looked up here.
 export class DemoDO extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
