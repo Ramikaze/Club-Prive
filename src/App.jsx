@@ -23,6 +23,7 @@ import Ledger from './pages/Ledger.jsx';
 import Closing from './pages/Closing.jsx';
 import Settings from './pages/Settings.jsx';
 import { api, setUnauthorizedHandler } from './lib/api.js';
+import { isDemoSpace, leaveDemo } from './lib/space.js';
 import { applyTheme } from './lib/theme.js';
 import { useStore, useIsAdmin } from './store/useStore.js';
 
@@ -64,6 +65,9 @@ export default function App() {
   }, []);
 
   if (status === 'boot') return <div className="boot">Chargement…</div>;
+  // In the demo space a reload sends the same demo header again, so a demo that cannot load would lock
+  // this browser out of the real site: offer the way out. It is the user's choice, never automatic (a
+  // network blip must not throw anyone out of the demo).
   if (status === 'offline') {
     return (
       <div className="login-page">
@@ -71,6 +75,7 @@ export default function App() {
           <h1>Serveur injoignable</h1>
           <p className="muted">{bootError?.message}</p>
           <button type="button" className="btn btn-primary" onClick={() => window.location.reload()}>Réessayer</button>
+          {isDemoSpace() && <button type="button" className="btn" onClick={leaveDemo}>Quitter la démo</button>}
         </div>
       </div>
     );
