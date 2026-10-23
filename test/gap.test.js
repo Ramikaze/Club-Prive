@@ -4,6 +4,7 @@ import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { Server, Client, ok, UM } from './harness.js';
 import { conflict } from '../worker/errors.js';
+import { addDays } from '../shared/time.js';
 
 let server, admin, manager, rooms, members, today, monthly;
 
@@ -369,15 +370,18 @@ const OBSTACLE = {
 };
 
 // The window and the server agree. One step beyond the longest extension the window names (the shortest, when it
-// names none) is refused, with the code of the obstacle; the longest is accepted, ends at the time the window gave,
-// and the session so extended has a closed window, stopped by the same obstacle.
-async function agrees(club, client, id, { max, until = null, code, reason = null }) {
+// names none) is refused, with the code of the obstacle; the longest is accepted, ends at the time the window gave
+// (on the day it gave: `nextDay`, true when that is a later calendar day than the end the session has), and the
+// session so extended has a closed window, stopped by the same obstacle.
+async function agrees(club, client, id, { max, until = null, nextDay = false, code, reason = null }) {
   const step = club.settings().booking.extension_step_min;
   const w = club.extensionWindow(id);
   assert.equal(w.max_minutes, max, 'max_minutes');
   assert.equal(w.possible, max > 0, 'possible');
   assert.equal(w.until_time, until, 'until_time');
+  assert.equal(w.until_next_day, nextDay, 'until_next_day');
   assert.equal(w.reason, reason, 'reason');
+  const endDate = ok(await client.get(`/api/reservations/${id}`)).reservation.end_date;
   const beyond = await client.post(`/api/reservations/${id}/extend`, { minutes: max + step });
   assert.equal(beyond.data.error?.code, code, JSON.stringify(beyond.data));
   if (!max) return;
@@ -386,6 +390,7 @@ async function agrees(club, client, id, { max, until = null, code, reason = null
   const done = ok(await client.post(`/api/reservations/${id}/extend`, { minutes: max }));
   assert.equal(done.reservation.end_time, until);
   assert.equal(done.reservation.end_at, w.until_at);
+  assert.equal(done.reservation.end_date !== endDate, nextDay, 'the extended booking ends on another day');
   assert.equal(done.extension_window.possible, false);
   assert.match(done.extension_window.reason, OBSTACLE[code]);
 }
@@ -395,7 +400,7 @@ test('fenêtre : suivante à fin + 90 min, battement 30', async () => {
   await book({ member_id: members[1].id, start_time: '17:30', duration_min: 60 }); // 17:30-18:30, 90 minutes after the end
   // An hour more still leaves the half hour before 17:30; an hour and a half does not.
   assert.deepEqual(windowOf(first.id), {
-    possible: true, max_minutes: 60, until_time: '17:00', until_at: isoOf(first.end_ms + 60 * MIN), reason: null,
+    possible: true, max_minutes: 60, until_time: '17:00', until_at: isoOf(first.end_ms + 60 * MIN), until_next_day: false, reason: null,
     next: { member_name: 'Bruno Test', start_time: '17:30' },
   });
 });
@@ -404,7 +409,7 @@ test('fenêtre : suivante à fin + 30 min', async () => {
   const first = await book({ start_time: '14:00', duration_min: 120 }); // 14:00-16:00
   await book({ member_id: members[1].id, start_time: '16:30', duration_min: 60 }); // 16:30-17:30
   assert.deepEqual(windowOf(first.id), {
-    possible: false, max_minutes: 0, until_time: null, until_at: null,
+    possible: false, max_minutes: 0, until_time: null, until_at: null, until_next_day: false,
     reason: 'Prolongation impossible : la séance suivante commence à 16:30 (Bruno Test).',
     next: { member_name: 'Bruno Test', start_time: '16:30' },
   });
@@ -412,9 +417,9 @@ test('fenêtre : suivante à fin + 30 min', async () => {
 
 test('fenêtre : sans suivante', async () => {
   const first = await book({ start_time: '14:00', duration_min: 120 }); // 14:00-16:00
-  // Nothing follows: the 24 hours of a session are the only limit, 22 hours more.
+  // Nothing follows: the 24 hours of a session are the only limit, 22 hours more, so 14:00 is tomorrow's.
   assert.deepEqual(windowOf(first.id), {
-    possible: true, max_minutes: 1320, until_time: '14:00', until_at: isoOf(first.end_ms + 1320 * MIN), reason: null, next: null,
+    possible: true, max_minutes: 1320, until_time: '14:00', until_at: isoOf(first.end_ms + 1320 * MIN), until_next_day: true, reason: null, next: null,
   });
   // It goes by whole steps, rounded down: 4 hours at a time, 20 hours more is the longest.
   await setBooking({ extension_step_min: 240 });
@@ -423,6 +428,27 @@ test('fenêtre : sans suivante', async () => {
   await setBooking({ extension_step_min: 60 });
   const second = await book({ member_id: members[1].id, room_id: rooms[1].id, start_time: '18:00', duration_min: 90 });
   assert.equal(windowOf(second.id).max_minutes, 1320);
+});
+
+test('fenêtre : une limite qui tombe le lendemain le dit, celle du jour même non', async () => {
+  const limit = (id) => {
+    const w = windowOf(id);
+    return [w.until_time, w.until_next_day];
+  };
+  // The same day: 16:00 plus an hour, with the next booking at 17:30.
+  const sameDay = await book({ start_time: '14:00', duration_min: 120 }); // 14:00-16:00
+  await book({ member_id: members[1].id, start_time: '17:30', duration_min: 60 });
+  assert.deepEqual(limit(sameDay.id), ['17:00', false]);
+  // Ending at 23:00 with the next booking tomorrow at 22:00, the limit is 21:30 tomorrow: a bare "21:30" would read
+  // as a time before the end.
+  const night = await sessionIn(rooms[1], 'Zoé', '22:00', 60); // 22:00-23:00
+  await sessionIn(rooms[1], 'Yann', '22:00', 60, { date: addDays(today, 1) });
+  assert.deepEqual(limit(night.id), ['21:30', true]);
+  assert.equal(windowOf(night.id).max_minutes, 1350);
+  // The comparison is with the end the session has: ending at midnight, it is already the next calendar day's,
+  // and a limit that afternoon is not tomorrow's again.
+  const midnight = await sessionIn(rooms[2], 'Camille', '22:00', 120); // 22:00-00:00
+  assert.deepEqual(limit(midnight.id), ['22:00', false]);
 });
 
 test('fenêtre : la suivante est celle de la même salle, une réservation annulée mise à part', async () => {
@@ -454,7 +480,7 @@ test('fenêtre : une séance terminée ou annulée n’a rien à prolonger', asy
   ok(await manager.post(`/api/reservations/${done.id}/finish`));
   const cancelled = await book({ member_id: members[1].id, start_time: '18:00', duration_min: 60 });
   ok(await manager.post(`/api/reservations/${cancelled.id}/cancel`, { reason: 'Annulation de test' }));
-  const nothing = { possible: false, max_minutes: 0, until_time: null, until_at: null, reason: null, next: null };
+  const nothing = { possible: false, max_minutes: 0, until_time: null, until_at: null, until_next_day: false, reason: null, next: null };
   for (const id of [done.id, cancelled.id]) {
     assert.deepEqual(windowOf(id), nothing);
     assert.deepEqual(ok(await manager.get(`/api/reservations/${id}`)).extension_window, nothing);
@@ -549,19 +575,33 @@ test("fenêtre et prolongation d'accord", async () => {
     {
       name: 'sans suivante',
       build: (room) => sessionIn(room, 'Zoé', '14:00', 120),
-      expect: { max: 1320, until: '14:00', code: 'DUREE_MAXIMALE' },
+      expect: { max: 1320, until: '14:00', nextDay: true, code: 'DUREE_MAXIMALE' },
+    },
+    {
+      name: 'séance finie à 23:00, suivante demain à 22:00 : la limite est celle du lendemain',
+      build: async (room) => {
+        const session = await sessionIn(room, 'Zoé', '22:00', 60); // 22:00-23:00
+        await sessionIn(room, 'Yann', '22:00', 60, { date: addDays(today, 1) });
+        return session;
+      },
+      expect: { max: 1350, until: '21:30', nextDay: true, code: 'BATTEMENT' },
+    },
+    {
+      name: 'séance finie à minuit : une limite l’après-midi suivant est du même jour que sa fin',
+      build: (room) => sessionIn(room, 'Zoé', '22:00', 120), // 22:00-00:00
+      expect: { max: 1320, until: '22:00', code: 'DUREE_MAXIMALE' },
     },
     {
       name: 'sans suivante, pas de 45 minutes',
       settings: { slot_min: 15, extension_step_min: 45 },
       build: (room) => sessionIn(room, 'Zoé', '14:00', 60), // 1380 minutes left, 30 steps of 45
-      expect: { max: 1350, until: '13:30', code: 'DUREE_MAXIMALE' },
+      expect: { max: 1350, until: '13:30', nextDay: true, code: 'DUREE_MAXIMALE' },
     },
     {
       name: 'sans suivante, pas de 4 heures',
       settings: { extension_step_min: 240 },
       build: (room) => sessionIn(room, 'Zoé', '14:00', 120),
-      expect: { max: 1200, until: '12:00', code: 'DUREE_MAXIMALE' },
+      expect: { max: 1200, until: '12:00', nextDay: true, code: 'DUREE_MAXIMALE' },
     },
     {
       name: 'une séance collée avant elle ne la gêne pas',
@@ -572,7 +612,7 @@ test("fenêtre et prolongation d'accord", async () => {
         await setBooking({ gap_min: 120 });
         return session;
       },
-      expect: { max: 1380, until: '14:00', code: 'DUREE_MAXIMALE' },
+      expect: { max: 1380, until: '14:00', nextDay: true, code: 'DUREE_MAXIMALE' },
     },
     {
       name: 'un membre inscrit ailleurs plus tard',
@@ -670,7 +710,7 @@ test('fenêtre : tarif non validé, sans crédit restant', async () => {
   try {
     const first = await real.book({ duration_min: 120 }); // the 2 hours of credit, all of it
     assert.deepEqual(real.server.club.extensionWindow(first.id), {
-      possible: false, max_minutes: 0, until_time: null, until_at: null, reason: TARIFF_REASON, next: null,
+      possible: false, max_minutes: 0, until_time: null, until_at: null, until_next_day: false, reason: TARIFF_REASON, next: null,
     });
     await real.agrees(first.id, { max: 0, code: 'TARIF_NON_VALIDE', reason: TARIFF_REASON });
   } finally {
@@ -683,14 +723,14 @@ test('fenêtre : tarif non validé, 60 min de crédit restant', async () => {
   try {
     const first = await real.book({ duration_min: 60 }); // 14:00-15:00, an hour of credit left
     assert.deepEqual(real.server.club.extensionWindow(first.id), {
-      possible: true, max_minutes: 60, until_time: '16:00', until_at: isoOf(first.end_ms + 60 * MIN), reason: null, next: null,
+      possible: true, max_minutes: 60, until_time: '16:00', until_at: isoOf(first.end_ms + 60 * MIN), until_next_day: false, reason: null, next: null,
     });
     await real.agrees(first.id, { max: 60, until: '16:00', code: 'TARIF_NON_VALIDE' });
     // Once an administrator has validated the tariff, a booking made after that is no longer limited by its credit...
     ok(await real.admin.put('/api/settings', { overtime_tariff: { hour: 25000 * UM, half: 15000 * UM, validated: true } }));
     const yann = await real.enroll('Yann');
     const later = await real.book({ member_id: yann.id, start_time: '20:00', duration_min: 60 }); // 60 minutes of credit left
-    await real.agrees(later.id, { max: 1380, until: '20:00', code: 'DUREE_MAXIMALE' });
+    await real.agrees(later.id, { max: 1380, until: '20:00', nextDay: true, code: 'DUREE_MAXIMALE' });
     // ... while the one made before keeps the tariff it was booked with, as the server does.
     await real.agrees(first.id, { max: 0, code: 'TARIF_NON_VALIDE', reason: TARIFF_REASON });
   } finally {
@@ -717,7 +757,7 @@ test('fenêtre : exposée', async () => {
   const first = await book({ start_time: '14:00', duration_min: 120 }); // 14:00-16:00
   await book({ member_id: members[1].id, start_time: '17:30', duration_min: 60 });
   const expected = {
-    possible: true, max_minutes: 60, until_time: '17:00', until_at: isoOf(first.end_ms + 60 * MIN), reason: null,
+    possible: true, max_minutes: 60, until_time: '17:00', until_at: isoOf(first.end_ms + 60 * MIN), until_next_day: false, reason: null,
     next: { member_name: 'Bruno Test', start_time: '17:30' },
   };
   // On the booking's page, started or not.
@@ -732,7 +772,7 @@ test('fenêtre : exposée', async () => {
   const extended = ok(await extend(first.id, 60));
   assert.equal(extended.reservation.end_time, '17:00');
   assert.deepEqual(extended.extension_window, {
-    possible: false, max_minutes: 0, until_time: null, until_at: null,
+    possible: false, max_minutes: 0, until_time: null, until_at: null, until_next_day: false,
     reason: 'Prolongation impossible : la séance suivante commence à 17:30 (Bruno Test).',
     next: { member_name: 'Bruno Test', start_time: '17:30' },
   });

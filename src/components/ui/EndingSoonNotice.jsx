@@ -25,7 +25,7 @@ export default function EndingSoonNotice({ reservation: r, onExtended }) {
   if (w?.possible) {
     answer = (
       <div className="ending-notice-extend">
-        <p>{`Prolongation possible jusqu’à ${w.until_time}`}</p>
+        <p>{`Prolongation possible jusqu’à ${w.until_time}${w.until_next_day ? ' (lendemain)' : ''}`}</p>
         <button type="button" className="btn btn-sm" onClick={() => openExtendDialog(r, onExtended, w)}>Prolonger</button>
       </div>
     );

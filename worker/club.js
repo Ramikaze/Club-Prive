@@ -1704,7 +1704,9 @@ export class Club {
   // so the window cannot say "possible" for an extension the server refuses. A refusal only ever grows with
   // the length (a longer extension takes more of the room and of each member's time, comes closer to the next
   // booking, goes further beyond the credit and nearer to the 24-hour limit), so the first length refused ends
-  // the search. `next` is the next booking of the room, whatever stops the extension.
+  // the search. `next` is the next booking of the room, whatever stops the extension. `until_time` is a bare
+  // time, so `until_next_day` says when that limit falls on a later calendar day than the session's current
+  // end ("until 14:00" after an end at 16:00 means tomorrow).
   extensionWindow(id) {
     const r = this.reservationRow(id);
     const { timezone: tz, booking: { extension_step_min: step } } = this.settings();
@@ -1725,7 +1727,7 @@ export class Club {
     }
     // A booking neither waiting nor running has nothing to extend, and nothing to say about it.
     if (refusal?.code === 'STATUT') {
-      return { possible: false, max_minutes: 0, until_time: null, until_at: null, reason: null, next: null };
+      return { possible: false, max_minutes: 0, until_time: null, until_at: null, until_next_day: false, reason: null, next: null };
     }
     const next = this.get(
       `${RES_SELECT} WHERE r.status <> 'annulee' AND COALESCE(r.room_id, 1) = ? AND r.start_ms >= ? AND r.id <> ?
@@ -1737,6 +1739,7 @@ export class Club {
       max_minutes: best?.add ?? 0,
       until_time: best ? localParts(best.newEnd, tz).time : null,
       until_at: best ? new Date(best.newEnd).toISOString() : null,
+      until_next_day: best ? localParts(best.newEnd, tz).date !== localParts(r.end_ms, tz).date : false,
       reason: best ? null : this.extensionReason(refusal),
       next: next ? { member_name: `${next.first_name} ${next.last_name}`, start_time: localParts(next.start_ms, tz).time } : null,
     };
