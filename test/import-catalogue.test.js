@@ -89,6 +89,21 @@ test('lecture Excel : sans ligne d’en-tête « cigares » et « prix », elle 
   assert.throws(() => readCatalogue(workbook([['cigares', 'montant'], ['alpha', 2000]])), /« cigares » et « prix »/);
 });
 
+test('lecture Excel : les numéros de ligne restent ceux d’Excel quand la feuille ne commence pas en A1', () => {
+  // The first cell in use is B3, as in a file whose title and first rows were cleared: Excel saves the range of the
+  // cells in use (B3:C6) and still counts the lines from its row 1. (`origin` alone leaves the range starting at A1.)
+  const book = XLSX.utils.book_new();
+  const sheet = XLSX.utils.aoa_to_sheet([['cigares', 'prix'], ['alpha', 2000], [], ['bravo', 3000]], { origin: 'B3' });
+  sheet['!ref'] = 'B3:C6';
+  XLSX.utils.book_append_sheet(book, sheet, 'Feuil1');
+  const buffer = XLSX.write(book, { type: 'buffer', bookType: 'xlsx' });
+  assert.equal(XLSX.read(buffer, { type: 'buffer' }).Sheets.Feuil1['!ref'], 'B3:C6', 'the sheet really starts at B3');
+  assert.deepEqual(readCatalogue(buffer), [
+    { row: 4, name: 'alpha', price: 2000 },
+    { row: 6, name: 'bravo', price: 3000 },
+  ]);
+});
+
 // ---------------------------------------------------------------------------- checking the sheet against the manifests
 
 // A manifest entry for a made-up cigar; `extra` overrides any field.
@@ -166,7 +181,7 @@ test('préparation : deux produits ne portent jamais le même nom, qu’il vienn
   });
   // The accent makes the third one another name.
   assert.equal(alike.problems.length, 1, alike.problems.join('\n'));
-  assert.match(alike.problems[0], /Nom en double « Edition limitée 2025 » : lignes 5 et 6/);
+  assert.match(alike.problems[0], /Nom en double « Edition limitée 2025 » : ligne 5 « alpha » et ligne 6 « bravo »\./);
 
   // The same cigar twice in the sheet.
   const twice = check({
@@ -175,14 +190,54 @@ test('préparation : deux produits ne portent jamais le même nom, qu’il vienn
     photos: { alpha: webp(), bravo: webp() },
   });
   assert.equal(twice.problems.length, 1, twice.problems.join('\n'));
-  assert.match(twice.problems[0], /Nom en double « alpha officiel » : lignes 5 et 8/);
+  assert.match(twice.problems[0], /Nom en double « alpha officiel » : ligne 5 « alpha » et ligne 8 « Alpha »\./);
 
   const thrice = check({
     rows: [5, 6, 9].map((row) => ({ row, name: 'alpha', price: 1000 })),
     manifests: [entry('alpha')],
     photos: { alpha: webp() },
   });
-  assert.match(thrice.problems.join('\n'), /lignes 5, 6 et 9/);
+  assert.match(thrice.problems.join('\n'), /ligne 5 « alpha », ligne 6 « alpha » et ligne 9 « alpha »\./);
+});
+
+test('préparation : un nom en double nomme chaque ligne d’Excel avec son nom, et dit quoi faire', () => {
+  // Two cigars of the sheet, two fiches, one official name: the owner has to know which rows, and what to change.
+  const two = check({
+    rows: [{ row: 46, name: 'ALPHA RB', price: 8000 }, { row: 47, name: 'ALPHA ED. 2025', price: 9000 }],
+    manifests: [
+      entry('ALPHA RB', { official_name: 'Alpha Robusto' }),
+      entry('ALPHA ED. 2025', { official_name: 'Alpha Robusto' }),
+    ],
+    photos: { 'alpha-rb': webp(), 'alpha-ed-2025': webp() },
+  });
+  assert.deepEqual(two.problems, [
+    "Nom en double « Alpha Robusto » : ligne 46 « ALPHA RB » et ligne 47 « ALPHA ED. 2025 ». Deux produits ne peuvent pas porter le même nom : "
+    + "le second écraserait le premier. Donnez à l'une des deux fiches son propre nom officiel, ou supprimez l'une des deux lignes du fichier Excel.",
+  ]);
+  assert.deepEqual(two.items, [
+    { row: 46, slug: 'alpha-rb', name: 'Alpha Robusto', price: 8000, description: 'Une description.', photo: { mime: 'image/webp', bytes: webp() } },
+    { row: 47, slug: 'alpha-ed-2025', name: 'Alpha Robusto', price: 9000, description: 'Une description.', photo: { mime: 'image/webp', bytes: webp() } },
+  ]);
+
+  // Three fiches: the same two ways out, for all but one of them.
+  const three = check({
+    rows: [{ row: 5, name: 'a1', price: 1000 }, { row: 6, name: 'a2', price: 1000 }, { row: 9, name: 'a3', price: 1000 }],
+    manifests: ['a1', 'a2', 'a3'].map((name) => entry(name, { official_name: 'Nom commun' })),
+    photos: { a1: webp(), a2: webp(), a3: webp() },
+  });
+  assert.equal(three.problems.length, 1, three.problems.join('\n'));
+  assert.match(three.problems[0], /ligne 5 « a1 », ligne 6 « a2 » et ligne 9 « a3 »\./);
+  assert.match(three.problems[0], /Donnez à chaque fiche sauf une son propre nom officiel, ou supprimez du fichier Excel les lignes en trop\.$/);
+
+  // One fiche used by both rows: another official name is out of the question, only a row can go.
+  const same = check({
+    rows: [{ row: 5, name: 'alpha', price: 1000 }, { row: 8, name: 'ALPHA', price: 1000 }],
+    manifests: [entry('alpha')],
+    photos: { alpha: webp() },
+  });
+  assert.equal(same.problems.length, 1, same.problems.join('\n'));
+  assert.match(same.problems[0], /ligne 5 « alpha » et ligne 8 « ALPHA »\./);
+  assert.match(same.problems[0], /Ces lignes utilisent la même fiche : supprimez du fichier Excel les lignes en trop\.$/);
 });
 
 test('préparation : le prix est un nombre entier de francs, de 1 à 1 000 000 000', () => {
@@ -277,9 +332,82 @@ test('préparation : l’identifiant d’une photo ne sort jamais du dossier imp
     });
     assert.equal(problems.length, 1, `${slug} : ${problems.join('\n')}`);
     assert.match(problems[0], /Ligne 5 « alpha » : identifiant de photo invalide/, slug);
+    // The message names every character the identifier may hold (dots and underscores are taken as well).
+    assert.match(problems[0], /lettres, chiffres, tirets, points ou tirets bas, en commençant par une lettre ou un chiffre/, slug);
     assert.deepEqual(items, []);
   }
   assert.deepEqual(asked, []);
+
+  // What the message promises is accepted.
+  const ok = check({
+    rows: [{ row: 5, name: 'alpha', price: 1000 }],
+    manifests: [entry('alpha', { slug: 'alpha_1.2-b' })],
+    photos: { 'alpha_1.2-b': webp() },
+  });
+  assert.deepEqual(ok.problems, []);
+  assert.equal(ok.items[0].slug, 'alpha_1.2-b');
+});
+
+test('préparation : une fiche de manifeste qui n’est pas un objet JSON est signalée, sans arrêter la lecture des autres', () => {
+  for (const bad of [null, 'texte', 42, true, [1, 2]]) {
+    const { problems, items } = check({
+      rows: [{ row: 5, name: 'alpha', price: 1000 }],
+      manifests: [[bad, entry('alpha')]],
+      photos: { alpha: webp() },
+    });
+    assert.deepEqual(problems, ["Une fiche des manifestes n'est pas un objet JSON."], JSON.stringify(bad));
+    assert.equal(items.length, 1, JSON.stringify(bad));
+  }
+  // Alone in its manifest, it must not make the check fail with an error of its own.
+  assert.match(check({ rows: [{ row: 5, name: 'alpha', price: 1000 }], manifests: [[null]] }).problems.join('\n'), /n'est pas un objet JSON/);
+});
+
+test('préparation : les noms et la description sont mis en forme Unicode NFC, comme le serveur les range', () => {
+  // The same words written two ways: the capital E and the e with its accent as one character, or as a letter followed by
+  // the combining acute accent (U+0301), which is how a Mac may write them.
+  const composed = '\u00c9dition Sp\u00e9ciale';
+  const decomposed = 'E\u0301dition Spe\u0301ciale';
+  assert.notEqual(decomposed, composed);
+  assert.notEqual(decomposed.length, composed.length);
+  assert.equal(decomposed.normalize('NFC'), composed);
+
+  // The official name and the description.
+  const official = oneRow({ official_name: decomposed, description_fr: `Une e\u0301toile. ${decomposed}` });
+  assert.deepEqual(official.problems, []);
+  assert.equal(official.items[0].name, composed);
+  assert.equal(official.items[0].name.length, composed.length);
+  assert.equal(official.items[0].description, `Une \u00e9toile. ${composed}`);
+
+  // No official name: the sheet's own name is the product's, in NFC as well, and found whichever way it was typed.
+  const sheetName = check({
+    rows: [{ row: 5, name: decomposed, price: 1000 }],
+    manifests: [entry(composed, { slug: 'edition-speciale', official_name: null, file: null })],
+  });
+  assert.deepEqual(sheetName.problems, []);
+  assert.equal(sheetName.items[0].name, composed);
+  assert.equal(sheetName.warnings.length, 1);
+});
+
+test('préparation : une fiche sans nom ni identifiant est dite telle quelle, jamais « undefined »', () => {
+  const { problems } = check({
+    rows: [{ row: 5, name: 'alpha', price: 1000 }],
+    manifests: [[entry('alpha'), { slug: 'sans-nom', official_name: 'Zéro' }, { input_name: 'zulu' }, { input_name: '  ', slug: 'blanc' }]],
+    photos: { alpha: webp() },
+  });
+  assert.equal(problems.length, 3, problems.join('\n'));
+  assert.match(problems[0], /^Fiche sans nom \(sans-nom\) : le nom du cigare \(« input_name »\) manque/);
+  assert.match(problems[1], /^Fiche « zulu » \(sans identifiant\) : aucune ligne du fichier Excel ne l'utilise\.$/);
+  assert.match(problems[2], /^Fiche sans nom \(blanc\) : le nom du cigare/);
+  assert.doesNotMatch(problems.join('\n'), /undefined/);
+
+  // Two fiches of one name, one of them without identifier.
+  const twin = check({
+    rows: [{ row: 5, name: 'charlie', price: 1000 }],
+    manifests: [[entry('charlie'), { input_name: 'charlie' }]],
+    photos: { charlie: webp() },
+  });
+  assert.match(twin.problems.join('\n'), /Ligne 5 « charlie » : 2 fiches portent ce nom dans les manifestes \(charlie, sans identifiant\)/);
+  assert.doesNotMatch(twin.problems.join('\n'), /undefined/);
 });
 
 test('préparation : un fichier sans aucun cigare est refusé, et tous les problèmes sont rendus d’un coup', () => {
@@ -318,7 +446,8 @@ function door(server) {
   return { fetch, calls };
 }
 
-// A `fetch` that answers from a script, one answer per call: [status, body] or an Error to throw.
+// A `fetch` that answers from a script, one answer per call: [status, body], a function that makes the Response, or an
+// Error to throw.
 function scripted(...answers) {
   const calls = [];
   const fetch = async (url, init) => {
@@ -326,6 +455,7 @@ function scripted(...answers) {
     const answer = answers.shift();
     assert.ok(answer, 'the script made a call nobody planned');
     if (answer instanceof Error) throw answer;
+    if (typeof answer === 'function') return answer();
     const [status, body] = answer;
     return new Response(typeof body === 'string' ? body : JSON.stringify(body), { status });
   };
@@ -333,7 +463,11 @@ function scripted(...answers) {
 }
 const done = (n, extra = {}) => [200, { id: n, reference: `CIG-${String(n).padStart(3, '0')}`, status: 'created', photo: true, ...extra }];
 const refusal = (status, code, message) => [status, { error: { code, message, details: null } }];
-const noReply = () => Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
+// A network failure as Node's fetch reports it: a TypeError « fetch failed », the system's code on its `cause`.
+const netError = (code, detail = `connect ${code} 127.0.0.1:443`) => Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error(detail), { code }) });
+const noReply = () => netError('ECONNREFUSED');
+// The 200 whose body breaks off halfway, as a connection that drops does.
+const cutShort = () => new Response(new ReadableStream({ start(controller) { controller.error(new TypeError('terminated')); } }), { status: 200 });
 
 const item = (row, name, extra = {}) => ({
   row, slug: `produit-${row}`, name, price: 9000 + row, description: `Description de ${name}.`, photo: { mime: 'image/webp', bytes: webp(300 + row, row) }, ...extra,
@@ -597,6 +731,181 @@ test('envoi : un message du serveur qui répéterait le code ne l’affiche pas,
   assert.equal(never.calls.length, 0);
 });
 
+test('envoi : un 403 autre que CODE_INCORRECT, ou un 409 CATEGORIE_DIFFERENTE, est l’échec de ce produit seul : ni nouvel essai, ni pause, et le suivant part', async () => {
+  const cases = [
+    ['403 INTERDIT', refusal(403, 'INTERDIT', 'Accès interdit à cette fiche.'), { status: 403, code: 'INTERDIT', message: 'Accès interdit à cette fiche.' }],
+    [
+      '409 CATEGORIE_DIFFERENTE',
+      refusal(409, 'CATEGORIE_DIFFERENTE', "Le produit « Bravo » existe déjà (catégorie bouteille) ; la fiche importée le range en cigare. Rien n'a été modifié."),
+      { status: 409, code: 'CATEGORIE_DIFFERENTE', message: "Le produit « Bravo » existe déjà (catégorie bouteille) ; la fiche importée le range en cigare. Rien n'a été modifié." },
+    ],
+  ];
+  for (const [label, answer, expected] of cases) {
+    const { fetch, calls } = scripted([200, { deactivated: 0 }], done(1), answer, done(3));
+    const w = witness();
+    const summary = await send([item(5, 'Alpha'), item(6, 'Bravo'), item(7, 'Charlie')], fetch, w);
+
+    assert.equal(calls.length, 4, label); // the retirement and three products, none sent twice
+    assert.equal(calls[3].item.name, 'Charlie', label);
+    assert.deepEqual(w.sleeps, [], label);
+    assert.equal(summary.stopped, null, label);
+    assert.equal(summary.created, 2, label);
+    assert.equal(summary.remaining, 0, label);
+    assert.deepEqual(summary.failures, [{ row: 6, name: 'Bravo', ...expected }], label);
+    assert.match(w.text(), /1 échec/, label);
+    assert.match(w.text(), /Ligne 6 « Bravo » : /, label);
+  }
+});
+
+test('envoi : un nom qui n’existe que dans l’autre catégorie est refusé par le serveur (409), rien n’est écrit, et le produit suivant part', async () => {
+  const { server } = await club();
+  const actor = server.club.userRow(server.club.userByLogin('proprietaire').id);
+  server.club.tx(() => server.club.createProduct(actor, { category: 'bouteille', name: 'Alpha Robusto', reference: 'BOU-001', price: 5000 * UM }));
+  const bottle = () => ({ ...server.club.get("SELECT category, name, reference, price, active, description FROM products WHERE reference = 'BOU-001'") });
+  const before = bottle();
+  const { fetch, calls } = door(server);
+  const w = witness();
+
+  const summary = await send([item(5, 'Alpha Robusto'), item(6, 'Bravo Corona')], fetch, w);
+
+  assert.equal(calls.length, 3);
+  assert.deepEqual(w.sleeps, []);
+  assert.equal(summary.stopped, null);
+  assert.equal(summary.created, 1);
+  assert.equal(summary.failures.length, 1);
+  assert.equal(summary.failures[0].row, 5);
+  assert.equal(summary.failures[0].status, 409);
+  assert.equal(summary.failures[0].code, 'CATEGORIE_DIFFERENTE');
+  assert.match(summary.failures[0].message, /existe déjà \(catégorie bouteille\)/);
+  // The refused call wrote nothing: the bottle is as it was, no cigar of that name was made, and the next one is CIG-001.
+  assert.deepEqual(bottle(), before);
+  assert.equal(server.club.get("SELECT COUNT(*) AS n FROM products WHERE lower(name) = 'alpha robusto'").n, 1);
+  assert.equal(server.club.get("SELECT reference FROM products WHERE name = 'Bravo Corona'").reference, 'CIG-001');
+  assert.match(w.text(), /ÉCHEC\s+Alpha Robusto : /);
+});
+
+test('envoi : le code ne s’affiche dans aucun message d’arrêt : ni sur le réseau, ni sur une erreur 5xx, ni sur un 429', async () => {
+  // The calls that fail, each with a reason that repeats the code: the first try and every retry the run allows itself.
+  const stops = [
+    ['réseau', 'RESEAU', () => [1, 2, 3, 4].map(() => new Error(`échec avec le code ${TOKEN}`))],
+    ['5xx', 'ERREUR_SERVEUR', () => [1, 2, 3, 4].map(() => refusal(500, 'ERREUR_SERVEUR', `Erreur interne du code ${TOKEN}`))],
+    ['429', 'TROP_DE_TENTATIVES', () => [1, 2, 3].map(() => refusal(429, 'TROP_DE_TENTATIVES', `Adresse bloquée pour le code ${TOKEN}`))],
+  ];
+  for (const [label, code, failing] of stops) {
+    // At the very first call, then in the middle of the products.
+    for (const [where, before] of [['premier appel', []], ['en cours de route', [[200, { deactivated: 0 }], done(1)]]]) {
+      const answers = [...before, ...failing()];
+      const { fetch, calls } = scripted(...answers);
+      const w = witness();
+      const summary = await send([item(5, 'Alpha'), item(6, 'Bravo')], fetch, w);
+      const what = `${label}, ${where}`;
+      assert.equal(calls.length, answers.length, what);
+      assert.equal(summary.stopped.code, code, what);
+      // The reason is still told, with the code struck out.
+      assert.match(summary.stopped.message, /le code \*\*\*|du code \*\*\*/, what);
+      assert.ok(!w.text().includes(TOKEN), `${what} : ${w.text()}`);
+      assert.ok(!JSON.stringify(summary).includes(TOKEN), what);
+    }
+  }
+});
+
+test('envoi : chaque appel part avec une limite de temps, et un appel qui reste sans réponse est retenté comme une panne de réseau', { timeout: 15000 }, async () => {
+  // The limit travels with the call as a signal still running a moment later (the real one lasts two minutes).
+  const signals = [];
+  const slowButSure = async (url, init) => {
+    signals.push(init.signal);
+    await new Promise((resolve) => { setTimeout(resolve, 40); });
+    return new Response(JSON.stringify({ deactivated: 0 }), { status: 200 });
+  };
+  await send([], slowButSure, witness());
+  assert.equal(signals.length, 1);
+  assert.ok(signals[0] instanceof AbortSignal);
+  assert.equal(signals[0].aborted, false);
+
+  // A server that never answers: the limit ends the wait, and the call is tried again like any network failure.
+  const silent = (url, init) => new Promise((resolve, reject) => {
+    init.signal.addEventListener('abort', () => reject(init.signal.reason));
+  });
+  const w = witness();
+  const summary = await runImport({ items: [item(5, 'Alpha')], baseUrl: BASE, token: TOKEN, fetch: silent, log: w.log, sleep: w.sleep, timeoutMs: 20 });
+  assert.deepEqual(w.sleeps, [2000, 5000, 10000]);
+  assert.equal(summary.stopped.code, 'RESEAU');
+  assert.match(w.text(), /Le serveur met trop de temps à répondre \(TimeoutError\)/);
+});
+
+test('envoi : une panne de réseau est dite en français, le code technique entre parenthèses ; un certificat refusé ou « fetch failed » donne l’astuce du VPN', async () => {
+  const vpn = 'Un VPN (NordVPN par exemple) en est souvent la cause : déconnectez-le puis relancez la commande.';
+  const certificate = (code) => [`certificat ${code}`, netError(code), `Le certificat de sécurité du site n'est pas accepté (${code})`, true];
+  const slow = (code) => [`délai ${code}`, netError(code), `Le serveur met trop de temps à répondre (${code})`, false];
+  const unknownAddress = (code) => [`adresse ${code}`, netError(code), `Adresse inconnue, vérifiez --url et la connexion internet (${code})`, false];
+  const cases = [
+    ['connexion refusée', noReply(), 'Le serveur ne répond pas à cette adresse (ECONNREFUSED)', false],
+    unknownAddress('ENOTFOUND'),
+    unknownAddress('EAI_AGAIN'),
+    ['délai de la requête', new DOMException('The operation was aborted due to timeout', 'TimeoutError'), 'Le serveur met trop de temps à répondre (TimeoutError)', false],
+    slow('ETIMEDOUT'),
+    slow('UND_ERR_CONNECT_TIMEOUT'),
+    certificate('CERT_HAS_EXPIRED'),
+    certificate('DEPTH_ZERO_SELF_SIGNED_CERT'),
+    certificate('SELF_SIGNED_CERT_IN_CHAIN'),
+    certificate('UNABLE_TO_VERIFY_LEAF_SIGNATURE'),
+    certificate('ERR_TLS_CERT_ALTNAME_INVALID'),
+    ['fetch failed sans précision', new TypeError('fetch failed'), 'La connexion a échoué (fetch failed)', true],
+    ['fetch failed, autre code', netError('ECONNRESET'), 'La connexion a échoué (ECONNRESET)', true],
+    ['autre erreur', new Error('boum'), 'Pas de réponse du serveur (boum)', false],
+  ];
+  for (const [label, error, said, withVpn] of cases) {
+    const { fetch, calls } = scripted(error, error, error, error);
+    const w = witness();
+    const summary = await send([item(5, 'Alpha')], fetch, w);
+
+    assert.equal(calls.length, 4, label);
+    assert.deepEqual(w.sleeps, [2000, 5000, 10000], label);
+    assert.equal(summary.stopped.code, 'RESEAU', label);
+    assert.equal(summary.stopped.message, `${said}, après plusieurs essais.`, label);
+    // Each wait tells the same thing in a few words; the stop gives the way out once.
+    assert.deepEqual(w.lines.filter((line) => line.includes('nouvel essai')), [2, 5, 10].map((s) => `  ${said} : nouvel essai dans ${s} s…`), label);
+    const stop = w.lines.indexOf(`ARRÊT (retrait des produits fictifs) : ${said}, après plusieurs essais.`);
+    assert.notEqual(stop, -1, `${label} : ${w.text()}`);
+    if (withVpn) {
+      assert.equal(summary.stopped.hint, vpn, label);
+      assert.equal(w.lines[stop + 1], vpn, label);
+    } else {
+      assert.equal(summary.stopped.hint, undefined, label);
+      assert.doesNotMatch(w.text(), /VPN/, label);
+    }
+  }
+
+  // In the middle of the products the stop says the same, with the row it stopped at.
+  const midway = scripted([200, { deactivated: 0 }], done(1), ...[1, 2, 3, 4].map(() => netError('CERT_HAS_EXPIRED')));
+  const w = witness();
+  const summary = await send([item(5, 'Alpha'), item(6, 'Bravo')], midway.fetch, w);
+  assert.equal(summary.created, 1);
+  assert.equal(summary.stopped.row, 6);
+  assert.equal(summary.stopped.hint, vpn);
+  assert.match(w.text(), /ARRÊT \(ligne 6 « Bravo »\) : Le certificat de sécurité du site n'est pas accepté \(CERT_HAS_EXPIRED\), après plusieurs essais\./);
+  assert.ok(w.lines.includes(vpn));
+});
+
+test('envoi : une réponse 200 coupée en route est retentée comme une panne de réseau, au lieu d’être prise pour une mauvaise adresse', async () => {
+  const flaky = scripted(cutShort, [200, { deactivated: 0 }], cutShort, done(1));
+  const w = witness();
+  const summary = await send([item(5, 'Alpha')], flaky.fetch, w);
+  assert.equal(flaky.calls.length, 4);
+  assert.deepEqual(w.sleeps, [2000, 2000]);
+  assert.equal(summary.created, 1);
+  assert.equal(summary.stopped, null);
+  assert.match(w.text(), /Pas de réponse du serveur \(terminated\) : nouvel essai dans 2 s…/);
+
+  // Always cut: it ends as a network failure, not as « not the club's answer ».
+  const broken = scripted(cutShort, cutShort, cutShort, cutShort);
+  const w2 = witness();
+  const stopped = await send([item(5, 'Alpha')], broken.fetch, w2);
+  assert.equal(stopped.stopped.code, 'RESEAU');
+  assert.deepEqual(w2.sleeps, [2000, 5000, 10000]);
+  assert.doesNotMatch(w2.text(), /vérifiez l'adresse/);
+});
+
 // ---------------------------------------------------------------------------- the command line
 
 // Three made-up cigars in a folder laid out as the owner's: the Excel file, two manifests and import/<slug>.webp.
@@ -720,7 +1029,8 @@ test('ligne de commande : --send demande l’adresse du site, en https (le http 
   assert.equal(noUrl.code, 1);
   assert.match(noUrl.out, /--url/);
 
-  for (const url of ['http://club.example.com', 'ftp://club.example.com', 'club.example.com', 'https://nom:secret@club.example.com']) {
+  // A name under .localhost goes through the resolver, which may send it anywhere: only the machine itself is « local ».
+  for (const url of ['http://club.example.com', 'ftp://club.example.com', 'club.example.com', 'https://nom:secret@club.example.com', 'http://club.localhost:8787']) {
     const refused = await cli([...base, '--url', url], { cwd: dir, env });
     assert.equal(refused.code, 1, url);
     assert.match(refused.out, /adresse/i, url);
@@ -732,6 +1042,17 @@ test('ligne de commande : --send demande l’adresse du site, en https (le http 
   assert.match(noCode.out, /IMPORT_TOKEN/);
   assert.match(noCode.out, /import-token\.local/);
   assert.match(noCode.out, /rien n'a été envoyé/i);
+});
+
+test('ligne de commande : le http reste admis pour localhost, 127.0.0.1 et [::1], les trois adresses de la machine elle-même', async () => {
+  const { dir, xlsx, photos } = laidOut();
+  for (const url of ['http://localhost:8787', 'http://127.0.0.1:8787', 'http://[::1]:8787']) {
+    const { fetch, calls } = scripted([200, { deactivated: 0 }], done(1), done(2), done(3));
+    const run = await cli(['--xlsx', xlsx, '--photos', photos, '--url', url, '--send'], { cwd: dir, env: { IMPORT_TOKEN: TOKEN }, fetch });
+    assert.equal(run.code, 0, `${url} : ${run.out}`);
+    assert.equal(calls.length, 4, url);
+    assert.ok(run.out.includes(`vers ${url}`), url);
+  }
 });
 
 test('ligne de commande : le code vient de IMPORT_TOKEN, sinon du fichier (par défaut import-token.local, espaces et fin de ligne ôtés), jamais affiché', async () => {
@@ -765,6 +1086,71 @@ test('ligne de commande : le code vient de IMPORT_TOKEN, sinon du fichier (par d
   const fourth = door(server);
   assert.equal((await cli([...args, '--token-file', 'autre-code.txt'], { cwd: dir, fetch: fourth.fetch })).code, 0);
   assert.equal(fourth.calls[0].headers.get('x-import-token'), 'code-du-fichier');
+});
+
+test('ligne de commande : --send dit où le code a été lu, sans jamais l’afficher ; si la variable et le fichier existent tous deux, la variable passe avant', async () => {
+  const { server } = await club({ token: 'code-du-fichier' });
+  const { dir, xlsx, photos } = laidOut();
+  const args = ['--xlsx', xlsx, '--photos', photos, '--url', BASE, '--send'];
+  const file = path.join(dir, 'import-token.local');
+  const run = async (extra, options) => {
+    const result = await cli([...args, ...extra], { cwd: dir, fetch: door(server).fetch, ...options });
+    assert.equal(result.code, 0, result.out);
+    assert.ok(!result.out.includes('code-du-fichier'));
+    return result.out;
+  };
+
+  // The file alone, the default one then another named on the command line.
+  fs.writeFileSync(file, 'code-du-fichier\n');
+  const viaFile = await run([]);
+  assert.match(viaFile, /^Code d'import lu dans le fichier import-token\.local\.$/m);
+  assert.doesNotMatch(viaFile, /variable/);
+  fs.writeFileSync(path.join(dir, 'autre-code.txt'), 'code-du-fichier\n');
+  assert.match(await run(['--token-file', 'autre-code.txt']), /^Code d'import lu dans le fichier autre-code\.txt\.$/m);
+
+  // Both exist: the variable is the one read, and the line says it wins over the file.
+  const both = await run([], { env: { IMPORT_TOKEN: 'code-du-fichier' } });
+  assert.match(both, /^Code d'import lu dans la variable IMPORT_TOKEN \(le fichier import-token\.local existe aussi, mais la variable passe avant\)\.$/m);
+  assert.match(await run(['--token-file', 'autre-code.txt'], { env: { IMPORT_TOKEN: 'code-du-fichier' } }), /\(le fichier autre-code\.txt existe aussi, mais la variable passe avant\)/);
+  // An empty variable counts for nothing: the file is what is read.
+  assert.match(await run([], { env: { IMPORT_TOKEN: '  ' } }), /^Code d'import lu dans le fichier import-token\.local\.$/m);
+
+  // The variable alone.
+  fs.rmSync(file);
+  const viaEnv = await run([], { env: { IMPORT_TOKEN: 'code-du-fichier' } });
+  assert.match(viaEnv, /^Code d'import lu dans la variable IMPORT_TOKEN\.$/m);
+  assert.doesNotMatch(viaEnv, /existe aussi|passe avant/);
+
+  // A run that is only a check reads no code, and says nothing of one.
+  const dry = await cli(['--xlsx', xlsx, '--photos', photos], { cwd: dir, env: { IMPORT_TOKEN: 'code-du-fichier' } });
+  assert.doesNotMatch(dry.out, /Code d'import lu/);
+});
+
+test('ligne de commande : un code refusé, on rappelle d’où il a été lu (une variable périmée passe avant le fichier à jour)', async () => {
+  const { server } = await club({ token: 'code-du-fichier' });
+  const { dir, xlsx, photos } = laidOut();
+  const args = ['--xlsx', xlsx, '--photos', photos, '--url', BASE, '--send'];
+  fs.writeFileSync(path.join(dir, 'import-token.local'), 'code-du-fichier\n');
+
+  const stale = door(server);
+  const viaEnv = await cli(args, { cwd: dir, env: { IMPORT_TOKEN: 'code-perime' }, fetch: stale.fetch });
+  assert.equal(viaEnv.code, 1);
+  assert.equal(stale.calls.length, 1);
+  assert.match(viaEnv.out, /Code d'import incorrect/);
+  assert.match(viaEnv.out, /^Rappel : le code refusé a été lu dans la variable IMPORT_TOKEN \(le fichier import-token\.local existe aussi, mais la variable passe avant\)\.$/m);
+  for (const secret of ['code-perime', 'code-du-fichier']) assert.ok(!viaEnv.out.includes(secret), secret);
+
+  // From the file this time: the server is changed under it.
+  const other = await club({ token: 'autre-code' });
+  const viaFile = await cli(args, { cwd: dir, fetch: door(other.server).fetch });
+  assert.equal(viaFile.code, 1);
+  assert.match(viaFile.out, /^Rappel : le code refusé a été lu dans le fichier import-token\.local\.$/m);
+  assert.ok(!viaFile.out.includes('code-du-fichier'));
+
+  // A run that works has nothing to recall.
+  const fine = await cli(args, { cwd: dir, fetch: door(server).fetch });
+  assert.equal(fine.code, 0, fine.out);
+  assert.doesNotMatch(fine.out, /Rappel/);
 });
 
 test('ligne de commande : un code vide, absent ou mal formé ne part jamais sur le réseau', async () => {

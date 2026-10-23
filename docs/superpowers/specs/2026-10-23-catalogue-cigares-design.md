@@ -48,7 +48,8 @@ Les prix d'achat viendront plus tard : un champ « prix d'achat » sera ajouté 
 - *Les photos sont rangées dans une table à part, `product_photos`, liée au produit :
   - types JPEG, PNG ou WebP ;
   - 200 Ko au plus après réduction ;
-  - la réduction se fait dans le navigateur pour les ajouts manuels, et sur l'ordinateur pour l'import (macOS `sips`).
+  - la réduction se fait dans le navigateur pour les ajouts manuels ;
+  - pour l'import, les photos sont préparées avant, sur l'ordinateur du propriétaire (un Mac) : `sips` les réduit à 800 px au plus, puis `cwebp` les convertit en WebP de 190 Ko au plus, rangés dans `photos-cigares/import/<slug>.webp`. Le programme d'import ne réduit rien : il vérifie ces fichiers et les envoie.
 - *Les photos sont servies par `GET /api/products/:id/photo` à tout utilisateur connecté :
   - la fiche produit porte `photo_version` (date de mise à jour) ;
   - l'interface demande `…/photo?v=<version>`, mis en cache longtemps puisque l'adresse change avec la photo ;
@@ -82,7 +83,7 @@ Les prix d'achat viendront plus tard : un champ « prix d'achat » sera ajouté 
 - **Interface** (`src/pages/Products.jsx` et la fiche produit) :
   - vignette dans la liste, grande photo sur la fiche ;
   - pour les administrateurs hors démo, « Ajouter une photo », « Changer la photo » et « Retirer la photo ». Le fichier est réduit dans le navigateur (canvas, 800 px au plus, JPEG) avant l'envoi.
-- **Programme d'import** : un script local dans `scripts/` (versionné, sans aucune donnée) lit le fichier Excel et les manifestes de `photos-cigares/`, réduit les photos, puis appelle la porte d'import une fiche à la fois.
+- **Programme d'import** : un script local dans `scripts/` (versionné, sans aucune donnée) lit le fichier Excel et les manifestes de `photos-cigares/`, vérifie les photos déjà préparées (`photos-cigares/import/<slug>.webp`, voir plus haut), puis appelle la porte d'import une fiche à la fois. Il ne réduit aucune photo lui-même.
 - **Tests** : les tests Node couvrent :
   - les routes photo (droits, taille, types, démo refusée) ;
   - la porte d'import (sans code, mauvais code, code absent, création, mise à jour par nom, désactivation des produits fictifs, 404 en démo) ;

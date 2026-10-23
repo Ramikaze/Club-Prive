@@ -7,8 +7,9 @@
 //
 // The door's code (the Worker's IMPORT_TOKEN secret) comes from the IMPORT_TOKEN variable or from a file, never
 // from the command line, where other programs can read it. It is not printed, not put in an address and not
-// written down. The import can be run again as often as needed: the server updates the product that already
-// bears a name instead of creating a second one. The exit code is 0 when all went well, 1 otherwise.
+// written down; the script only says where it read it (the variable or which file). The import can be run again as
+// often as needed: the server updates the product that already bears a name instead of creating a second one. The
+// exit code is 0 when all went well, 1 otherwise.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -38,7 +39,8 @@ const count = (n, one, many) => `${n} ${n > 1 ? many : one}`; // 0 and 1 are sin
 const grouped = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 const fcfa = (n) => `${grouped(n)} FCFA`;
 const ko = (bytes) => `${grouped(Math.ceil(bytes / 1024))} Ko`;
-const listOf = (numbers) => (numbers.length < 2 ? numbers.join('') : `${numbers.slice(0, -1).join(', ')} et ${numbers.at(-1)}`);
+const listOf = (items) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} et ${items.at(-1)}`);
+const slugOf = (entry) => (typeof entry.slug === 'string' && entry.slug !== '' ? entry.slug : 'sans identifiant');
 const shown = (value) => {
   if (blank(value)) return 'vide';
   return typeof value === 'string' ? `« ${value} »` : String(value).replace('.', ',');
@@ -85,7 +87,7 @@ export function readCatalogue(xlsx) {
 // Gives { photo } or { problem }.
 function pictureOf(entry, readPhoto) {
   if (typeof entry.slug !== 'string' || !SLUG.test(entry.slug)) {
-    return { problem: "identifiant de photo invalide (le « slug » de la fiche : lettres, chiffres et tirets)." };
+    return { problem: "identifiant de photo invalide (le « slug » de la fiche : lettres, chiffres, tirets, points ou tirets bas, en commençant par une lettre ou un chiffre)." };
   }
   const where = `import/${entry.slug}.webp`;
   let bytes;
@@ -138,7 +140,7 @@ export function buildImport({ rows, manifests, readPhoto }) {
     const found = excelName ? byName.get(sameName(excelName)) ?? [] : [];
     for (const entry of found) used.add(entry);
     if (excelName && found.length === 0) fail('aucune fiche dans les manifestes (manifest-*.json).');
-    if (found.length > 1) fail(`${found.length} fiches portent ce nom dans les manifestes (${found.map((e) => e.slug).join(', ')}) : une seule est attendue.`);
+    if (found.length > 1) fail(`${found.length} fiches portent ce nom dans les manifestes (${found.map(slugOf).join(', ')}) : une seule est attendue.`);
 
     if (typeof price !== 'number' || !Number.isInteger(price) || price < 1 || price > PRICE_MAX) {
       fail(`prix invalide (${shown(price)}) : un nombre entier de francs, de 1 à ${grouped(PRICE_MAX)}, est attendu.`);
@@ -152,7 +154,7 @@ export function buildImport({ rows, manifests, readPhoto }) {
     const name = official || excelName.normalize('NFC');
     if (!official) warn('pas de nom officiel dans la fiche, le nom du fichier Excel est utilisé.');
     if (name.length > NAME_MAX) fail(`nom trop long (${name.length} caractères, ${NAME_MAX} au plus).`);
-    named.push({ row, name });
+    named.push({ row, excelName, name, entry });
 
     const description = typeof entry.description_fr === 'string' ? entry.description_fr.trim().normalize('NFC') : '';
     if (description.length > DESCRIPTION_MAX) fail(`description trop longue (${description.length} caractères, ${DESCRIPTION_MAX} au plus).`);
@@ -169,20 +171,31 @@ export function buildImport({ rows, manifests, readPhoto }) {
   }
 
   for (const entry of readable) {
-    if (!used.has(entry)) problems.push(`Fiche « ${entry.input_name} » (${entry.slug}) : aucune ligne du fichier Excel ne l'utilise.`);
+    if (used.has(entry)) continue;
+    const called = String(entry.input_name ?? '').trim();
+    problems.push(called
+      ? `Fiche « ${called} » (${slugOf(entry)}) : aucune ligne du fichier Excel ne l'utilise.`
+      : `Fiche sans nom (${slugOf(entry)}) : le nom du cigare (« input_name ») manque, aucune ligne du fichier Excel ne peut l'utiliser.`);
   }
   const byProduct = new Map();
-  for (const { row, name } of named) {
-    const key = sameName(name);
-    byProduct.set(key, [...(byProduct.get(key) ?? []), { row, name }]);
+  for (const one of named) {
+    const key = sameName(one.name);
+    byProduct.set(key, [...(byProduct.get(key) ?? []), one]);
   }
   for (const group of byProduct.values()) {
-    if (group.length > 1) {
-      const rowsOf = listOf(group.map((p) => p.row));
-      problems.push(`Nom en double « ${group[0].name} » : lignes ${rowsOf}. Deux produits ne peuvent pas porter le même nom : le second écraserait le premier.`);
-    }
+    if (group.length < 2) continue;
+    const rowsOf = listOf(group.map((p) => `ligne ${p.row} « ${p.excelName} »`));
+    problems.push(`Nom en double « ${group[0].name} » : ${rowsOf}. Deux produits ne peuvent pas porter le même nom : le second écraserait le premier. ${howToSettle(group)}`);
   }
   return { items, problems, warnings };
+}
+
+// What the owner can do about rows that would give one name to several products: the fiches can each have an official
+// name of their own, or rows can go from the sheet. When all the rows use one and the same fiche, only a row can go.
+function howToSettle(group) {
+  if (new Set(group.map((p) => p.entry)).size === 1) return 'Ces lignes utilisent la même fiche : supprimez du fichier Excel les lignes en trop.';
+  if (group.length === 2) return "Donnez à l'une des deux fiches son propre nom officiel, ou supprimez l'une des deux lignes du fichier Excel.";
+  return 'Donnez à chaque fiche sauf une son propre nom officiel, ou supprimez du fichier Excel les lignes en trop.';
 }
 
 // ---------------------------------------------------------------- sending to the door
@@ -202,10 +215,12 @@ const productBody = ({ name, price, description, photo }) => ({
 });
 
 async function readAnswer(res) {
+  // A read that breaks off halfway (the connection dropped) throws: it is a network failure, for the caller to retry.
+  const body = await res.text();
   let data = null;
   try {
-    data = JSON.parse(await res.text());
-  } catch { /* not JSON: a proxy's page, an interrupted answer */ }
+    data = JSON.parse(body);
+  } catch { /* not JSON: a proxy's page */ }
   const error = data?.error && typeof data.error === 'object' ? data.error : null;
   return {
     status: res.status,
@@ -215,16 +230,33 @@ async function readAnswer(res) {
   };
 }
 
-const reason = (err) => (err?.name === 'TimeoutError' ? 'délai dépassé' : err?.cause?.code ?? err?.code ?? err?.message ?? 'erreur inconnue');
+const VPN_HINT = 'Un VPN (NordVPN par exemple) en est souvent la cause : déconnectez-le puis relancez la commande.';
+
+// What a call that got no answer says, in plain French, the technical code kept in brackets for whoever looks into it.
+// Gives { text, hint? }: `hint` is the way out when the usual cause is the computer's own connection (a VPN that
+// filters the traffic or swaps the site's certificate). `hide` strikes the import code out of whatever the error says.
+function networkReason(err, hide) {
+  // Node's fetch puts the system's code on `cause`; a DOMException's own `code` is a number, which says nothing here.
+  const named = [err?.cause?.code, err?.code].find((c) => typeof c === 'string');
+  const timedOut = err?.name === 'TimeoutError' || err?.cause?.name === 'TimeoutError' || /TIMEOUT|TIMEDOUT/.test(named ?? '');
+  const raw = hide(named || (timedOut ? 'TimeoutError' : err?.message) || 'erreur inconnue');
+  if (timedOut) return { text: `Le serveur met trop de temps à répondre (${raw})` };
+  if (named === 'ECONNREFUSED') return { text: `Le serveur ne répond pas à cette adresse (${raw})` };
+  if (named === 'ENOTFOUND' || named === 'EAI_AGAIN') return { text: `Adresse inconnue, vérifiez --url et la connexion internet (${raw})` };
+  if (/CERT|SELF_SIGNED|VERIFY_LEAF/.test(named ?? '')) return { text: `Le certificat de sécurité du site n'est pas accepté (${raw})`, hint: VPN_HINT };
+  if (err?.message === 'fetch failed') return { text: `La connexion a échoué (${raw})`, hint: VPN_HINT };
+  return { text: `Pas de réponse du serveur (${raw})` };
+}
 
 // Sends the products to the door, the fictitious ones' retirement first. `items`: what buildImport gave. `fetch`
-// and `sleep` can be replaced, so that a test neither reaches the network nor waits. Prints a line per product
-// through `log` and the totals at the end, and gives the summary:
+// and `sleep` can be replaced, so that a test neither reaches the network nor waits; `timeoutMs` is how long one call
+// may last. Prints a line per product through `log` and the totals at the end, and gives the summary:
 //   { deactivated, created, updated, withPhoto, withoutPhoto, failures: [{ row, name, status, code, message }],
-//     stopped: null | { code, message, row?, name? }, remaining }
-// `stopped` tells that the run could not go on (wrong code, server down...); `remaining` counts the products that
-// were then left untouched. A product the server refuses is a failure, and the next one goes on.
-export async function runImport({ items, baseUrl, token, fetch = globalThis.fetch, log = console.log, sleep = pause }) {
+//     stopped: null | { code, message, hint?, row?, name? }, remaining }
+// `stopped` tells that the run could not go on (wrong code, server down...), `hint` being the way out when there is
+// a usual one; `remaining` counts the products that were then left untouched. A product the server refuses is a
+// failure, and the next one goes on.
+export async function runImport({ items, baseUrl, token, fetch = globalThis.fetch, log = console.log, sleep = pause, timeoutMs = REQUEST_TIMEOUT_MS }) {
   if (typeof token !== 'string' || token.trim() === '') throw new Error("Le code d'import est vide : rien n'a été envoyé.");
   const url = new URL(DOOR, baseUrl).href;
   // What the server or the network says is shown, but never with the code in it.
@@ -246,16 +278,17 @@ export async function runImport({ items, baseUrl, token, fetch = globalThis.fetc
       return true;
     };
     for (;;) {
-      let res;
+      let answer;
       try {
         // A redirect is not followed: the code would go along to wherever it leads.
-        res = await fetch(url, { method: 'POST', headers, body: payload, redirect: 'manual', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+        const res = await fetch(url, { method: 'POST', headers, body: payload, redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });
+        answer = await readAnswer(res);
       } catch (err) {
-        const why = `Pas de réponse du serveur (${hide(reason(err))})`;
-        if (await retryLater(why)) continue;
-        return { stop: { code: 'RESEAU', message: `${why}, après plusieurs essais.` } };
+        const { text, hint } = networkReason(err, hide);
+        if (await retryLater(text)) continue;
+        return { stop: { code: 'RESEAU', message: `${text}, après plusieurs essais.`, ...(hint ? { hint } : {}) } };
       }
-      const { status, data, code, message } = await readAnswer(res);
+      const { status, data, code, message } = answer;
       if (status >= 200 && status < 300) {
         if (data !== null && typeof data === 'object' && !Array.isArray(data)) return { data };
         return { stop: { code: 'REPONSE_INATTENDUE', message: "La réponse n'est pas celle du club (ce n'est pas du JSON) : vérifiez l'adresse (--url)." } };
@@ -295,6 +328,7 @@ export async function runImport({ items, baseUrl, token, fetch = globalThis.fetc
     if (stopped) {
       const step = summary.deactivated === null ? 'retrait des produits fictifs' : `ligne ${stopped.row} « ${stopped.name} »`;
       log(`ARRÊT (${step}) : ${stopped.message}`);
+      if (stopped.hint) log(stopped.hint);
       if (stopped.code === 'CODE_INCORRECT') log("Vérifiez le code d'import. Cinq codes faux de suite bloquent l'adresse pendant une minute.");
       if (stopped.code === 'CODE_ABSENT') log("Le code d'import n'est pas (ou plus) activé sur le site : npx wrangler secret put IMPORT_TOKEN.");
     }
@@ -315,8 +349,8 @@ export async function runImport({ items, baseUrl, token, fetch = globalThis.fetc
   const first = await call({ deactivate_demo_products: true });
   if (!first.data || !Number.isInteger(first.data.deactivated)) {
     // The very first call failing says the setup is wrong, not a product: nothing else is tried.
-    const { code, message } = first.stop ?? first.refused ?? unexpected;
-    summary.stopped = { code: code ?? 'REFUSE', message };
+    const { code, message, hint } = first.stop ?? first.refused ?? unexpected;
+    summary.stopped = { code: code ?? 'REFUSE', message, ...(hint ? { hint } : {}) };
     return conclude();
   }
   summary.deactivated = first.data.deactivated;
@@ -390,19 +424,34 @@ function siteAddress(raw) {
     return { problem: `L'adresse donnée avec --url n'est pas valide (exemple : ${SITE}).` };
   }
   if (url.username || url.password) return { problem: "L'adresse donnée avec --url ne doit contenir ni identifiant ni mot de passe." };
-  const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) || url.hostname.endsWith('.localhost');
+  const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
   if (url.protocol === 'https:' || (url.protocol === 'http:' && local)) return { baseUrl: url.origin };
   return { problem: "L'adresse donnée avec --url doit commencer par https:// (http:// n'est admis que pour localhost) : sinon le code circulerait en clair." };
 }
 
+const isFile = (file) => {
+  try {
+    return fs.statSync(file).isFile();
+  } catch {
+    return false;
+  }
+};
+
 // The door's code: the IMPORT_TOKEN variable if it holds anything, else the content of the token file (trimmed). It
 // travels in an HTTP header, so it has to be one line of plain characters; it is refused otherwise, before any call
 // is made (a code that arrives garbled counts as a wrong one, and five wrong ones lock the address).
+// Gives { token, origin } or { problem }. `origin` says where the code was read (« dans la variable IMPORT_TOKEN »,
+// « dans le fichier <nom> »), never the code. A variable left over in the shell wins over a file that is up to date,
+// and a code refused for that reason is hard to understand, so when both exist the origin says that the variable wins.
 function importCode({ env, cwd, tokenFile }) {
   const fromEnv = String(env.IMPORT_TOKEN ?? '').trim();
-  const file = path.resolve(cwd, tokenFile ?? 'import-token.local');
+  const name = tokenFile ?? 'import-token.local'; // as the owner wrote it, to be said back
+  const file = path.resolve(cwd, name);
   let token = fromEnv;
-  if (!token) {
+  let origin = 'dans la variable IMPORT_TOKEN';
+  if (token) {
+    if (isFile(file)) origin += ` (le fichier ${name} existe aussi, mais la variable passe avant)`;
+  } else {
     let content;
     try {
       content = fs.readFileSync(file, 'utf8');
@@ -414,11 +463,12 @@ function importCode({ env, cwd, tokenFile }) {
     }
     token = content.trim();
     if (!token) return { problem: `Le fichier du code d'import est vide (${file}).` };
+    origin = `dans le fichier ${name}`;
   }
   if (!/^[\x20-\x7e]+$/.test(token)) {
     return { problem: "Le code d'import doit tenir sur une seule ligne, en caractères simples (lettres sans accent, chiffres, signes)." };
   }
-  return { token };
+  return { token, origin };
 }
 
 function usageError(err) {
@@ -509,7 +559,7 @@ export async function main(argv, { env = process.env, cwd = process.cwd(), log =
     const site = args.url ? siteAddress(args.url) : { problem: `--send demande l'adresse du site avec --url (exemple : --url ${SITE}).` };
     const code = importCode({ env, cwd, tokenFile: args['token-file'] });
     problems.push(...[site.problem, code.problem].filter(Boolean));
-    if (!site.problem && !code.problem) target = { baseUrl: site.baseUrl, token: code.token };
+    if (!site.problem && !code.problem) target = { baseUrl: site.baseUrl, token: code.token, origin: code.origin };
   } else {
     for (const line of preview(items)) log(line);
     log('');
@@ -535,6 +585,7 @@ export async function main(argv, { env = process.env, cwd = process.cwd(), log =
   }
 
   log(`Envoi de ${totals}, vers ${target.baseUrl}`);
+  log(`Code d'import lu ${target.origin}.`);
   let summary;
   try {
     summary = await runImport({ items, baseUrl: target.baseUrl, token: target.token, fetch, log, sleep });
@@ -542,6 +593,8 @@ export async function main(argv, { env = process.env, cwd = process.cwd(), log =
     log(`Erreur : ${String(err.message).split(target.token).join('***')}`);
     return 1;
   }
+  // A code that is refused may come from the wrong place (a stale variable): say where this one was read.
+  if (summary.stopped?.code === 'CODE_INCORRECT') log(`Rappel : le code refusé a été lu ${target.origin}.`);
   return summary.stopped || summary.failures.length > 0 ? 1 : 0;
 }
 
