@@ -3,7 +3,7 @@
 // The database is reached through a small adapter (get / all / run / transaction, see db.js) so the
 // same code runs on a Cloudflare Durable Object and on node:sqlite in tests. Everything here is
 // synchronous: password hashing and other async work happen in the API layer, before the transaction.
-import { invalid, forbidden, notFound, conflict } from './errors.js';
+import { AppError, invalid, forbidden, notFound, conflict } from './errors.js';
 import { text, int, toId, flag, frDate } from './validate.js';
 import { ledgerMethods, DEFAULT_CATEGORIES } from './ledger.js';
 import { loungeMethods } from './lounge.js';
@@ -1251,7 +1251,8 @@ export class Club {
   //  - a new booking: [startMs, endMs) is its span; the closest booking before it and the closest one
   //    after it speak.
   //  - an extension: `startMs` is the end the booking has and `endMs` the end it asked for; only what
-  //    follows speaks, and the latest end is a whole number of extension steps from the end it has.
+  //    follows speaks, and the latest end is a whole number of extension steps from the end it has. When
+  //    not even one step fits, it says that no extension is possible instead of naming the end it has.
   //  - a move: `roomName` is the room it would go to; every booking too close is named.
   gapError(conflicts, { startMs, endMs, extension = false, roomName = null }) {
     const { gap_min: gap, slot_min: slot, extension_step_min: step } = this.settings().booking;
@@ -1279,7 +1280,9 @@ export class Club {
     if (next && extension) {
       const stepMs = step * 60000;
       const latest = startMs + Math.floor(Math.max(next.start_ms - gapMs - startMs, 0) / stepMs) * stepMs;
-      parts.push(`la séance suivante commence à ${time(next.start_ms)}, la prolongation peut aller jusqu'à ${time(latest)} au plus tard`);
+      parts.push(latest > startMs
+        ? `la séance suivante commence à ${time(next.start_ms)}, la prolongation peut aller jusqu'à ${time(latest)} au plus tard`
+        : `la séance suivante commence à ${time(next.start_ms)}, aucune prolongation n'est possible`);
     } else if (next) {
       parts.push(`la séance suivante commence à ${time(next.start_ms)}, celle-ci doit se terminer à ${time(lastSlotUntil(next.start_ms - gapMs))} au plus tard`);
     }
@@ -1299,7 +1302,11 @@ export class Club {
     if (!conflicts.length) return;
     const first = conflicts[0];
     const attendee = first.attendees.find((a) => ids.includes(a.member_id));
-    throw conflict('MEMBRE_OCCUPE', `${attendee.name} participe déjà à une réservation dans « ${first.room_name} » (${first.start_time} → ${first.end_time}).`, { conflicts });
+    throw conflict(
+      'MEMBRE_OCCUPE',
+      `${attendee.name} participe déjà à une réservation dans « ${first.room_name} » (${first.start_time} → ${first.end_time}).`,
+      { conflicts, member_name: attendee.name },
+    );
   }
 
   validateOccupancy(room, partySize, attendeeCount) {
@@ -1624,14 +1631,23 @@ export class Club {
     };
   }
 
+  // Why a planned extension cannot go ahead, as the error to raise, or null when it can: the room is taken,
+  // the next booking would be too close, or the time beyond the credit has no tariff an administrator has
+  // validated to be billed at (the demo bills it all the same). extendReservation raises it and
+  // extensionWindow words it, so what the window calls possible is what the server accepts.
+  extensionRefusal(p) {
+    if (p.conflicts.length) return this.overlapError(p.conflicts, p.r.room_name);
+    if (p.gap_conflicts.length) return this.gapError(p.gap_conflicts, { startMs: p.r.end_ms, endMs: p.newEnd, extension: true });
+    if (p.addPaid > 0 && !p.tariff.validated && !this.settings().demo_mode) {
+      return conflict('TARIF_NON_VALIDE', "Le tarif des heures supplémentaires de cette réservation n'a pas été validé.");
+    }
+    return null;
+  }
+
   extendReservation(actor, id, input) {
     const p = this.planExtension(id, input.minutes);
-    const s = this.settings();
-    if (p.conflicts.length) throw this.overlapError(p.conflicts, p.r.room_name);
-    if (p.gap_conflicts.length) throw this.gapError(p.gap_conflicts, { startMs: p.r.end_ms, endMs: p.newEnd, extension: true });
-    if (p.addPaid > 0 && !p.tariff.validated && !s.demo_mode) {
-      throw conflict('TARIF_NON_VALIDE', "Le tarif des heures supplémentaires de cette réservation n'a pas été validé.");
-    }
+    const refusal = this.extensionRefusal(p);
+    if (refusal) throw refusal;
     try {
       this.run(
         `UPDATE reservations SET end_ms = ?, duration_min = duration_min + ?, included_minutes = included_minutes + ?,
@@ -1668,6 +1684,69 @@ export class Club {
       minutes_incluses: p.addIncluded, minutes_payantes: p.addPaid, supplement_ajoute: p.delta,
     });
     return this.reservationDetail(p.r.id);
+  }
+
+  // How far a session can still be extended, for the alert shown shortly before it ends: the longest
+  // extension the server would accept, or, when not even the shortest is accepted, why. Lengths are whole
+  // extension steps, each one tried through planExtension and extensionRefusal (what extendReservation runs),
+  // so the window cannot say "possible" for an extension the server refuses. A refusal only ever grows with
+  // the length (a longer extension takes more of the room and of each member's time, comes closer to the next
+  // booking, goes further beyond the credit and nearer to the 24-hour limit), so the first length refused ends
+  // the search. `next` is the next booking of the room, whatever stops the extension.
+  extensionWindow(id) {
+    const r = this.reservationRow(id);
+    const { timezone: tz, booking: { extension_step_min: step } } = this.settings();
+    let best = null;
+    let refusal = null;
+    for (let add = step; add <= 1440; add += step) {
+      let p;
+      try {
+        p = this.planExtension(r.id, add);
+      } catch (err) {
+        if (!(err instanceof AppError)) throw err;
+        refusal = err;
+        break;
+      }
+      refusal = this.extensionRefusal(p);
+      if (refusal) break;
+      best = p;
+    }
+    // A booking neither waiting nor running has nothing to extend, and nothing to say about it.
+    if (refusal?.code === 'STATUT') {
+      return { possible: false, max_minutes: 0, until_time: null, until_at: null, reason: null, next: null };
+    }
+    const next = this.get(
+      `${RES_SELECT} WHERE r.status <> 'annulee' AND COALESCE(r.room_id, 1) = ? AND r.start_ms >= ? AND r.id <> ?
+       ORDER BY r.start_ms LIMIT 1`,
+      r.room_id ?? 1, r.end_ms, r.id,
+    );
+    return {
+      possible: best !== null,
+      max_minutes: best?.add ?? 0,
+      until_time: best ? localParts(best.newEnd, tz).time : null,
+      until_at: best ? new Date(best.newEnd).toISOString() : null,
+      reason: best ? null : this.extensionReason(refusal),
+      next: next ? { member_name: `${next.first_name} ${next.last_name}`, start_time: localParts(next.start_ms, tz).time } : null,
+    };
+  }
+
+  // The refusal of the shortest extension, in the words of the alert. A refusal this does not know keeps
+  // its own message, so that a rule added to extendReservation is never hidden.
+  extensionReason(refusal) {
+    const first = refusal.details?.conflicts?.[0];
+    switch (refusal.code) {
+      case 'CHEVAUCHEMENT':
+      case 'BATTEMENT':
+        return `Prolongation impossible : la séance suivante commence à ${first.start_time} (${first.member_name}).`;
+      case 'MEMBRE_OCCUPE':
+        return `Prolongation impossible : ${refusal.details.member_name} est déjà inscrit à une autre séance à ${first.start_time}.`;
+      case 'TARIF_NON_VALIDE':
+        return "Prolongation impossible : le tarif des heures supplémentaires n'est pas encore validé par un administrateur.";
+      case 'DUREE_MAXIMALE':
+        return 'Prolongation impossible : une séance ne peut pas dépasser 24 heures.';
+      default:
+        return `Prolongation impossible : ${refusal.message}`;
+    }
   }
 
   startReservation(actor, id) {
@@ -1788,6 +1867,7 @@ export class Club {
       reservation: this.reservationDTO(r),
       subscription: this.subscriptionDTO(sub, this.bizToday()),
       charges, payments, credit_movements, history, totals,
+      extension_window: this.extensionWindow(r.id),
     };
   }
 
@@ -2162,7 +2242,7 @@ export class Club {
       return {
         ...rm,
         occupied: Boolean(occ),
-        current: occ ? { ...occ, consumptions: this.consumptionLines(occ.id) } : null,
+        current: occ ? { ...occ, consumptions: this.consumptionLines(occ.id), extension_window: this.extensionWindow(occ.id) } : null,
         next: nxt,
         today_count: todayCount,
       };
