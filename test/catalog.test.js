@@ -96,6 +96,8 @@ test('photo : un administrateur l’ajoute, tout utilisateur connecté la relit 
     assert.equal(got.headers.get('cache-control'), 'private, max-age=31536000, immutable');
     assert.equal(got.headers.get('x-content-type-options'), 'nosniff');
     assert.equal(got.headers.get('x-frame-options'), 'DENY');
+    // Should a browser ever open the picture as a page, this lets it load and run nothing.
+    assert.equal(got.headers.get('content-security-policy'), "default-src 'none'; sandbox");
   }
   // The version in the address serves the browser's cache; the server does not read it.
   assert.deepEqual((await getPhoto(manager, p.id, `?v=${encodeURIComponent(saved.photo_version)}`)).bytes, sent.bytes);
@@ -394,6 +396,101 @@ test('import : cinq échecs de suite bloquent la porte une minute, même avec le
   assert.notEqual((await door.post('/api/setup/reset', { setup_token: 'x', login: 'a', password: 'b' })).status, 429);
 });
 
+// A call to the door with its body as written (the Client of the tests always sends JSON that parses). `declare`:
+// says the body's length in the request, as a call over the network does.
+const importRaw = (server, body, { token = IMPORT_TOKEN, declare = false } = {}) => server.fetch('/api/admin/catalog-import', {
+  method: 'POST',
+  headers: {
+    'content-type': 'application/json',
+    ...(token === null ? {} : { 'x-import-token': token }),
+    ...(declare ? { 'content-length': String(body.length) } : {}),
+  },
+  body,
+});
+const NOT_JSON = 'ceci n’est pas du JSON {';
+const TOO_BIG = JSON.stringify({ item: ITEM, filler: 'x'.repeat(310 * 1024) }); // beyond the 300 KB the door reads
+
+test('import : le code est vérifié avant le corps — sans le bon code, 403 quel que soit le corps', async () => {
+  const { server } = await setup({ env: { IMPORT_TOKEN } });
+
+  // Four failures: a fifth would lock the door.
+  for (const [label, body, options] of [
+    ['mauvais code, corps qui n’est pas du JSON', NOT_JSON, { token: 'mauvais-code' }],
+    ['mauvais code, corps trop gros', TOO_BIG, { token: 'mauvais-code' }],
+    ['mauvais code, corps trop gros et longueur annoncée', TOO_BIG, { token: 'mauvais-code', declare: true }],
+    ['sans code, corps qui n’est pas du JSON', NOT_JSON, { token: null }],
+  ]) {
+    const r = await importRaw(server, body, options);
+    assert.equal(r.status, 403, label);
+    assert.equal((await r.json()).error.code, 'CODE_INCORRECT', label);
+  }
+  // With the right code the body is read, and refused as it always was.
+  const unreadable = await importRaw(server, NOT_JSON);
+  assert.equal(unreadable.status, 400);
+  assert.equal((await unreadable.json()).error.code, 'INVALIDE');
+  for (const declare of [false, true]) {
+    const heavy = await importRaw(server, TOO_BIG, { declare });
+    assert.equal(heavy.status, 413, String(declare));
+    assert.equal((await heavy.json()).error.code, 'TROP_VOLUMINEUX');
+  }
+  assert.equal(productCount(server), 0);
+});
+
+test('import : un corps illisible ne dispense ni du compte des échecs, ni du blocage, ni du 503', async () => {
+  const { server } = await setup({ env: { IMPORT_TOKEN } });
+  for (let i = 0; i < 5; i += 1) assert.equal((await importRaw(server, NOT_JSON, { token: 'mauvais-code' })).status, 403, String(i));
+  for (const body of [NOT_JSON, TOO_BIG]) {
+    const locked = await importRaw(server, body); // the right code, a locked door
+    assert.equal(locked.status, 429);
+    assert.equal((await locked.json()).error.code, 'TROP_DE_TENTATIVES');
+  }
+
+  const bare = await setup(); // no IMPORT_TOKEN
+  for (const body of [NOT_JSON, TOO_BIG]) {
+    const absent = await importRaw(bare.server, body);
+    assert.equal(absent.status, 503);
+    assert.equal((await absent.json()).error.code, 'CODE_ABSENT');
+  }
+});
+
+test('import : sans le bon code, le corps de la requête n’est même pas lu', async () => {
+  const { server } = await setup({ env: { IMPORT_TOKEN } });
+  const bare = await setup(); // no IMPORT_TOKEN
+  // A request whose body is a stream that gives its bytes on demand only, and notes that it was asked for them.
+  const watched = (token) => {
+    const seen = { read: false };
+    const body = new ReadableStream({
+      pull(controller) {
+        seen.read = true;
+        controller.enqueue(new TextEncoder().encode(JSON.stringify({ item: ITEM })));
+        controller.close();
+      },
+    }, { highWaterMark: 0 });
+    const request = new Request(`${ORIGIN}/api/admin/catalog-import`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(token === null ? {} : { 'x-import-token': token }) },
+      body,
+      duplex: 'half',
+    });
+    return { seen, request };
+  };
+
+  for (const [label, door, token, status] of [
+    ['mauvais code', server, 'mauvais-code', 403],
+    ['sans code', server, null, 403],
+    ['code non configuré', bare.server, IMPORT_TOKEN, 503],
+  ]) {
+    const { seen, request } = watched(token);
+    assert.equal((await door.api.handle(request)).status, status, label);
+    assert.equal(seen.read, false, label);
+  }
+  // The right code gets its body read, which shows the stream does tell.
+  const { seen, request } = watched(IMPORT_TOKEN);
+  assert.equal((await server.api.handle(request)).status, 200);
+  assert.equal(seen.read, true);
+  assert.equal(productCount(server), 1);
+});
+
 test('import : le bon code crée la fiche — CIG-001, prix ×100, stock 0, photo servie, journal sans auteur', async () => {
   const { server, admin, manager } = await setup({ env: { IMPORT_TOKEN } });
   const door = new Client(server);
@@ -448,7 +545,7 @@ test('import : même nom, aux majuscules et espaces près — mise à jour du pr
   const created = ok(await importWith(door, { item: { ...ITEM, photo: first.body } }));
   const versionBefore = server.club.get('SELECT updated_at FROM product_photos WHERE product_id = ?', created.id).updated_at;
 
-  // The owner retired it and counted some in meanwhile: the import puts it back on sale, the stock stays.
+  // The owner took it off sale and counted some in meanwhile: the import leaves it off sale, the stock stays.
   ok(await admin.put(`/api/products/${created.id}`, { active: false, reference: 'MA-REF' }));
   ok(await manager.post(`/api/products/${created.id}/stock`, { kind: 'entree', quantity: 5 }));
 
@@ -461,7 +558,7 @@ test('import : même nom, aux majuscules et espaces près — mise à jour du pr
   const row = server.club.get('SELECT * FROM products WHERE id = ?', created.id);
   assert.deepEqual(
     [row.name, row.price, row.description, row.active, row.stock_qty, row.reference],
-    ['Cohiba Siglo I', 13000 * UM, 'Nouvelle description.', 1, 5, 'MA-REF'],
+    ['Cohiba Siglo I', 13000 * UM, 'Nouvelle description.', 0, 5, 'MA-REF'],
   );
   const got = await getPhoto(manager, created.id);
   assert.equal(got.headers.get('content-type'), 'image/png');
@@ -479,6 +576,83 @@ test('import : même nom, aux majuscules et espaces près — mise à jour du pr
   ok(await importWith(door, { item: { name: 'Cohiba Siglo I', price: 14000, category: 'cigare', description: '' } }));
   assert.equal(server.club.get('SELECT description FROM products WHERE id = ?', created.id).description, null);
   assert.equal(productCount(server), 1);
+});
+
+test('import : une mise à jour n’apporte que le prix, la description et la photo — le reste du produit ne bouge pas', async () => {
+  const { server, admin } = await setup({ env: { IMPORT_TOKEN } });
+  const door = new Client(server);
+  const created = ok(await importWith(door, { item: ITEM }));
+  // What the owner did by hand since: another alert threshold, and the product off sale.
+  ok(await admin.put(`/api/products/${created.id}`, { low_stock_threshold: 8, active: false }));
+  const restOf = () => {
+    const row = { ...server.club.get('SELECT * FROM products WHERE id = ?', created.id) };
+    for (const column of ['price', 'description', 'updated_at', 'updated_by']) delete row[column];
+    return row;
+  };
+  const before = restOf();
+  assert.deepEqual([before.active, before.low_stock_threshold], [0, 8]);
+
+  // With a new description, then with a photo.
+  ok(await importWith(door, { item: { ...ITEM, price: 13000, description: 'Nouvelle description.' } }));
+  ok(await importWith(door, { item: { ...ITEM, price: 14000, photo: picture().body } }));
+
+  assert.deepEqual(restOf(), before);
+  assert.deepEqual(ok(await admin.get('/api/products')), []); // still off sale
+  const row = server.club.get('SELECT price, description, updated_by FROM products WHERE id = ?', created.id);
+  assert.deepEqual({ ...row }, { price: 14000 * UM, description: ITEM.description, updated_by: null });
+  // A product on sale stays on sale.
+  ok(await admin.put(`/api/products/${created.id}`, { active: true }));
+  ok(await importWith(door, { item: { ...ITEM, price: 15000 } }));
+  assert.equal(ok(await admin.get('/api/products')).length, 1);
+});
+
+test('import : un produit de même nom mais d’une autre catégorie est refusé (409), sans rien écrire', async () => {
+  const { server, admin } = await setup({ env: { IMPORT_TOKEN } });
+  const door = new Client(server);
+  const bottle = await newProduct(admin, { name: 'Havane Club', category: 'bouteille', reference: 'BOU-001', price: 30000 * UM, description: 'Un rhum.' });
+  await newProduct(admin, { name: 'Cohiba Siglo I', reference: 'CIG-001', price: 12000 * UM });
+  ok(await admin.put(`/api/products/${bottle.id}/photo`, picture('image/jpeg', 1500, 3).body));
+  const state = () => ({
+    products: server.club.all('SELECT * FROM products ORDER BY id').map((r) => ({ ...r })),
+    photos: server.club.all('SELECT * FROM product_photos ORDER BY product_id').map((r) => ({ ...r })),
+    journal: server.club.auditLog().length,
+  });
+  const before = state();
+
+  for (const [name, category, message] of [
+    [' HAVANE club ', 'cigare', "Le produit « Havane Club » existe déjà (catégorie bouteille) ; la fiche importée le range en cigare. Rien n'a été modifié."],
+    ['cohiba siglo i', 'bouteille', "Le produit « Cohiba Siglo I » existe déjà (catégorie cigare) ; la fiche importée le range en bouteille. Rien n'a été modifié."],
+  ]) {
+    const r = await importWith(door, { item: { name, category, price: 99000, description: 'Autre texte.', photo: picture('image/png', 900).body } });
+    assert.equal(r.status, 409, name);
+    assert.equal(r.data.error.code, 'CATEGORIE_DIFFERENTE', name);
+    assert.equal(r.data.error.message, message, name);
+  }
+  assert.deepEqual(state(), before); // no price, no description, no photo, no journal entry
+
+  // The same names in their own category are the same products.
+  assert.equal(ok(await importWith(door, { item: { name: 'havane club', category: 'bouteille', price: 31000 } })).id, bottle.id);
+});
+
+test('import : le journal d’une mise à jour garde le prix et la description remplacés, dans les unités de « produit.modifier »', async () => {
+  const { server, admin } = await setup({ env: { IMPORT_TOKEN } });
+  const door = new Client(server);
+  const created = ok(await importWith(door, { item: { name: ITEM.name, price: 12500, category: 'cigare' } })); // no description
+  ok(await importWith(door, { item: { ...ITEM, price: 13000, description: 'Nouvelle description.' } }));
+  ok(await importWith(door, { item: { name: ITEM.name, price: 14000, category: 'cigare' } })); // no description: it stays
+  ok(await admin.put(`/api/products/${created.id}`, { price: 15000 * UM }));
+
+  // Newest first.
+  const [edit, bare, second, first] = server.club.auditLog().filter((a) => ['produit.importer', 'produit.modifier'].includes(a.action));
+  assert.equal(first.details.status, 'created');
+  assert.ok(!('avant' in first.details));
+  assert.equal(second.details.status, 'updated');
+  assert.deepEqual(second.details.avant, { price: 12500 * UM, description: null });
+  assert.equal(second.details.price, 13000 * UM);
+  assert.deepEqual(bare.details.avant, { price: 13000 * UM, description: 'Nouvelle description.' });
+  // The modification of a product by hand counts in the same unit.
+  assert.equal(edit.action, 'produit.modifier');
+  assert.equal(edit.details.avant.price, 14000 * UM);
 });
 
 test('import : le nom est comparé à la casse et à l’écriture Unicode près, et seuls les vrais produits sont visés', async () => {
@@ -499,6 +673,24 @@ test('import : le nom est comparé à la casse et à l’écriture Unicode près
   assert.equal(real.status, 'created');
   assert.notEqual(real.id, fictitious.id);
   assert.equal(server.club.get('SELECT price FROM products WHERE id = ?', fictitious.id).price, 10000 * UM);
+});
+
+test('import : un nom reçu en e + accent est gardé en é (NFC), et se retrouve sous l’une ou l’autre écriture', async () => {
+  const { server } = await setup({ env: { IMPORT_TOKEN } });
+  const door = new Client(server);
+  const composed = '\u00c9clat de Havane';
+  const decomposed = 'E\u0301clat de Havane';
+  assert.notEqual(decomposed, composed);
+
+  const created = ok(await importWith(door, { item: { name: decomposed, price: 7000, category: 'cigare' } }));
+  assert.equal(server.club.get('SELECT name FROM products WHERE id = ?', created.id).name, composed);
+  assert.equal(server.club.auditLog().find((a) => a.action === 'produit.importer').details.name, composed);
+  assert.equal(server.club.listProducts()[0].name, composed);
+
+  // Found again under either writing.
+  for (const name of [composed, decomposed]) assert.equal(ok(await importWith(door, { item: { name, price: 7100, category: 'cigare' } })).id, created.id);
+  assert.equal(productCount(server), 1);
+  assert.equal(server.club.get('SELECT name FROM products WHERE id = ?', created.id).name, composed);
 });
 
 test('import : prix en francs entiers, nom, catégorie, description et photo vérifiés ; rien n’est créé sur un refus', async () => {
@@ -732,6 +924,49 @@ test('démo : un remplissage refusé ou en échec ne laisse aucun produit recopi
   assert.throws(() => demo.club.prepareDemo(config), (err) => err.code === 'DONNEES_EXISTANTES');
   assert.deepEqual(demo.club.all('SELECT name FROM products').map((p) => p.name), ['Resté là']);
   assert.equal(demo.club.get("SELECT COUNT(*) AS n FROM meta WHERE key = 'demo_seeded'").n, 0);
+});
+
+test('démo : un vrai produit qui porte la référence d’un produit fictif la garde, le fictif prend la suivante de sa série', async () => {
+  const { real, demo, admin } = await withDemo();
+  // The seed's Robusto wants CIG-DEMO-01. Lower case on purpose: references are unique whatever their case.
+  const mine = await newProduct(admin, { name: 'Cigare maison', reference: 'cig-demo-01' });
+  const inTheDemo = inDemo(real, demo, admin);
+
+  const check = async (step) => {
+    const products = ok(await inTheDemo.get('/api/products?all=1'));
+    const copy = products.find((p) => p.id === mine.id);
+    assert.deepEqual([copy.name, copy.reference, copy.is_demo], ['Cigare maison', 'cig-demo-01', false], step);
+    const referenceOf = (name) => products.find((p) => p.name === name).reference;
+    assert.deepEqual(
+      ['Robusto (démo)', 'Corona (démo)', 'Churchill (démo)', 'Whisky 12 ans (démo)'].map(referenceOf),
+      ['CIG-DEMO-02', 'CIG-DEMO-03', 'CIG-DEMO-04', 'BOU-DEMO-01'], step,
+    );
+    assert.equal(products.length, 8, step);
+    assert.equal(new Set(products.map((p) => p.reference.toLowerCase())).size, 8, step);
+  };
+
+  await check('ouverture');
+  ok(await inTheDemo.post('/api/demo/reset', {}));
+  await check('première remise à neuf');
+  ok(await inTheDemo.post('/api/demo/reset', {}));
+  await check('seconde remise à neuf');
+});
+
+test('démo : des références prises de suite, dans les deux séries, sont sautées une à une', async () => {
+  const { real, demo, admin } = await withDemo();
+  const mine = [];
+  for (const [category, reference] of [['cigare', 'cig-demo-01'], ['cigare', 'CIG-DEMO-02'], ['bouteille', 'bou-demo-02']]) {
+    mine.push(await newProduct(admin, { name: `Réel ${reference}`, category, reference }));
+  }
+  demo.club.prepareDemo(real.club.demoConfig());
+
+  const products = demo.club.listProducts();
+  assert.deepEqual(mine.map((p) => products.find((x) => x.id === p.id).reference), ['cig-demo-01', 'CIG-DEMO-02', 'bou-demo-02']);
+  const fictitious = products.filter((p) => p.is_demo);
+  assert.deepEqual(fictitious.map((p) => p.reference).sort(), [
+    'BOU-DEMO-01', 'BOU-DEMO-03', 'BOU-DEMO-04', 'BOU-DEMO-05', 'CIG-DEMO-03', 'CIG-DEMO-04', 'CIG-DEMO-05',
+  ]);
+  assert.equal(demo.club.listMembers().length, 5); // the history was made all the same
 });
 
 test('photos : en démo, ajouter ou retirer est refusé sans toucher à la photo du vrai club, qui reste servie par lui', async () => {

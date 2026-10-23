@@ -2285,7 +2285,7 @@ export class Club {
   // under is the version in the picture's address, which the browser keeps for a year: it must change with
   // every photo, even one stored in the same millisecond or by a clock that went back. Tells whether a
   // photo was replaced.
-  storePhoto(productId, { mime, bytes }, userId) {
+  storePhoto(productId, { mime, bytes: data }, userId) {
     const previous = this.get('SELECT updated_at FROM product_photos WHERE product_id = ?', productId);
     let at = this.nowIso();
     if (previous && at <= previous.updated_at) at = new Date(Date.parse(previous.updated_at) + 1).toISOString();
@@ -2293,7 +2293,7 @@ export class Club {
       `INSERT INTO product_photos (product_id, mime, bytes, updated_at, updated_by, data) VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(product_id) DO UPDATE SET mime = excluded.mime, bytes = excluded.bytes, updated_at = excluded.updated_at,
          updated_by = excluded.updated_by, data = excluded.data`,
-      productId, mime, bytes.length, at, userId, bytes,
+      productId, mime, data.length, at, userId, data,
     );
     return !!previous;
   }
@@ -2329,30 +2329,41 @@ export class Club {
     return `${prefix}-${String(highest + 1).padStart(3, '0')}`;
   }
 
-  // The import's one product: created, or updated when a real product already has this name (capitals and
-  // spaces around it do not count). An update brings the price, the description if one comes, the photo if one
-  // comes, and puts the product back on sale; its stock, reference, category and name stay what they are.
-  // A new product has a stock of 0 and the club's usual alert threshold. No account stands behind the
-  // import door, so the product and the journal have no author.
+  // The import's one product: created, or updated when a real product already has this name (capitals, spaces
+  // around it and the way an accent is written do not count). An update brings the price, the description if one
+  // comes and the photo if one comes, and nothing else: a product the owner took off sale stays off sale, and its
+  // stock, reference, category and name stay what they are. A product of that name in another category is a
+  // mistake in the file, not something to update: the call is refused and nothing is written. The journal of an
+  // update keeps the price and the description it replaces (`avant`, as updateProduct's does). A new product is
+  // stored under its name in NFC, with a stock of 0 and the club's usual alert threshold. No account stands behind
+  // the import door, so the product and the journal have no author.
   importCatalogItem(item) {
     if (item === null || typeof item !== 'object' || Array.isArray(item)) throw invalid('Fiche produit invalide.');
-    const name = text(item.name, 'Nom du produit', { required: true, max: 80 });
+    const name = text(item.name, 'Nom du produit', { required: true, max: 80 }).normalize('NFC');
     if (!['cigare', 'bouteille'].includes(item.category)) throw invalid('Catégorie invalide (cigare ou bouteille).');
     const price = int(item.price, 'Prix de vente (en francs)', { min: 0, max: MAX_IMPORT_PRICE }) * 100;
     const description = item.description === undefined ? undefined : text(item.description, 'Description', { max: 300 });
     const photo = item.photo === undefined || item.photo === null ? null : decodePhoto(item.photo);
 
     const sameName = (n) => n.trim().normalize('NFC').toLowerCase();
-    const found = this.all('SELECT id, name FROM products WHERE is_demo = 0 ORDER BY id').find((p) => sameName(p.name) === sameName(name));
+    const found = this.all('SELECT id, name, category FROM products WHERE is_demo = 0 ORDER BY id').find((p) => sameName(p.name) === sameName(name));
+    if (found && found.category !== item.category) {
+      throw conflict(
+        'CATEGORIE_DIFFERENTE',
+        `Le produit « ${found.name} » existe déjà (catégorie ${found.category}) ; la fiche importée le range en ${item.category}. Rien n'a été modifié.`,
+      );
+    }
     const now = this.nowIso();
     let id;
     let reference;
+    let avant;
     if (found) {
       id = found.id;
-      const current = this.get('SELECT reference, description FROM products WHERE id = ?', id);
+      const current = this.get('SELECT reference, description, price FROM products WHERE id = ?', id);
       reference = current.reference;
+      avant = { price: current.price, description: current.description };
       this.run(
-        'UPDATE products SET price = ?, description = ?, active = 1, updated_at = ?, updated_by = NULL WHERE id = ?',
+        'UPDATE products SET price = ?, description = ?, updated_at = ?, updated_by = NULL WHERE id = ?',
         price, description === undefined ? current.description : description, now, id,
       );
     } else {
@@ -2365,7 +2376,7 @@ export class Club {
     }
     if (photo) this.storePhoto(id, photo, null);
     const status = found ? 'updated' : 'created';
-    this.audit(null, 'produit.importer', 'product', id, { name, reference, status, price, photo: !!photo });
+    this.audit(null, 'produit.importer', 'product', id, { name, reference, status, price, photo: !!photo, avant });
     return { id, reference, status, photo: !!this.get('SELECT 1 AS x FROM product_photos WHERE product_id = ?', id) };
   }
 

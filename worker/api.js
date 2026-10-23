@@ -3,6 +3,7 @@
 // (worker/index.js) and, unchanged, in the Node tests.
 // Each route may have an async `prepare` step (password hashing, token hashing) that runs first;
 // the handler itself is synchronous and, for writes, runs in one transaction with the idempotency record.
+// A route whose credential is not in the body may also have a `guard`: the same kind of step, before the body is read.
 // The same API also serves the demo space (`demo: true`, a second Durable Object with its own database).
 // That instance opens no session: the real club vouches for the signed-in account (demoContext) and the
 // demo space serves the request as that account (handleDemo).
@@ -173,7 +174,8 @@ export function createApi({ db, env = {}, demo = false }) {
     absent: "Le code d'installation (secret SETUP_TOKEN) n'est pas configuré sur le serveur.",
     wrong: "Code d'installation incorrect.",
   });
-  // The catalogue import door: the code comes in a header of its own, since the door has no session.
+  // The catalogue import door: the code comes in a header of its own, since the door has no session, and is
+  // checked before the body is read (the route's `guard`).
   const checkImportToken = (ctx) => checkSecret(ctx, {
     scope: 'import',
     secret: env.IMPORT_TOKEN,
@@ -226,7 +228,7 @@ export function createApi({ db, env = {}, demo = false }) {
   // while the IMPORT_TOKEN secret exists. There is no session: the code is the whole credential, so the door
   // belongs to the real club alone (the demo space answers 404).
   if (!demo) {
-    add('POST', '/api/admin/catalog-import', { public: true, ...WITH_PHOTO, prepare: checkImportToken }, (ctx) => club.importCatalog(ctx.body));
+    add('POST', '/api/admin/catalog-import', { public: true, ...WITH_PHOTO, guard: checkImportToken }, (ctx) => club.importCatalog(ctx.body));
   }
   // Demo space only (the real club answers 404): empties the space and fills it again from the real
   // club's configuration, which handleDemo hands over with the request.
@@ -386,15 +388,18 @@ export function createApi({ db, env = {}, demo = false }) {
       const { route, params } = found;
       const writes = request.method !== 'GET';
       if (writes) checkCsrf(request, url);
-      const body = writes ? await readJson(request, route.opts.maxBody) : {};
       const token = user ? null : (parseCookies(request.headers.get('cookie')).sid || null);
       const ctx = {
-        params, body, token, tokenHash: token ? await sha256Hex(token) : null, user: null, demoConfig,
+        params, body: {}, token, tokenHash: token ? await sha256Hex(token) : null, user: null, demoConfig,
         headers: request.headers,
         ip: request.headers.get('cf-connecting-ip') ?? 'local',
         query: Object.fromEntries(url.searchParams),
         setCookie: (value, maxAge) => cookies.push(cookieHeader(value, maxAge)),
       };
+      // A credential that is not in the body is checked before the body is read, so that a caller without it
+      // makes the Worker read and parse nothing (the import door's body may be up to 300 KB).
+      if (route.opts.guard) await route.opts.guard(ctx);
+      if (writes) ctx.body = await readJson(request, route.opts.maxBody);
       if (!route.opts.public) {
         ctx.user = user ?? club.sessionUser(ctx.tokenHash);
         // A session's account is active by construction; the one handleDemo hands over may have been deactivated.
@@ -411,7 +416,7 @@ export function createApi({ db, env = {}, demo = false }) {
 
       const key = request.headers.get('idempotency-key') ?? undefined;
       if (key !== undefined && !/^[A-Za-z0-9_-]{8,100}$/.test(key)) throw invalid("Clé d'idempotence invalide.");
-      const hash = key && ctx.user ? await sha256Hex(JSON.stringify([request.method, url.pathname, body])) : null;
+      const hash = key && ctx.user ? await sha256Hex(JSON.stringify([request.method, url.pathname, ctx.body])) : null;
       const replay = () => {
         const prev = club.get('SELECT * FROM idempotency_keys WHERE key = ? AND user_id = ?', key, ctx.user.id);
         if (!prev) return undefined;
@@ -462,11 +467,17 @@ export function createApi({ db, env = {}, demo = false }) {
     }
     if (payload?.__image) {
       // A photo never changes at its address (the version in it changes with the photo): kept a year, by the
-      // signed-in browser alone. This answer's Cache-Control replaces the no-store of the other answers.
+      // signed-in browser alone. This answer's Cache-Control replaces the no-store of the other answers. It is
+      // a picture and nothing else: opened as a page, it would be allowed to load and run nothing.
       const { mime, data } = payload.__image;
       return new Response(data, {
         status: 200,
-        headers: { ...SECURITY_HEADERS, 'Content-Type': mime, 'Cache-Control': 'private, max-age=31536000, immutable' },
+        headers: {
+          ...SECURITY_HEADERS,
+          'Content-Type': mime,
+          'Cache-Control': 'private, max-age=31536000, immutable',
+          'Content-Security-Policy': "default-src 'none'; sandbox",
+        },
       });
     }
     return json(200, payload, { cookies, replayed });
