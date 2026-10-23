@@ -44,6 +44,13 @@
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --slot-h: 34px;
   --tabbar-h: 64px;
+  --sidebar-w: 254px;
+  /* The demo space's own orange, the same in both themes (rules at the end of this file): --demo is the
+     frame, the watermark and the light stripe (3.1:1 against the cream page, 5.2:1 against the dark one);
+     --demo-deep is the fill under white text (4.6:1). */
+  --demo: #d46a00;
+  --demo-deep: #b85c00;
+  --demo-frame: 6px;
   accent-color: var(--bronze);
 }
 
@@ -159,7 +166,7 @@ p { margin: 0; }
 
 /* ------------------------------------------------------------------ shell */
 
-.shell { display: grid; grid-template-columns: 254px minmax(0, 1fr); min-height: 100vh; }
+.shell { display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); min-height: 100vh; }
 
 .sidebar {
   position: sticky; top: 0; height: 100vh;
@@ -203,15 +210,13 @@ main:focus { outline: none; }
 .topbar { display: none; }
 .tabbar { display: none; }
 
+/* The bar at the top of a page: a message and its button. Its only use is the demo banner. */
 .banner {
-  display: flex; gap: 10px; align-items: flex-start;
-  background: var(--bronze-soft); color: var(--text); border-bottom: 1px solid var(--bronze-line);
-  padding: 9px 36px; font-size: 0.88rem;
+  display: flex; gap: 12px; align-items: center;
+  padding: 6px 36px; font-size: 0.88rem;
 }
-.banner strong { color: var(--bronze-text); }
-.banner svg { width: 18px; height: 18px; flex: none; margin-top: 1px; color: var(--bronze-text); }
 .banner > span { flex: 1; min-width: 0; }
-.banner > a { flex: none; }
+.banner > .btn { flex: none; }
 
 @media (max-width: 899px) {
   .shell { grid-template-columns: minmax(0, 1fr); }
@@ -240,7 +245,7 @@ main:focus { outline: none; }
   }
   .tabbar a[aria-current="page"] { color: var(--bronze-on-charcoal); }
   main { padding: 18px 16px calc(var(--tabbar-h) + 28px + env(safe-area-inset-bottom)); }
-  .banner { padding: 8px 16px; }
+  .banner { padding: 6px 16px; }
   h1 { font-size: 1.45rem; }
 }
 
@@ -668,6 +673,55 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .kv dt { color: var(--text-2); }
 .kv dd { margin: 0; }
 .plan-box { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px; display: grid; gap: 12px; }
+
+/* ------------------------------------------------------------------ demo space */
+
+/* The demo space must never pass for the real club, at a glance, on any page: an orange frame round the
+   screen, a big DÉMO over the page, and a striped banner with its way out. The frame and the watermark
+   are fixed, drawn above the page, and let every click through. */
+
+/* Above everything, dialogs and tour included. It takes ::before because ::after of the shell is the
+   veil of signing in (app.css): sharing that one would make the frame fade out with the veil. */
+.shell.is-demo::before {
+  content: ""; position: fixed; inset: 0; z-index: 100;
+  border: var(--demo-frame) solid var(--demo); pointer-events: none;
+}
+
+/* Centred on the page content (not under the sidebar), over the cards, under the bars and the dialogs.
+   Faint enough to read through, a little stronger on the dark page. Not selectable: select-all must
+   not copy it. */
+.demo-watermark {
+  --mark: 0.14;
+  position: fixed; top: 50%; left: calc(50% + var(--sidebar-w) / 2); z-index: 10;
+  transform: translate(-50%, -50%) rotate(-18deg);
+  font-size: clamp(96px, 26vmin, 340px); font-weight: 900; line-height: 1; letter-spacing: 0.04em; white-space: nowrap;
+  color: var(--demo); opacity: var(--mark);
+  pointer-events: none; -webkit-user-select: none; user-select: none;
+}
+:root[data-theme="dark"] .demo-watermark { --mark: 0.2; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .demo-watermark { --mark: 0.2; } }
+@media (max-width: 899px) { .demo-watermark { left: 50%; } }
+
+/* White text needs a deep stripe under it: --demo-deep gives 4.6:1, --demo 3.6:1 (hence the shadow). On
+   wide screens the banner is the first thing under the top edge of the frame, so its content starts
+   below it; on phones the top bar is above it. */
+.banner-demo {
+  padding-top: calc(6px + var(--demo-frame));
+  background: repeating-linear-gradient(135deg, var(--demo-deep) 0 10px, var(--demo) 10px 20px);
+  color: #fff; font-weight: 800; letter-spacing: 0.02em;
+  text-shadow: 0 1px 2px rgba(50, 20, 0, 0.5);
+}
+@media (max-width: 899px) { .banner-demo { padding-top: 6px; } }
+.banner-demo .btn { background: #fff; border-color: #fff; color: #7a3e00; font-weight: 700; text-shadow: none; }
+.banner-demo .btn:hover { background: #fff1de; }
+.banner-demo .btn:focus-visible { box-shadow: 0 0 0 2px #7a3e00, 0 0 0 4px #fff; }
+
+/* The way in and out: the one orange button, in the sidebar (always dark) and in the account menu. */
+.btn-demo, .side-user .btn-demo {
+  background: var(--demo-deep); border-color: color-mix(in srgb, #fff 45%, var(--demo)); color: #fff; font-weight: 700;
+}
+.btn-demo:hover, .side-user .btn-demo:hover { background: var(--demo); }
+.btn-demo:focus-visible { box-shadow: 0 0 0 2px var(--charcoal), 0 0 0 4px color-mix(in srgb, #fff 45%, var(--demo)); }
 
 /* ------------------------------------------------------------------ print */
 
