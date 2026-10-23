@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { addDays } from '../shared/time.js';
 import { Server, Client, ok, UM } from './harness.js';
 
-const server = new Server();
+const server = new Server({}, { lenientTariffs: true });
 let today;
 let plans;
 let manager;
@@ -271,7 +271,7 @@ test('12. restrictions du rôle gérant (contrôlées côté serveur)', async ()
   const anonymous = new Client(server);
   assert.equal((await anonymous.get('/api/dashboard')).status, 401);
   const forbiddenCalls = [
-    manager.put('/api/settings', { demo_mode: false }),
+    manager.put('/api/settings', { club_name: 'X' }),
     manager.put(`/api/plans/${plans[0].id}`, { price: 1 }),
     manager.get('/api/users'),
     manager.post('/api/users', { login: 'pirate', name: 'X', role: 'admin', password: 'xxxxxxxxxxxx' }),
@@ -306,7 +306,9 @@ test('12. restrictions du rôle gérant (contrôlées côté serveur)', async ()
 test('13. tarifs non validés bloqués hors démonstration ; pas de recalcul après changement de tarif', async () => {
   const k = await newMember('Karim');
   ok(await book(k, day(9), '12:00', 120));
-  ok(await admin.put('/api/settings', { demo_mode: false }));
+  // Leave the demo mode the scenarios run in: the real club refuses tariffs nobody has validated.
+  server.club.demo = false;
+  server.club.cachedSettings = null;
   try {
     const paid = await book(k, day(9), '16:00', 60);
     assert.equal(paid.status, 409);
@@ -325,7 +327,9 @@ test('13. tarifs non validés bloqués hors démonstration ; pas de recalcul apr
     const extended = ok(await manager.post(`/api/reservations/${now.reservation.id}/extend`, { minutes: 30 }));
     assert.equal(extended.reservation.supplement_amount, 40000 * UM); // still the booked tariff: 25 000 + 15 000
   } finally {
-    ok(await admin.put('/api/settings', { demo_mode: true, overtime_tariff: { hour: 25000 * UM, half: 15000 * UM, validated: false } }));
+    server.club.demo = true;
+    server.club.cachedSettings = null;
+    ok(await admin.put('/api/settings', { overtime_tariff: { hour: 25000 * UM, half: 15000 * UM, validated: false } }));
   }
 });
 

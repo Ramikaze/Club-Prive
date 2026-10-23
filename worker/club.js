@@ -52,7 +52,6 @@ export function defaultSettings() {
     opening_balances: { date: null, amounts: {} },
     low_stock_default: 3,
     expiry_warning_days: 7,
-    demo_mode: true,
   };
 }
 
@@ -100,9 +99,9 @@ const CHARGE_SELECT = `
   LEFT JOIN refunds rf ON rf.charge_id = c.id`;
 
 export class Club {
-  constructor(db, { instanceLabel = null } = {}) {
+  constructor(db, { demo = false } = {}) {
     this.db = db;
-    this.instanceLabel = instanceLabel; // e.g. « Version de test » on the test Worker; null on the clients' site
+    this.demo = !!demo; // true only in the demo space (fictitious data); the real club is never in demo mode
     this.depth = 0;
     this.cachedSettings = null;
     this.at = null; // fixed clock (ms), used only by the demo seed to backdate history
@@ -202,6 +201,8 @@ export class Club {
     if (!this.cachedSettings) {
       const s = defaultSettings();
       for (const row of this.all('SELECT key, value FROM settings')) if (row.key in s) s[row.key] = JSON.parse(row.value);
+      // Not a stored setting: it follows the space the club runs in, whatever an older `demo_mode` row says.
+      s.demo_mode = this.demo;
       this.cachedSettings = s;
     }
     return this.cachedSettings;
@@ -241,7 +242,7 @@ export class Club {
       accounts: ACCOUNTS.map((key) => ({ key, label: ACCOUNT_LABELS[key] })),
       biz_today: this.bizToday(),
       server_time: this.nowIso(),
-      instance_label: this.instanceLabel,
+      demo: this.demo,
     };
   }
 
@@ -291,7 +292,6 @@ export class Club {
         return out;
       }
       case 'refunds_admin_only':
-      case 'demo_mode':
         return flag(v);
       case 'annual_allocation_mode':
         if (!['activation', 'mensuelle'].includes(v)) throw invalid("Mode d'attribution invalide.");
@@ -321,6 +321,8 @@ export class Club {
     const current = this.settings();
     const changes = {};
     for (const [key, value] of Object.entries(patch)) {
+      // `demo_mode` is in `current` (derived, see settings()) but has no case in normalizeSetting:
+      // it is refused like any unknown key.
       if (!(key in current)) throw invalid(`Paramètre inconnu : ${key}`);
       changes[key] = this.normalizeSetting(actor, key, value, current[key]);
     }

@@ -12,16 +12,26 @@ export const UM = 100; // amounts are stored in hundredths
 export const ORIGIN = 'http://club.test';
 
 export class Server {
-  constructor(env = {}) {
+  // `demo`: the club runs as the demo space. `lenientTariffs`: see start().
+  constructor(env = {}, { demo = false, lenientTariffs = false } = {}) {
     this.env = env;
+    this.demo = demo;
+    this.lenientTariffs = lenientTariffs;
     this.dir = fs.mkdtempSync(path.join(os.tmpdir(), 'club-test-'));
     this.file = path.join(this.dir, 'test.sqlite');
   }
 
   async start() {
     this.db = nodeDb(this.file);
-    this.api = createApi({ db: this.db, env: this.env });
+    this.api = createApi({ db: this.db, env: this.env, demo: this.demo });
     await this.api.init();
+    // The scenarios run with unvalidated tariffs usable, as in the demo space: the default tariffs
+    // are unvalidated and the real club refuses to charge with them. Tests of the real club's own
+    // rules leave this off.
+    if (this.lenientTariffs) {
+      this.club.demo = true;
+      this.club.cachedSettings = null;
+    }
     // Tests book on dates relative to today, whatever the weekday, so on a fresh database the
     // weekend minimum (2 h on Friday and Saturday from 18:00) starts equal to the weekday one; the
     // weekend test raises it. A restart keeps whatever the test set.

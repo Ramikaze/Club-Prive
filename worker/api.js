@@ -5,7 +5,7 @@
 // the handler itself is synchronous and, for writes, runs in one transaction with the idempotency record.
 import { Club } from './club.js';
 import { migrate } from './schema.js';
-import { seedDemo, DEMO_ACCOUNTS } from './seed.js';
+import { DEMO_ACCOUNTS } from './seed.js';
 import { AppError, forbidden, invalid, conflict } from './errors.js';
 import { hashPassword, verifyPassword, sha256Hex, newToken, checkPasswordStrength } from './auth.js';
 
@@ -64,9 +64,9 @@ async function readJson(request) {
   }
 }
 
-export function createApi({ db, env = {} }) {
+export function createApi({ db, env = {}, demo = false }) {
   migrate(db);
-  const club = new Club(db, { instanceLabel: env.INSTANCE_LABEL || null });
+  const club = new Club(db, { demo });
   club.bootstrap();
 
   const allowedOrigins = String(env.ALLOWED_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -155,9 +155,7 @@ export function createApi({ db, env = {} }) {
       throw new AppError(403, 'CODE_INCORRECT', "Code d'installation incorrect.");
     }
   };
-  add('GET', '/api/setup', { public: true }, () => ({
-    needed: !club.hasUsers(), token_configured: !!env.SETUP_TOKEN, instance_label: club.instanceLabel,
-  }));
+  add('GET', '/api/setup', { public: true }, () => ({ needed: !club.hasUsers(), token_configured: !!env.SETUP_TOKEN }));
   add('POST', '/api/setup', {
     public: true,
     prepare: async (ctx) => {
@@ -197,10 +195,6 @@ export function createApi({ db, env = {} }) {
   add('POST', '/api/users/:id/password', { ...ADMIN, prepare: (ctx) => preparePassword(ctx, 'password') },
     (ctx) => club.setUserPassword(ctx.user, ctx.params.id, ctx.passwordHash));
   add('GET', '/api/audit', ADMIN, (ctx) => club.auditLog(ctx.query));
-  add('POST', '/api/admin/demo', ADMIN, (ctx) => {
-    seedDemo(club, { actor: ctx.user });
-    return club.bundle(ctx.user);
-  });
   add('POST', '/api/admin/reset', ADMIN, (ctx) => club.wipeData(ctx.user, ctx.body.confirm));
 
   // Overview
@@ -411,12 +405,12 @@ export function createApi({ db, env = {} }) {
     return json(200, payload, { cookies, replayed });
   }
 
-  // Local development only: a fresh database gets the demonstration with its known accounts.
+  // Local development only: a fresh database gets the accounts with known passwords, and no data.
   async function init() {
     if (env.DEMO_ACCOUNTS !== '1' || club.hasUsers()) return;
     const accounts = [];
     for (const a of DEMO_ACCOUNTS) accounts.push({ ...a, password_hash: await hashPassword(a.password) });
-    if (!club.hasUsers()) seedDemo(club, { accounts });
+    if (!club.hasUsers()) club.tx(() => accounts.forEach((a) => club.createUser(null, a)));
   }
 
   return { club, handle, init };

@@ -1,7 +1,8 @@
 // Demonstration data. Every person and product here is fictitious and flagged as such.
 // History is created through the same business methods as real use, with a backdated clock.
-// Accounts with known passwords are only created when the caller passes them (local development,
-// DEMO_ACCOUNTS=1). Online, an administrator loads the demonstration under their own account.
+// It is only loaded into the demo space (club.demo), under the author the caller passes.
+// The accounts below have known passwords: only local development creates them (DEMO_ACCOUNTS=1),
+// and without any data.
 import { AppError, conflict } from './errors.js';
 import { addDays, fmtHHMM, localParts, localToUtcMs, parseHHMM } from '../shared/time.js';
 import { minDurationFor } from '../shared/rules.js';
@@ -16,30 +17,25 @@ export const DEMO_ACCOUNTS = [
 const HOUR = 3600000;
 const DAY = 24 * HOUR;
 
-// `accounts`: DEMO_ACCOUNTS with a `password_hash` each; otherwise `actor` (an administrator) owns
-// every demonstration record.
-export function seedDemo(club, options = {}) {
+// `actor`: the full `users` row of the author, an administrator, who owns every demonstration record.
+export function seedDemo(club, { actor }) {
   try {
-    club.tx(() => fill(club, options));
+    club.tx(() => fill(club, { actor }));
   } finally {
     club.at = null;
   }
 }
 
-function fill(club, { accounts = null, actor = null }) {
+function fill(club, { actor }) {
   if (!club.isEmpty()) {
     throw conflict('DONNEES_EXISTANTES', 'Des membres, produits ou opérations existent déjà : effacez les données avant de charger la démonstration.');
   }
   const s = club.settings();
-  if (!s.demo_mode) throw conflict('MODE_DEMO_INACTIF', 'Activez le mode démonstration dans les paramètres avant de charger les données fictives.');
+  if (!s.demo_mode) throw conflict('MODE_DEMO_INACTIF', "Les données fictives ne se chargent que dans l'espace démo.");
   const realNow = Date.now();
   const tz = s.timezone;
-  let owner = actor;
-  let manager = actor;
-  if (accounts) {
-    const users = accounts.map((u) => club.userRow(club.createUser(null, u).id));
-    [owner, , manager] = users;
-  }
+  const owner = actor;
+  const manager = actor;
   const today = club.bizToday();
   const monthly = club.get("SELECT id FROM plans WHERE code = 'MENSUELLE'").id;
   const annual = club.get("SELECT id FROM plans WHERE code = 'ANNUELLE'").id;
