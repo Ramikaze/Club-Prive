@@ -175,14 +175,20 @@ function ResetDialog({ close, onDone }) {
 function ClubSection({ save }) {
   const s = useSettings();
   const { busy, error, onSubmit } = useFormAction((v) => save({
-    club_name: v.club_name, currency: { label: v.currency_label, decimals: Number(v.currency_decimals) }, timezone: v.timezone,
+    club_name: v.club_name, club_whatsapp: v.club_whatsapp,
+    currency: { label: v.currency_label, decimals: Number(v.currency_decimals) }, timezone: v.timezone,
   }));
   return (
     <section className="card settings-section" id="sec-club">
       <div className="card-head"><h2>Identité du club</h2></div>
       <form className="form-grid" onSubmit={onSubmit} noValidate>
-        <label className="field"><span>Nom du club</span>
-          <input name="club_name" defaultValue={s.club_name} required maxLength={80} /></label>
+        <div className="form-row">
+          <label className="field"><span>Nom du club</span>
+            <input name="club_name" defaultValue={s.club_name} required maxLength={80} /></label>
+          <label className="field"><span>Numéro WhatsApp du club</span>
+            <input type="tel" name="club_whatsapp" defaultValue={s.club_whatsapp ?? ''} maxLength={30} autoComplete="off" placeholder="+242 06 000 00 00" />
+            <span className="help">Au format international. Il figure en bas du message de confirmation WhatsApp envoyé aux clients ; laissé vide, il est omis.</span></label>
+        </div>
         <div className="form-row">
           <label className="field"><span>Libellé de la devise</span>
             <input name="currency_label" defaultValue={s.currency.label} required maxLength={12} /></label>
@@ -282,15 +288,20 @@ function RoomsSection() {
 
 function HoursSection({ save }) {
   const s = useSettings();
-  const { busy, error, onSubmit } = useFormAction((v) => save({
-    hours: { open: v.open },
-    booking: {
-      slot_min: Number(v.slot_min),
-      min_duration_min: Number(v.min_duration_min),
-      weekend_min_duration_min: Number(v.weekend_min_duration_min),
-      extension_step_min: Number(v.extension_step_min),
-    },
-  }));
+  const { busy, error, onSubmit } = useFormAction((v) => {
+    // A blank field would read as 0 and quietly switch the gap off.
+    if (String(v.gap_min ?? '').trim() === '') throw new Error('Battement entre deux réservations : nombre entier attendu.');
+    return save({
+      hours: { open: v.open },
+      booking: {
+        slot_min: Number(v.slot_min),
+        min_duration_min: Number(v.min_duration_min),
+        weekend_min_duration_min: Number(v.weekend_min_duration_min),
+        extension_step_min: Number(v.extension_step_min),
+        gap_min: Number(v.gap_min),
+      },
+    });
+  });
   return (
     <section className="card settings-section" id="sec-hours">
       <div className="card-head"><h2>Journée et créneaux</h2></div>
@@ -306,6 +317,11 @@ function HoursSection({ save }) {
           <label className="field"><span>Vendredi et samedi dès 18 h</span><select name="weekend_min_duration_min" defaultValue={s.booking.weekend_min_duration_min ?? s.booking.min_duration_min}>{[60, 90, 120, 150, 180].map((n) => <option key={n} value={n}>{fmtDuration(n)}</option>)}</select>
             <span className="help">Durée minimale de ces soirées.</span></label>
           <label className="field"><span>Pas de prolongation</span><select name="extension_step_min" defaultValue={s.booking.extension_step_min}>{[15, 30, 60].map((n) => <option key={n} value={n}>{n} min</option>)}</select></label>
+        </div>
+        <div className="form-row">
+          <label className="field"><span>Battement entre deux réservations (minutes)</span>
+            <input type="number" name="gap_min" min="0" max="240" step="1" required defaultValue={s.booking.gap_min} />
+            <span className="help">0 pour désactiver</span></label>
         </div>
         <FormFooter busy={busy} error={error} />
       </form>

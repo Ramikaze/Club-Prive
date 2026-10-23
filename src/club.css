@@ -32,6 +32,14 @@
   --info: #29537a;
   --info-soft: #dfe9f2;
   --neutral-soft: #ebe0cc;
+  /* The end-of-session alert (.notice-ending): an orange that asks the manager for an answer, where the amber
+     of --warn only informs. Text 9.5:1 on the tint; the bar 3.2:1 against the cream cards; the button text on
+     --ending-deep 5.2:1 (8.4:1 in the dark theme). */
+  --ending-soft: #fde3c4;
+  --ending-text: #5c2a00;
+  --ending-line: #d26200;
+  --ending-deep: #b34f00;
+  --ending-on-deep: #fff;
   --off-hours: repeating-linear-gradient(135deg, #f0e6d5 0 6px, #e8dcc7 6px 12px);
   --focus-ring: 0 0 0 3px rgba(158, 101, 46, 0.38);
   --radius: 14px;
@@ -86,6 +94,11 @@
   --info: #8db8e6;
   --info-soft: #1a2a3c;
   --neutral-soft: #2e2924;
+  --ending-soft: #3a2310;
+  --ending-text: #ffcf9f;
+  --ending-line: #f08a24;
+  --ending-deep: #f2a33a;
+  --ending-on-deep: #2b1400;
   --off-hours: repeating-linear-gradient(135deg, #1f1d1a 0 6px, #262320 6px 12px);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 18px rgba(0, 0, 0, 0.25);
@@ -121,6 +134,11 @@
     --info: #8db8e6;
     --info-soft: #1a2a3c;
     --neutral-soft: #2e2924;
+    --ending-soft: #3a2310;
+    --ending-text: #ffcf9f;
+    --ending-line: #f08a24;
+    --ending-deep: #f2a33a;
+    --ending-on-deep: #2b1400;
     --off-hours: repeating-linear-gradient(135deg, #1f1d1a 0 6px, #262320 6px 12px);
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 18px rgba(0, 0, 0, 0.25);
@@ -435,6 +453,29 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .notice-ok { background: var(--ok-soft); color: var(--ok); }
 .notice-bronze { background: var(--bronze-soft); color: var(--bronze-text); }
 
+/* The alert of a session about to end (EndingSoonNotice): an orange block with a bar on its left and a filled
+   button, so that it reads as something to act on. Its countdown is always "reste mm:ss" in tabular figures:
+   the box keeps its size as the seconds go by. On the dashboard it takes a line of its own under the room. */
+.notice-ending {
+  background: var(--ending-soft); color: var(--ending-text);
+  border: 1px solid color-mix(in srgb, var(--ending-line) 40%, transparent); border-left: 4px solid var(--ending-line);
+}
+.notice-ending > svg { color: var(--ending-line); }
+.ending-notice-main { flex: 1; min-width: 0; display: grid; gap: 8px; }
+.ending-notice-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; }
+.ending-notice-title { flex: 1 1 12rem; min-width: 0; font-weight: 650; }
+.ending-notice-clock { flex: none; font-variant-numeric: tabular-nums; font-weight: 700; white-space: nowrap; }
+.ending-notice-extend { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
+.ending-notice-extend p { font-weight: 600; }
+.notice-ending .btn { background: var(--ending-deep); border-color: var(--ending-deep); color: var(--ending-on-deep); font-weight: 650; }
+.notice-ending .btn:hover {
+  background: color-mix(in srgb, var(--ending-deep) 80%, var(--ending-text));
+  border-color: color-mix(in srgb, var(--ending-deep) 80%, var(--ending-text));
+}
+/* Two tones, the dark one outside, so the ring shows on the orange tint and on the button. */
+.notice-ending .btn:focus-visible { box-shadow: 0 0 0 2px var(--ending-soft), 0 0 0 4px var(--ending-text); }
+.list-item-interactive > .notice-ending { flex: 1 1 100%; }
+
 .empty { text-align: center; color: var(--text-2); padding: 26px 12px; display: grid; gap: 10px; justify-items: center; }
 .empty svg { width: 28px; height: 28px; color: var(--text-3); }
 
@@ -486,7 +527,23 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 }
 .toast.error { border-left-color: var(--danger); }
 .toast svg { width: 18px; height: 18px; flex: none; margin-top: 1px; }
+.toast-body { display: grid; gap: 8px; justify-items: start; min-width: 0; }
+/* The action of a toast, under its message (the toast is charcoal in both themes). */
+.toast-action {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px; border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--on-charcoal) 55%, transparent); background: transparent; color: var(--on-charcoal);
+  font: inherit; font-weight: 600; cursor: pointer;
+}
+.toast-action:hover { background: color-mix(in srgb, var(--on-charcoal) 14%, transparent); }
+.toast-action:focus-visible { box-shadow: 0 0 0 2px var(--charcoal), 0 0 0 4px var(--bronze-on-charcoal); }
+.toast-action svg { margin-top: 0; }
 @media (max-width: 899px) { .toasts { bottom: calc(var(--tabbar-h) + 12px + env(safe-area-inset-bottom)); left: 16px; right: 16px; max-width: none; } }
+
+/* The confirmation message the demo shows instead of opening WhatsApp. */
+.wa-message {
+  margin: 0; padding: 12px 14px; border-left: 3px solid var(--bronze); border-radius: var(--radius-sm);
+  background: var(--surface-2); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text;
+}
 
 /* ------------------------------------------------------------------ segmented & toolbar */
 

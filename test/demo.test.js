@@ -150,6 +150,30 @@ test('réglages inhabituels : petite salle', async () => {
   assert.ok(parties.every((n) => n <= 2), parties.join(' '));
 });
 
+// Two history bookings of the seed sit 3 h 30 apart in the room (yesterday 15:00-17:30 and 21:00-22:00): a gap
+// beyond that refuses the second, and the demo must still open and reset, with the club's rule kept.
+for (const gap of [211, 240]) {
+  test(`réglages inhabituels : battement de ${gap} minutes`, async () => {
+    const { real, demo } = await preparedWith(async (spaces) => {
+      ok(await spaces.admin.put('/api/settings', { booking: { ...spaces.bundle.settings.booking, gap_min: gap } }));
+      assert.equal(spaces.real.club.settings().booking.gap_min, gap);
+    });
+
+    assert.equal(demo.club.listMembers().length, 5);
+    assert.equal(demo.club.settings().booking.gap_min, gap);
+    // What the seed could book keeps the rule: no two bookings of a room closer than the gap.
+    const booked = demo.club.all("SELECT room_id, start_ms, end_ms FROM reservations WHERE status <> 'annulee' ORDER BY room_id, start_ms");
+    assert.ok(booked.length > 0);
+    for (let i = 1; i < booked.length; i += 1) {
+      if (booked[i].room_id === booked[i - 1].room_id) assert.ok(booked[i].start_ms - booked[i - 1].end_ms >= gap * 60000, `réservation ${i}`);
+    }
+    // The reset fills the space again from the same settings, and works too.
+    const actor = demo.club.userRow(real.club.userByLogin('proprietaire').id);
+    demo.club.resetDemo(real.club.demoConfig(), actor);
+    assert.equal(demo.club.listMembers().length, 5);
+  });
+}
+
 test('réglages inhabituels : formules retirées de la vente', async () => {
   const { demo } = await preparedWith(async ({ admin, bundle }) => {
     for (const plan of bundle.plans) ok(await admin.put(`/api/plans/${plan.id}`, { active: false }));

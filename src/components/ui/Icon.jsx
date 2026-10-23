@@ -4,7 +4,7 @@ import {
   CreditCard, TriangleAlert, Info, Check, X, Moon, Printer, Download, Clock, Menu, KeyRound, Pencil, List, Receipt,
   Landmark, BookOpen, Lock, LockOpen, FileSpreadsheet, Compass, ArrowLeftRight, Ban, Undo2, Play, CircleStop,
   RotateCcw, UserPlus, HandCoins, Thermometer, Droplets, Archive, ArrowDownToLine, ArrowUpFromLine, Trash2,
-  DoorOpen, Eye, EyeOff, GraduationCap,
+  DoorOpen, Eye, EyeOff, GraduationCap, MessageCircle,
 } from 'lucide-react';
 
 const ICONS = {
@@ -16,7 +16,7 @@ const ICONS = {
   ban: Ban, undo: Undo2, play: Play, stop: CircleStop, reset: RotateCcw, 'user-plus': UserPlus,
   cash: HandCoins, humidor: Archive, humidity: Droplets, temperature: Thermometer,
   deposit: ArrowDownToLine, withdraw: ArrowUpFromLine, trash: Trash2, eye: Eye, 'eye-off': EyeOff,
-  demo: GraduationCap,
+  demo: GraduationCap, message: MessageCircle,
 };
 
 export default function Icon({ name, size, ...props }) {

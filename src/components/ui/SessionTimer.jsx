@@ -3,9 +3,10 @@
 import { useEffect, useState } from 'react';
 import { fmtDuration, parts } from '../../lib/format.js';
 
-const ENDING_SOON_MS = 10 * 60000;
+// The last 15 minutes of a session: the timer turns amber and EndingSoonNotice asks about an extension.
+export const ENDING_SOON_MS = 15 * 60000;
 
-function useNow(intervalMs) {
+export function useNow(intervalMs) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), intervalMs);

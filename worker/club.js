@@ -3,7 +3,7 @@
 // The database is reached through a small adapter (get / all / run / transaction, see db.js) so the
 // same code runs on a Cloudflare Durable Object and on node:sqlite in tests. Everything here is
 // synchronous: password hashing and other async work happen in the API layer, before the transaction.
-import { invalid, forbidden, notFound, conflict } from './errors.js';
+import { AppError, invalid, forbidden, notFound, conflict } from './errors.js';
 import { text, int, toId, flag, frDate } from './validate.js';
 import { ledgerMethods, DEFAULT_CATEGORIES } from './ledger.js';
 import { loungeMethods } from './lounge.js';
@@ -45,10 +45,14 @@ export const DEMO_AUTHOR_ID = 0;
 export function defaultSettings() {
   return {
     club_name: 'Limen',
+    // The club's WhatsApp number, as an administrator types it. It closes the booking confirmation sent to members
+    // (« Pour toute question : … ») and is left out of the message while empty. Set in Settings, never in the code.
+    club_whatsapp: '',
     currency: { label: 'FCFA', decimals: 0 },
     timezone: 'Africa/Brazzaville',
     hours: { open: '06:00' }, // start of the business day; the room can be booked at any hour
-    booking: { slot_min: 30, min_duration_min: 60, weekend_min_duration_min: 120, extension_step_min: 30 },
+    // gap_min: minutes kept free between two bookings of the same room; 0 turns the rule off.
+    booking: { slot_min: 30, min_duration_min: 60, weekend_min_duration_min: 120, extension_step_min: 30, gap_min: 30 },
     overtime_tariff: { hour: 2500000, half: 1500000, validated: false },
     annual_allocation_mode: 'activation',
     subscription_revenue_account: 'reservations',
@@ -102,6 +106,15 @@ const CHARGE_SELECT = `
   LEFT JOIN payment_allocations pa ON pa.charge_id = c.id
   LEFT JOIN payments p ON p.id = pa.payment_id
   LEFT JOIN refunds rf ON rf.charge_id = c.id`;
+
+// A duration inside a sentence: « 30 minutes » (fmtDuration abbreviates them to « 30 min »), « 1 h 30 » from an hour on.
+const durationInWords = (min) => (min < 60 ? `${min} minute${min > 1 ? 's' : ''}` : fmtDuration(min));
+
+// A booking lasts 24 hours at most (planReservation and planExtension refuse more), so one that is still going
+// on at some instant began less than this before it. The queries looking for the bookings around a time lean
+// on it to leave the whole past out: reservations_time (start_ms, end_ms) narrows by start_ms alone, and
+// without a lower bound on it the search walks every booking ever made.
+const MAX_SESSION_MS = 1440 * 60000;
 
 export class Club {
   constructor(db, { demo = false } = {}) {
@@ -206,6 +219,8 @@ export class Club {
     if (!this.cachedSettings) {
       const s = defaultSettings();
       for (const row of this.all('SELECT key, value FROM settings')) if (row.key in s) s[row.key] = JSON.parse(row.value);
+      // A booking setting saved before the gap existed has no `gap_min`: it reads with the default.
+      if (!Number.isInteger(s.booking.gap_min)) s.booking = { ...s.booking, gap_min: defaultSettings().booking.gap_min };
       // Not a stored setting: it follows the space the club runs in, whatever an older `demo_mode` row says.
       s.demo_mode = this.demo;
       this.cachedSettings = s;
@@ -255,6 +270,9 @@ export class Club {
     switch (key) {
       case 'club_name':
         return text(v, 'Nom du club', { required: true, max: 80 });
+      case 'club_whatsapp':
+        // Free text, trimmed; empty clears the number.
+        return text(v, 'Numéro WhatsApp du club', { max: 30 }) ?? '';
       case 'currency': {
         if (!v || typeof v !== 'object') throw invalid('Devise invalide.');
         return {
@@ -279,9 +297,11 @@ export class Club {
         const min = int(v?.min_duration_min, 'Durée minimale', { min: slot, max: 720 });
         const weekend = int(v?.weekend_min_duration_min ?? current.weekend_min_duration_min ?? min, 'Durée minimale le week-end', { min: slot, max: 720 });
         const step = int(v?.extension_step_min, 'Pas de prolongation', { min: slot, max: 240 });
+        // Left out (as by a client that predates the gap), the gap keeps its value.
+        const gap = int(v?.gap_min ?? current.gap_min, 'Battement entre deux réservations', { min: 0, max: 240 });
         if (min % slot || weekend % slot || step % slot) throw invalid('Les durées minimales et le pas de prolongation doivent être des multiples du pas des créneaux.');
         if (weekend < min) throw invalid('La durée minimale du week-end ne peut pas être plus courte que celle de la semaine.');
-        return { slot_min: slot, min_duration_min: min, weekend_min_duration_min: weekend, extension_step_min: step };
+        return { slot_min: slot, min_duration_min: min, weekend_min_duration_min: weekend, extension_step_min: step, gap_min: gap };
       }
       case 'overtime_tariff': {
         const hour = int(v?.hour, "Prix de l'heure supplémentaire", { min: 0 });
@@ -1202,16 +1222,20 @@ export class Club {
     };
   }
 
+  // The bookings that strictly overlap [startMs, endMs). One that ends after startMs began after startMs less
+  // 24 hours (MAX_SESSION_MS): the lower bound on start_ms changes nothing in the result, it only keeps the
+  // search from walking the past.
   overlapping(startMs, endMs, excludeId, roomId = null) {
+    const since = startMs - MAX_SESSION_MS;
     if (roomId != null) {
       return this.all(
-        `${RES_SELECT} WHERE r.status <> 'annulee' AND COALESCE(r.room_id, 1) = ? AND r.start_ms < ? AND r.end_ms > ? AND r.id <> ? ORDER BY r.start_ms`,
-        roomId, endMs, startMs, excludeId ?? 0,
+        `${RES_SELECT} WHERE r.status <> 'annulee' AND COALESCE(r.room_id, 1) = ? AND r.start_ms > ? AND r.start_ms < ? AND r.end_ms > ? AND r.id <> ? ORDER BY r.start_ms`,
+        roomId, since, endMs, startMs, excludeId ?? 0,
       ).map((r) => this.reservationDTO(r));
     }
     return this.all(
-      `${RES_SELECT} WHERE r.status <> 'annulee' AND r.start_ms < ? AND r.end_ms > ? AND r.id <> ? ORDER BY r.start_ms`,
-      endMs, startMs, excludeId ?? 0,
+      `${RES_SELECT} WHERE r.status <> 'annulee' AND r.start_ms > ? AND r.start_ms < ? AND r.end_ms > ? AND r.id <> ? ORDER BY r.start_ms`,
+      since, endMs, startMs, excludeId ?? 0,
     ).map((r) => this.reservationDTO(r));
   }
 
@@ -1223,20 +1247,85 @@ export class Club {
     return conflict('CHEVAUCHEMENT', `${prefix} est déjà réservée sur ce créneau${who}.`, { conflicts });
   }
 
+  // The bookings of a room that [startMs, endMs) would sit too close to: they do not strictly overlap
+  // it (that is `overlapping`, which takes priority) but begin less than `gap_min` minutes after it
+  // ends or end less than `gap_min` minutes before it begins. A gap of exactly `gap_min` is enough.
+  // Cancelled bookings do not count, and nothing is too close when the gap is 0. One that ends after
+  // startMs less the gap began after startMs less the gap and 24 hours (MAX_SESSION_MS): that lower bound on
+  // start_ms changes nothing in the result, it only keeps the search from walking the past.
+  gapConflicts(startMs, endMs, excludeId, roomId) {
+    const gapMs = this.settings().booking.gap_min * 60000;
+    if (!gapMs) return [];
+    return this.all(
+      `${RES_SELECT} WHERE r.status <> 'annulee' AND COALESCE(r.room_id, 1) = ? AND r.id <> ? AND r.start_ms > ?
+         AND r.start_ms < ? AND r.end_ms > ? AND (r.start_ms >= ? OR r.end_ms <= ?) ORDER BY r.start_ms`,
+      roomId, excludeId ?? 0, startMs - gapMs - MAX_SESSION_MS, endMs + gapMs, startMs - gapMs, endMs, startMs,
+    ).map((r) => this.reservationDTO(r));
+  }
+
+  // The refusal for a booking too close to another one of its room: like overlapError, it names the
+  // neighbour and gives the nearest time that would do. That time falls on the slot grid, as a start
+  // or an end must.
+  //  - a new booking: [startMs, endMs) is its span; the closest booking before it and the closest one
+  //    after it speak.
+  //  - an extension: `startMs` is the end the booking has and `endMs` the end it asked for; only what
+  //    follows speaks, and the latest end is a whole number of extension steps from the end it has. When
+  //    not even one step fits, it says that no extension is possible instead of naming the end it has.
+  //  - a move: `roomName` is the room it would go to; every booking too close is named.
+  gapError(conflicts, { startMs, endMs, extension = false, roomName = null }) {
+    const { gap_min: gap, slot_min: slot, extension_step_min: step } = this.settings().booking;
+    const tz = this.settings().timezone;
+    const time = (ms) => localParts(ms, tz).time;
+    const lead = `Il faut ${durationInWords(gap)} entre deux réservations : `;
+    const details = { conflicts };
+    if (roomName) {
+      const spans = conflicts.map((c) => `de ${c.start_time} à ${c.end_time}`);
+      const list = spans.length > 1 ? `${spans.slice(0, -1).join(', ')} et ${spans.at(-1)}` : spans[0];
+      return conflict('BATTEMENT', `${lead}la salle « ${roomName} » a ${spans.length > 1 ? 'des réservations' : 'une réservation'} ${list}.`, details);
+    }
+    const gapMs = gap * 60000;
+    const slotMs = slot * 60000;
+    // Slots are counted from midnight in the club's time zone.
+    const sinceSlot = (ms) => (localParts(ms, tz).minutes % slot) * 60000;
+    const firstSlotFrom = (ms) => ms + ((slotMs - sinceSlot(ms)) % slotMs);
+    const lastSlotUntil = (ms) => ms - sinceSlot(ms);
+    const parts = [];
+    const previous = conflicts.filter((c) => c.end_ms <= startMs).at(-1);
+    if (previous) {
+      parts.push(`la séance précédente se termine à ${time(previous.end_ms)}, celle-ci peut commencer à ${time(firstSlotFrom(previous.end_ms + gapMs))} au plus tôt`);
+    }
+    const next = conflicts.find((c) => c.start_ms >= endMs);
+    if (next && extension) {
+      const stepMs = step * 60000;
+      const latest = startMs + Math.floor(Math.max(next.start_ms - gapMs - startMs, 0) / stepMs) * stepMs;
+      parts.push(latest > startMs
+        ? `la séance suivante commence à ${time(next.start_ms)}, la prolongation peut aller jusqu'à ${time(latest)} au plus tard`
+        : `la séance suivante commence à ${time(next.start_ms)}, aucune prolongation n'est possible`);
+    } else if (next) {
+      parts.push(`la séance suivante commence à ${time(next.start_ms)}, celle-ci doit se terminer à ${time(lastSlotUntil(next.start_ms - gapMs))} au plus tard`);
+    }
+    return conflict('BATTEMENT', `${lead}${parts.join(' ; ')}.`, details);
+  }
+
   ensureMembersAvailable(memberIds, startMs, endMs, excludeId = null) {
     const ids = [...new Set(memberIds)];
     const placeholders = ids.map(() => '?').join(',');
+    // Same lower bound on start_ms as `overlapping`: it leaves the past out without changing the result.
     const conflicts = this.all(
-      `${RES_SELECT} WHERE r.status <> 'annulee' AND r.start_ms < ? AND r.end_ms > ? AND r.id <> ?
+      `${RES_SELECT} WHERE r.status <> 'annulee' AND r.start_ms > ? AND r.start_ms < ? AND r.end_ms > ? AND r.id <> ?
        AND (r.member_id IN (${placeholders}) OR EXISTS (
          SELECT 1 FROM reservation_attendees ra WHERE ra.reservation_id = r.id AND ra.member_id IN (${placeholders})
        )) ORDER BY r.start_ms`,
-      endMs, startMs, excludeId ?? 0, ...ids, ...ids,
+      startMs - MAX_SESSION_MS, endMs, startMs, excludeId ?? 0, ...ids, ...ids,
     ).map((r) => this.reservationDTO(r));
     if (!conflicts.length) return;
     const first = conflicts[0];
     const attendee = first.attendees.find((a) => ids.includes(a.member_id));
-    throw conflict('MEMBRE_OCCUPE', `${attendee.name} participe déjà à une réservation dans « ${first.room_name} » (${first.start_time} → ${first.end_time}).`, { conflicts });
+    throw conflict(
+      'MEMBRE_OCCUPE',
+      `${attendee.name} participe déjà à une réservation dans « ${first.room_name} » (${first.start_time} → ${first.end_time}).`,
+      { conflicts, member_name: attendee.name },
+    );
   }
 
   validateOccupancy(room, partySize, attendeeCount) {
@@ -1310,15 +1399,22 @@ export class Club {
     const conflicts = allOverlaps.filter((r) => r.room_id === room.id);
     if (!conflicts.length) this.ensureMembersAvailable([...seenIds], startMs, endMs);
     const busyRoomIds = new Set(allOverlaps.map((r) => r.room_id));
-    const roomsAvailability = this.rooms().map((rm) => ({
+    // A room is also refused when a booking of its own sits too close; a strict overlap comes first, so
+    // a busy room reports its overlap alone. Each room's list is made once: the chosen room is one of the
+    // rooms offered (resolveRoom takes the active, unarchived ones, which are the ones `rooms()` lists).
+    const offered = this.rooms();
+    const near = new Map(offered.map((rm) => [rm.id, busyRoomIds.has(rm.id) ? [] : this.gapConflicts(startMs, endMs, null, rm.id)]));
+    const roomsAvailability = offered.map((rm) => ({
       ...rm,
-      available: !busyRoomIds.has(rm.id),
+      available: !busyRoomIds.has(rm.id) && !near.get(rm.id).length,
       conflict: allOverlaps.find((r) => r.room_id === rm.id) ?? null,
+      gap_conflict: near.get(rm.id)[0] ?? null,
     }));
     return {
       member, sub, room, partySize, extraAttendees, credit, startMs, endMs, duration, place, included, paid,
       supplement: supplementAmount(paid, tariff), tariff,
       conflicts,
+      gap_conflicts: near.get(room.id),
       rooms_availability: roomsAvailability,
     };
   }
@@ -1353,6 +1449,10 @@ export class Club {
       deposit_amount: depositFor(p.duration, p.supplement),
       balance_amount: p.supplement - depositFor(p.duration, p.supplement),
       conflicts: p.conflicts,
+      gap_conflicts: p.gap_conflicts,
+      // The sentence createReservation refuses with (the nearest time that would do included), to show before
+      // sending: the browser words nothing itself.
+      gap_message: p.gap_conflicts.length ? this.gapError(p.gap_conflicts, { startMs: p.startMs, endMs: p.endMs }).message : null,
     };
   }
 
@@ -1360,6 +1460,7 @@ export class Club {
     const p = this.planReservation(input);
     const s = this.settings();
     if (p.conflicts.length) throw this.overlapError(p.conflicts, p.room.name);
+    if (p.gap_conflicts.length) throw this.gapError(p.gap_conflicts, { startMs: p.startMs, endMs: p.endMs });
     if (p.paid > 0 && !p.tariff.validated && !s.demo_mode) {
       throw conflict('TARIF_NON_VALIDE', "Le tarif des heures supplémentaires n'a pas été validé par un administrateur.");
     }
@@ -1488,6 +1589,8 @@ export class Club {
     if (room.id !== (r.room_id ?? 1) && ['reservee', 'en_cours'].includes(r.status)) {
       const conflicts = this.overlapping(r.start_ms, r.end_ms, r.id, room.id);
       if (conflicts.length) throw this.overlapError(conflicts, room.name);
+      const tooClose = this.gapConflicts(r.start_ms, r.end_ms, r.id, room.id);
+      if (tooClose.length) throw this.gapError(tooClose, { startMs: r.start_ms, endMs: r.end_ms, roomName: room.name });
     }
     this.run(
       'UPDATE reservations SET party_size = ?, room_id = ?, updated_at = ?, updated_by = ? WHERE id = ?',
@@ -1522,10 +1625,14 @@ export class Club {
     const newSupplement = supplementAmount(newPaid, tariff);
     const conflicts = this.overlapping(r.end_ms, newEnd, r.id, r.room_id ?? 1);
     if (!conflicts.length) this.ensureMembersAvailable(this.attendeesFor(r).map((a) => a.member_id), r.end_ms, newEnd, r.id);
+    // Only the bookings after this one can be too close: ending later does not bring it closer to the ones
+    // before it, which may already be as close as the gap allows (or closer, if the gap has grown since).
+    const tooClose = conflicts.length ? [] : this.gapConflicts(r.end_ms, newEnd, r.id, r.room_id ?? 1).filter((o) => o.start_ms >= r.end_ms);
     return {
       r, add, newEnd, place, credit, addIncluded, addPaid, newPaid, newSupplement,
       delta: newSupplement - r.supplement_amount, tariff,
       conflicts,
+      gap_conflicts: tooClose,
     };
   }
 
@@ -1541,16 +1648,30 @@ export class Club {
       supplement_delta: p.delta, tariff: p.tariff,
       tariff_blocked: p.addPaid > 0 && !p.tariff.validated && !s.demo_mode,
       conflicts: p.conflicts,
+      gap_conflicts: p.gap_conflicts,
+      // The sentence extendReservation refuses with: how far the extension could go, or that none can. A plan has
+      // gap conflicts only when nothing overlaps, so the refusal it gets from extensionRefusal is the gap one.
+      gap_message: p.gap_conflicts.length ? this.extensionRefusal(p).message : null,
     };
+  }
+
+  // Why a planned extension cannot go ahead, as the error to raise, or null when it can: the room is taken,
+  // the next booking would be too close, or the time beyond the credit has no tariff an administrator has
+  // validated to be billed at (the demo bills it all the same). extendReservation raises it and
+  // extensionWindow words it, so what the window calls possible is what the server accepts.
+  extensionRefusal(p) {
+    if (p.conflicts.length) return this.overlapError(p.conflicts, p.r.room_name);
+    if (p.gap_conflicts.length) return this.gapError(p.gap_conflicts, { startMs: p.r.end_ms, endMs: p.newEnd, extension: true });
+    if (p.addPaid > 0 && !p.tariff.validated && !this.settings().demo_mode) {
+      return conflict('TARIF_NON_VALIDE', "Le tarif des heures supplémentaires de cette réservation n'a pas été validé.");
+    }
+    return null;
   }
 
   extendReservation(actor, id, input) {
     const p = this.planExtension(id, input.minutes);
-    const s = this.settings();
-    if (p.conflicts.length) throw this.overlapError(p.conflicts, p.r.room_name);
-    if (p.addPaid > 0 && !p.tariff.validated && !s.demo_mode) {
-      throw conflict('TARIF_NON_VALIDE', "Le tarif des heures supplémentaires de cette réservation n'a pas été validé.");
-    }
+    const refusal = this.extensionRefusal(p);
+    if (refusal) throw refusal;
     try {
       this.run(
         `UPDATE reservations SET end_ms = ?, duration_min = duration_min + ?, included_minutes = included_minutes + ?,
@@ -1587,6 +1708,72 @@ export class Club {
       minutes_incluses: p.addIncluded, minutes_payantes: p.addPaid, supplement_ajoute: p.delta,
     });
     return this.reservationDetail(p.r.id);
+  }
+
+  // How far a session can still be extended, for the alert shown shortly before it ends: the longest
+  // extension the server would accept, or, when not even the shortest is accepted, why. Lengths are whole
+  // extension steps, each one tried through planExtension and extensionRefusal (what extendReservation runs),
+  // so the window cannot say "possible" for an extension the server refuses. A refusal only ever grows with
+  // the length (a longer extension takes more of the room and of each member's time, comes closer to the next
+  // booking, goes further beyond the credit and nearer to the 24-hour limit), so the first length refused ends
+  // the search. `next` is the next booking of the room, whatever stops the extension. `until_time` is a bare
+  // time, so `until_next_day` says when that limit falls on a later calendar day than the session's current
+  // end ("until 14:00" after an end at 16:00 means tomorrow).
+  extensionWindow(id) {
+    const r = this.reservationRow(id);
+    const { timezone: tz, booking: { extension_step_min: step } } = this.settings();
+    let best = null;
+    let refusal = null;
+    for (let add = step; add <= 1440; add += step) {
+      let p;
+      try {
+        p = this.planExtension(r.id, add);
+      } catch (err) {
+        if (!(err instanceof AppError)) throw err;
+        refusal = err;
+        break;
+      }
+      refusal = this.extensionRefusal(p);
+      if (refusal) break;
+      best = p;
+    }
+    // A booking neither waiting nor running has nothing to extend, and nothing to say about it.
+    if (refusal?.code === 'STATUT') {
+      return { possible: false, max_minutes: 0, until_time: null, until_at: null, until_next_day: false, reason: null, next: null };
+    }
+    const next = this.get(
+      `${RES_SELECT} WHERE r.status <> 'annulee' AND COALESCE(r.room_id, 1) = ? AND r.start_ms >= ? AND r.id <> ?
+       ORDER BY r.start_ms LIMIT 1`,
+      r.room_id ?? 1, r.end_ms, r.id,
+    );
+    return {
+      possible: best !== null,
+      max_minutes: best?.add ?? 0,
+      until_time: best ? localParts(best.newEnd, tz).time : null,
+      until_at: best ? new Date(best.newEnd).toISOString() : null,
+      until_next_day: best ? localParts(best.newEnd, tz).date !== localParts(r.end_ms, tz).date : false,
+      reason: best ? null : this.extensionReason(refusal),
+      next: next ? { member_name: `${next.first_name} ${next.last_name}`, start_time: localParts(next.start_ms, tz).time } : null,
+    };
+  }
+
+  // The refusal of the shortest extension, in the words of the alert. A refusal this does not know keeps
+  // its own message, so that a rule added to extendReservation is never hidden.
+  extensionReason(refusal) {
+    const first = refusal.details?.conflicts?.[0];
+    switch (refusal.code) {
+      case 'CHEVAUCHEMENT':
+      case 'BATTEMENT':
+        return `Prolongation impossible : la séance suivante commence à ${first.start_time} (${first.member_name}).`;
+      case 'MEMBRE_OCCUPE':
+        return `Prolongation impossible : ${refusal.details.member_name} est déjà inscrit à une autre séance à ${first.start_time}.`;
+      case 'TARIF_NON_VALIDE':
+        return "Prolongation impossible : le tarif des heures supplémentaires n'est pas encore validé par un administrateur.";
+      case 'DUREE_MAXIMALE':
+        return 'Prolongation impossible : une séance ne peut pas dépasser 24 heures.';
+      default:
+        return `Prolongation impossible : ${refusal.message}`;
+    }
   }
 
   startReservation(actor, id) {
@@ -1707,6 +1894,11 @@ export class Club {
       reservation: this.reservationDTO(r),
       subscription: this.subscriptionDTO(sub, this.bizToday()),
       charges, payments, credit_movements, history, totals,
+      extension_window: this.extensionWindow(r.id),
+      // What the WhatsApp confirmation to the booking's holder is addressed from. They are in this detail only:
+      // the lists of bookings do not spread the members' phone numbers.
+      member_first_name: r.first_name,
+      member_phone: this.memberRow(r.member_id).phone,
     };
   }
 
@@ -2081,7 +2273,7 @@ export class Club {
       return {
         ...rm,
         occupied: Boolean(occ),
-        current: occ ? { ...occ, consumptions: this.consumptionLines(occ.id) } : null,
+        current: occ ? { ...occ, consumptions: this.consumptionLines(occ.id), extension_window: this.extensionWindow(occ.id) } : null,
         next: nxt,
         today_count: todayCount,
       };

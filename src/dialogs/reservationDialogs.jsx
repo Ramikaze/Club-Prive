@@ -13,6 +13,7 @@ import { useLoad, useSubmit } from '../lib/hooks.js';
 import { openPaymentDialog } from './moneyDialogs.jsx';
 import { daysBetween, parseHHMM } from '../../shared/time.js';
 import { minDurationFor, supplementDetail } from '../../shared/rules.js';
+import { waDigits, waLink, bookingConfirmationText } from '../../shared/whatsapp.js';
 
 export function supplementText(paid, tariff) {
   if (!paid) return 'aucun';
@@ -89,6 +90,9 @@ function QuotePanel({ q, s, now }) {
   }
   if (q.conflicts.length) {
     warnings.push(<Notice key="conflicts" kind="danger">{`${q.room?.name ?? 'Salle'} déjà occupée sur ce créneau : ${conflictText(q.conflicts)}. Choisissez une autre salle disponible ci-dessus.`}</Notice>);
+  }
+  if (q.gap_message) {
+    warnings.push(<Notice key="gap" kind="danger">{`${q.gap_message} Choisissez un autre créneau ou une autre salle disponible ci-dessus.`}</Notice>);
   }
   if (q.room && q.party_size > q.room.capacity) {
     warnings.push(<Notice key="cap" kind="warn">{`Le nombre de membres (${q.party_size}) dépasse la capacité de ${q.room.name} (${q.room.capacity} pers.).`}</Notice>);
@@ -331,7 +335,11 @@ function BookingDialog({ close, preset, onDone }) {
       if (!member) throw new Error('Choisissez un membre titulaire.');
       const detail = await api.post('/api/reservations', payload(), key);
       close();
-      toast(`${detail.reservation.status === 'en_cours' ? 'Membres installés' : 'Réservation confirmée'} : ${detail.reservation.member_name} (${detail.reservation.room_name}, ${detail.reservation.party_size} membre(s)).`);
+      // A booking for later offers the confirmation to the member, one click away in the toast (members
+      // installed in the room right now have nothing to be told). The dialog closes as it always did; the
+      // booking's page keeps a « Renvoyer la confirmation » button.
+      const confirmation = detail.reservation.status === 'reservee' ? confirmationToastAction(detail) : null;
+      toast(`${detail.reservation.status === 'en_cours' ? 'Membres installés' : 'Réservation confirmée'} : ${detail.reservation.member_name} (${detail.reservation.room_name}, ${detail.reservation.party_size} membre(s)).`, 'ok', confirmation);
       onDone?.(detail);
     });
   };
@@ -345,9 +353,9 @@ function BookingDialog({ close, preset, onDone }) {
   const goingIn = startNow && date === bizToday();
 
   const ready = Boolean(member && quote && !quoteError);
-  const canSubmit = ready && !(quote.conflicts.length > 0 || quote.tariff_blocked);
+  const canSubmit = ready && !(quote.conflicts.length > 0 || quote.gap_conflicts.length > 0 || quote.tariff_blocked);
 
-  const roomsList = quote?.rooms_availability ?? activeRooms.map((rm) => ({ ...rm, available: true, conflicts: [] }));
+  const roomsList = quote?.rooms_availability ?? activeRooms.map((rm) => ({ ...rm, available: true, conflict: null, gap_conflict: null }));
   const currentRoom = roomsList.find((rm) => rm.id === Number(roomId)) ?? activeRooms[0];
   const selectedIds = new Set([member?.id, ...extraMembers.map((m) => m.id)].filter(Boolean));
   const qNorm = attSearch.trim().toLowerCase();
@@ -413,6 +421,9 @@ function BookingDialog({ close, preset, onDone }) {
             {roomsList.map((rm) => {
               const selected = Number(roomId) === rm.id;
               const free = rm.available !== false;
+              // Refused for the gap alone: no booking overlaps the slot, one of the room sits too close to it.
+              const tooClose = !free && !rm.conflict && Boolean(rm.gap_conflict);
+              const near = rm.conflict ?? rm.gap_conflict;
               return (
                 <button
                   key={rm.id}
@@ -422,10 +433,12 @@ function BookingDialog({ close, preset, onDone }) {
                 >
                   <div className="row" style={{ justifyContent: 'space-between', width: '100%' }}>
                     <strong>{rm.name}</strong>
-                    <span className={`chip ${free ? 'chip-ok' : 'chip-danger'}`}>{free ? 'Disponible' : 'Occupée'}</span>
+                    <span className={`chip ${free ? 'chip-ok' : tooClose ? 'chip-warn' : 'chip-danger'}`}>
+                      {free ? 'Disponible' : tooClose ? 'Trop proche d’une autre réservation' : 'Occupée'}
+                    </span>
                   </div>
                   <div className="subtle" style={{ fontSize: '0.78rem' }}>
-                    Jusqu’à {rm.capacity} membres{!free && rm.conflicts?.[0] ? ` · ${rm.conflicts[0].member_name}` : ''}
+                    Jusqu’à {rm.capacity} membres{!free && near ? ` · ${near.member_name}` : ''}
                   </div>
                 </button>
               );
@@ -544,6 +557,61 @@ function BookingDialog({ close, preset, onDone }) {
 
 export function openBookingDialog(preset = {}, onDone) {
   openDialog(BookingDialog, { preset: preset ?? {}, onDone });
+}
+
+// ---------------------------------------------------------------- WhatsApp confirmation
+
+// What the confirmation says, from a booking's detail (the server's answer when it is made, or its page) and the
+// club's settings. The day is the one the session starts on, as the member reads it in his calendar: a session
+// at 01:00 after a Friday evening is Saturday's.
+function confirmationText(detail) {
+  const r = detail.reservation;
+  const { club_name: clubName, club_whatsapp: clubWhatsapp } = useStore.getState().settings;
+  return bookingConfirmationText({
+    firstName: detail.member_first_name,
+    dayLabel: dayLabel(r.start_date, 'title').toLowerCase(),
+    startTime: r.start_time,
+    endTime: r.end_time,
+    roomName: r.room_name,
+    partySize: r.party_size,
+    clubName,
+    clubWhatsapp,
+  });
+}
+
+// The demo shows the message and sends nothing.
+function DemoMessageDialog({ close, text }) {
+  return (
+    <Modal title="Confirmation WhatsApp" onClose={close}>
+      <div className="form-grid">
+        <Notice kind="info">En démo, aucun message n'est envoyé.</Notice>
+        <p className="subtle">Voici le message que WhatsApp afficherait, prêt à envoyer au client :</p>
+        <blockquote className="wa-message">{text}</blockquote>
+        <div className="modal-actions"><button type="button" className="btn btn-primary" onClick={close}>Fermer</button></div>
+      </div>
+    </Modal>
+  );
+}
+
+// The only way a confirmation leaves the application, and only on the manager's click: WhatsApp opens on the
+// message, addressed to the member's number, and waits for him to press « Envoyer ». A number that cannot be
+// used opens WhatsApp without a recipient, and he picks the contact. The demo never opens the link: it shows
+// the message. `demo` is whether the booking belongs to the demo: a button pressed on the page asks the store,
+// a toast's button passes the answer it was made with.
+export function sendWhatsAppConfirmation(detail, demo = useStore.getState().demo) {
+  const text = confirmationText(detail);
+  if (demo) {
+    openDialog(DemoMessageDialog, { text });
+    return;
+  }
+  window.open(waLink(waDigits(detail.member_phone), text), '_blank', 'noopener');
+}
+
+// The button of the toast shown after a booking for later. It stays 20 seconds, long enough for the session to
+// change under it, so it keeps the space it was made in: made in the demo, it can never open WhatsApp.
+export function confirmationToastAction(detail) {
+  const demo = useStore.getState().demo;
+  return { label: 'Envoyer la confirmation WhatsApp', icon: 'message', onClick: () => sendWhatsAppConfirmation(detail, demo) };
 }
 
 // ---------------------------------------------------------------- add/remove member in room
@@ -704,6 +772,7 @@ function ExtendDialog({ close, r, onDone, options, endRel }) {
   else if (q) {
     const warnings = [];
     if (q.conflicts.length) warnings.push(<Notice key="conflicts" kind="danger">{`Créneau suivant occupé : ${conflictText(q.conflicts)}.`}</Notice>);
+    if (q.gap_message) warnings.push(<Notice key="gap" kind="danger">{q.gap_message}</Notice>);
     if (q.tariff_blocked) warnings.push(<Notice key="tariff" kind="danger">Le tarif de cette réservation n’a pas été validé par un administrateur : prolongation payante impossible.</Notice>);
     box = (
       <>
@@ -722,7 +791,7 @@ function ExtendDialog({ close, r, onDone, options, endRel }) {
     );
   }
 
-  const blocked = Boolean(quoteError) || !q || q.conflicts.length > 0 || q.tariff_blocked;
+  const blocked = Boolean(quoteError) || !q || q.conflicts.length > 0 || q.gap_conflicts.length > 0 || q.tariff_blocked;
 
   return (
     <Modal title="Prolonger la réservation" onClose={close}>
@@ -743,14 +812,22 @@ function ExtendDialog({ close, r, onDone, options, endRel }) {
   );
 }
 
-export function openExtendDialog(r, onDone) {
+// `extensionWindow` is what the server says the session can still be extended by (the `extension_window` of
+// the dashboard and of the booking's detail). The callers that have it pass it in, so the dialog offers
+// nothing the server would refuse; without it every length is offered, and the server decides.
+export function openExtendDialog(r, onDone, extensionWindow) {
+  if (extensionWindow && !extensionWindow.possible) {
+    toast(extensionWindow.reason || 'Prolongation impossible.', 'error');
+    return;
+  }
   const s = useStore.getState().settings;
   const step = s.booking.extension_step_min;
   const end = parts(r.end_ms);
   const endRel = daysBetween(r.biz_day, end.date) * 1440 + end.minutes;
   // No closing time: up to 6 hours more at a time, within the 24 hours a session can last.
+  const longest = Math.min(6 * 60, extensionWindow?.max_minutes ?? Infinity);
   const options = [];
-  for (let d = step; d <= 6 * 60 && r.duration_min + d <= 1440; d += step) options.push(d);
+  for (let d = step; d <= longest && r.duration_min + d <= 1440; d += step) options.push(d);
   if (!options.length) {
     toast('Prolongation impossible : une séance ne peut pas dépasser 24 heures.', 'error');
     return;
