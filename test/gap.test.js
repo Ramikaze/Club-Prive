@@ -147,6 +147,8 @@ test('battement : prolongation', async () => {
     "Il faut 30 minutes entre deux réservations : la séance suivante commence à 16:30, aucune prolongation n'est possible.",
   );
   assert.deepEqual(refused.details.conflicts.map((r) => r.member_name), ['Bruno Test']);
+  // The quote carries that very sentence, for the dialog to show before anything is sent.
+  assert.equal(quote.gap_message, refused.message);
   assert.equal(ok(await manager.get(`/api/reservations/${first.id}`)).reservation.duration_min, 120);
 });
 
@@ -155,11 +157,13 @@ test('battement : prolongation, le message donne la fin la plus tardive', async 
   const first = await book({ start_time: '14:00', duration_min: 60 }); // 14:00-15:00
   await book({ member_id: members[1].id, start_time: '18:00', duration_min: 60 }); // 18:00-19:00
   assert.equal(ok(await extend(first.id, 30)).reservation.end_time, '15:30');
+  const quote = ok(await manager.post(`/api/reservations/${first.id}/extend/quote`, { minutes: 60 }));
   const refused = rejected(await extend(first.id, 60), 'BATTEMENT'); // would end at 16:30, 90 minutes before 18:00
   assert.equal(
     refused.message,
     "Il faut 2 h entre deux réservations : la séance suivante commence à 18:00, la prolongation peut aller jusqu'à 16:00 au plus tard.",
   );
+  assert.equal(quote.gap_message, refused.message);
   // The time given is exactly the one the server accepts.
   assert.equal(ok(await extend(first.id, 30)).reservation.end_time, '16:00');
 });
@@ -172,6 +176,7 @@ test('battement : prolongation, une séance déjà collée avant elle ne la gên
   // The first session is within 120 minutes of the extra half hour, but the extension does not bring it closer.
   const quote = ok(await manager.post(`/api/reservations/${second.id}/extend/quote`, { minutes: 30 }));
   assert.deepEqual(quote.gap_conflicts, []);
+  assert.equal(quote.gap_message, null);
   assert.equal(ok(await extend(second.id, 30)).reservation.end_time, '15:30');
 });
 
@@ -180,6 +185,9 @@ test('battement : devis', async () => {
   const quote = ok(await manager.post('/api/reservations/quote', request({ member_id: members[1].id, start_time: '16:00' })));
   assert.deepEqual(quote.conflicts, []);
   assert.deepEqual(quote.gap_conflicts.map((r) => r.id), [first.id]);
+  // The quote carries the very sentence the refusal would, nearest time included, for the dialog to show before sending.
+  const refused = rejected(await attempt({ member_id: members[1].id, start_time: '16:00' }), 'BATTEMENT');
+  assert.equal(quote.gap_message, refused.message);
   const byRoom = Object.fromEntries(quote.rooms_availability.map((rm) => [rm.id, rm]));
   assert.equal(byRoom[rooms[0].id].available, false);
   assert.equal(byRoom[rooms[0].id].gap_conflict.id, first.id);
@@ -193,6 +201,7 @@ test('battement : devis', async () => {
   const overlap = ok(await manager.post('/api/reservations/quote', request({ member_id: members[1].id, start_time: '15:00' })));
   assert.deepEqual(overlap.conflicts.map((r) => r.id), [first.id]);
   assert.deepEqual(overlap.gap_conflicts, []);
+  assert.equal(overlap.gap_message, null);
   const busy = overlap.rooms_availability.find((rm) => rm.id === rooms[0].id);
   assert.deepEqual([busy.available, busy.conflict.id, busy.gap_conflict], [false, first.id, null]);
 
@@ -206,6 +215,7 @@ test('battement : devis', async () => {
 
   const far = ok(await manager.post('/api/reservations/quote', request({ member_id: members[1].id, start_time: '16:30', duration_min: 60 })));
   assert.deepEqual(far.gap_conflicts, []);
+  assert.equal(far.gap_message, null);
   assert.equal(far.rooms_availability.every((rm) => rm.available && rm.gap_conflict === null), true);
 });
 
@@ -273,6 +283,8 @@ test('battement : une réservation coincée entre deux autres reçoit les deux h
     'Il faut 30 minutes entre deux réservations : la séance précédente se termine à 16:00, celle-ci peut commencer à 16:30 au plus tôt ; '
       + 'la séance suivante commence à 18:00, celle-ci doit se terminer à 17:30 au plus tard.',
   );
+  const quote = ok(await manager.post('/api/reservations/quote', request({ member_id: members[2].id, start_time: '16:00', duration_min: 120 })));
+  assert.equal(quote.gap_message, refused.message);
   assert.deepEqual(refused.details.conflicts.map((r) => r.id), [earlier.id, later.id]);
   ok(await attempt({ member_id: members[2].id, start_time: '16:30', duration_min: 60 })); // 16:30-17:30 fits exactly
 });

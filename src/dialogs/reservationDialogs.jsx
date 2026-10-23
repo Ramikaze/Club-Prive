@@ -63,20 +63,6 @@ export function memberRoomEligibility(m) {
 
 const conflictText = (conflicts) => conflicts.map((c) => `${c.member_name} (${c.start_time} – ${c.end_time})`).join(', ');
 
-// « Il faut 30 minutes entre deux réservations », as the server opens its BATTEMENT refusals: « N minutes »
-// under an hour, « 1 h 30 » from an hour on.
-const gapLead = (min) => `Il faut ${min < 60 ? `${min} minute${min > 1 ? 's' : ''}` : fmtDuration(min)} entre deux réservations`;
-
-// The bookings of the room that sit too close to a new one, in the words of the server's refusal. The
-// nearest time that would do is the server's to work out, so it is not repeated here.
-function gapText(q, gapMin) {
-  const startMs = Date.parse(q.start_at);
-  const facts = q.gap_conflicts.map((c) => (c.end_ms <= startMs
-    ? `la séance précédente se termine à ${c.end_time} (${c.member_name})`
-    : `la séance suivante commence à ${c.start_time} (${c.member_name})`));
-  return `${gapLead(gapMin)} : ${facts.join(' ; ')}. Choisissez un autre créneau ou une autre salle disponible ci-dessus.`;
-}
-
 // ---------------------------------------------------------------- new reservation
 
 // The club has no opening hours: any start of the business day can be booked, for any length.
@@ -104,8 +90,8 @@ function QuotePanel({ q, s, now }) {
   if (q.conflicts.length) {
     warnings.push(<Notice key="conflicts" kind="danger">{`${q.room?.name ?? 'Salle'} déjà occupée sur ce créneau : ${conflictText(q.conflicts)}. Choisissez une autre salle disponible ci-dessus.`}</Notice>);
   }
-  if (q.gap_conflicts.length) {
-    warnings.push(<Notice key="gap" kind="danger">{gapText(q, s.booking.gap_min)}</Notice>);
+  if (q.gap_message) {
+    warnings.push(<Notice key="gap" kind="danger">{`${q.gap_message} Choisissez un autre créneau ou une autre salle disponible ci-dessus.`}</Notice>);
   }
   if (q.room && q.party_size > q.room.capacity) {
     warnings.push(<Notice key="cap" kind="warn">{`Le nombre de membres (${q.party_size}) dépasse la capacité de ${q.room.name} (${q.room.capacity} pers.).`}</Notice>);
@@ -364,7 +350,7 @@ function BookingDialog({ close, preset, onDone }) {
   const ready = Boolean(member && quote && !quoteError);
   const canSubmit = ready && !(quote.conflicts.length > 0 || quote.gap_conflicts.length > 0 || quote.tariff_blocked);
 
-  const roomsList = quote?.rooms_availability ?? activeRooms.map((rm) => ({ ...rm, available: true, conflicts: [] }));
+  const roomsList = quote?.rooms_availability ?? activeRooms.map((rm) => ({ ...rm, available: true, conflict: null, gap_conflict: null }));
   const currentRoom = roomsList.find((rm) => rm.id === Number(roomId)) ?? activeRooms[0];
   const selectedIds = new Set([member?.id, ...extraMembers.map((m) => m.id)].filter(Boolean));
   const qNorm = attSearch.trim().toLowerCase();
@@ -432,7 +418,7 @@ function BookingDialog({ close, preset, onDone }) {
               const free = rm.available !== false;
               // Refused for the gap alone: no booking overlaps the slot, one of the room sits too close to it.
               const tooClose = !free && !rm.conflict && Boolean(rm.gap_conflict);
-              const near = rm.conflicts?.[0] ?? rm.gap_conflict;
+              const near = rm.conflict ?? rm.gap_conflict;
               return (
                 <button
                   key={rm.id}
@@ -726,10 +712,7 @@ function ExtendDialog({ close, r, onDone, options, endRel }) {
   else if (q) {
     const warnings = [];
     if (q.conflicts.length) warnings.push(<Notice key="conflicts" kind="danger">{`Créneau suivant occupé : ${conflictText(q.conflicts)}.`}</Notice>);
-    if (q.gap_conflicts.length) {
-      const next = q.gap_conflicts[0];
-      warnings.push(<Notice key="gap" kind="danger">{`${gapLead(s.booking.gap_min)} : la séance suivante commence à ${next.start_time} (${next.member_name}). Choisissez une durée plus courte.`}</Notice>);
-    }
+    if (q.gap_message) warnings.push(<Notice key="gap" kind="danger">{q.gap_message}</Notice>);
     if (q.tariff_blocked) warnings.push(<Notice key="tariff" kind="danger">Le tarif de cette réservation n’a pas été validé par un administrateur : prolongation payante impossible.</Notice>);
     box = (
       <>

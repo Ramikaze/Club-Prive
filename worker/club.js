@@ -1432,6 +1432,9 @@ export class Club {
       balance_amount: p.supplement - depositFor(p.duration, p.supplement),
       conflicts: p.conflicts,
       gap_conflicts: p.gap_conflicts,
+      // The sentence createReservation refuses with (the nearest time that would do included), to show before
+      // sending: the browser words nothing itself.
+      gap_message: p.gap_conflicts.length ? this.gapError(p.gap_conflicts, { startMs: p.startMs, endMs: p.endMs }).message : null,
     };
   }
 
@@ -1628,6 +1631,9 @@ export class Club {
       tariff_blocked: p.addPaid > 0 && !p.tariff.validated && !s.demo_mode,
       conflicts: p.conflicts,
       gap_conflicts: p.gap_conflicts,
+      // The sentence extendReservation refuses with: how far the extension could go, or that none can. A plan has
+      // gap conflicts only when nothing overlaps, so the refusal it gets from extensionRefusal is the gap one.
+      gap_message: p.gap_conflicts.length ? this.extensionRefusal(p).message : null,
     };
   }
 
