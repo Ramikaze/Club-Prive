@@ -777,3 +777,70 @@ test('fenêtre : exposée', async () => {
     next: { member_name: 'Bruno Test', start_time: '17:30' },
   });
 });
+
+// ---------------------------------------------------------------- the search leaves the past out
+// overlapping, gapConflicts and ensureMembersAvailable only look at the bookings that began after the time they are
+// asked about less 24 hours (and less the gap, for the gap): none lasts longer, so none that began earlier can still
+// be going on, and the history of the club is not walked at every booking. A booking of exactly 24 hours is the one
+// that sits on that bound.
+
+test('recherche bornée : une réservation de 24 heures à la borne est toujours trouvée', async () => {
+  const { club } = server;
+  const method = club.settings().payment_methods[0];
+  const day = await book({ start_time: '10:00', duration_min: 1440, deposit_method: method }); // 10:00 today to 10:00 tomorrow
+  assert.equal(day.end_ms - day.start_ms, 1440 * MIN);
+  const ids = (list) => list.map((r) => r.id);
+  const room = rooms[0].id;
+  const memberCode = (start, end) => {
+    try {
+      club.ensureMembersAvailable([members[0].id], start, end);
+      return null;
+    } catch (err) {
+      return err.code;
+    }
+  };
+
+  // Overlap. Asked about from a minute before it ends, it began a minute short of 24 hours earlier: found in the
+  // room, in any room, and as the booking of a member. Asked about from the minute it ends, it began exactly 24
+  // hours earlier and is not in the way.
+  const late = day.end_ms - MIN;
+  assert.deepEqual(ids(club.overlapping(late, late + 60 * MIN, null, room)), [day.id]);
+  assert.deepEqual(ids(club.overlapping(late, late + 60 * MIN, null)), [day.id]);
+  assert.equal(memberCode(late, late + 60 * MIN), 'MEMBRE_OCCUPE');
+  assert.deepEqual(club.overlapping(day.end_ms, day.end_ms + 60 * MIN, null, room), []);
+  assert.deepEqual(club.overlapping(day.end_ms, day.end_ms + 60 * MIN, null), []);
+  assert.equal(memberCode(day.end_ms, day.end_ms + 60 * MIN), null);
+
+  // Gap. A booking that ended 29 minutes before the time asked about is too close, though it began 24 hours and 29
+  // minutes earlier, which only the gap in the bound lets through; one that ended 30 minutes before is far enough.
+  const tooClose = day.end_ms + 29 * MIN;
+  assert.deepEqual(ids(club.gapConflicts(tooClose, tooClose + 60 * MIN, null, room)), [day.id]);
+  assert.deepEqual(club.gapConflicts(day.end_ms + 30 * MIN, day.end_ms + 90 * MIN, null, room), []);
+  // The gap in the bound is the one that is set.
+  await setBooking({ gap_min: 240 });
+  const farTooClose = day.end_ms + 239 * MIN;
+  assert.deepEqual(ids(club.gapConflicts(farTooClose, farTooClose + 60 * MIN, null, room)), [day.id]);
+  assert.deepEqual(club.gapConflicts(day.end_ms + 240 * MIN, day.end_ms + 300 * MIN, null, room), []);
+  await setBooking({ gap_min: 30 });
+
+  // And as a booking is made the next morning: back to back with the end, overlapping it, then half an hour after.
+  const tomorrow = addDays(today, 1);
+  rejected(await attempt({ member_id: members[1].id, date: tomorrow, start_time: '10:00' }), 'BATTEMENT');
+  rejected(await attempt({ member_id: members[1].id, date: tomorrow, start_time: '09:30' }), 'CHEVAUCHEMENT');
+  ok(await attempt({ member_id: members[1].id, date: tomorrow, start_time: '10:30' }));
+});
+
+test('devis : la liste des réservations trop proches se calcule une fois par salle', async () => {
+  await book({ start_time: '14:00', duration_min: 120 }); // 14:00-16:00
+  const original = server.club.gapConflicts.bind(server.club);
+  const asked = [];
+  server.club.gapConflicts = (start, end, exclude, room) => {
+    asked.push(room);
+    return original(start, end, exclude, room);
+  };
+  const quote = ok(await manager.post('/api/reservations/quote', request({ member_id: members[1].id, start_time: '16:00' })));
+  // The chosen room is one of the rooms offered: its list is the one already made for its card.
+  assert.deepEqual(asked.toSorted((a, b) => a - b), rooms.map((rm) => rm.id).toSorted((a, b) => a - b));
+  assert.equal(quote.gap_conflicts.length, 1);
+  assert.equal(quote.gap_conflicts[0].id, quote.rooms_availability.find((rm) => rm.id === rooms[0].id).gap_conflict.id);
+});

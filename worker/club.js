@@ -110,6 +110,12 @@ const CHARGE_SELECT = `
 // A duration inside a sentence: « 30 minutes » (fmtDuration abbreviates them to « 30 min »), « 1 h 30 » from an hour on.
 const durationInWords = (min) => (min < 60 ? `${min} minute${min > 1 ? 's' : ''}` : fmtDuration(min));
 
+// A booking lasts 24 hours at most (planReservation and planExtension refuse more), so one that is still going
+// on at some instant began less than this before it. The queries looking for the bookings around a time lean
+// on it to leave the whole past out: reservations_time (start_ms, end_ms) narrows by start_ms alone, and
+// without a lower bound on it the search walks every booking ever made.
+const MAX_SESSION_MS = 1440 * 60000;
+
 export class Club {
   constructor(db, { demo = false } = {}) {
     this.db = db;
@@ -1216,16 +1222,20 @@ export class Club {
     };
   }
 
+  // The bookings that strictly overlap [startMs, endMs). One that ends after startMs began after startMs less
+  // 24 hours (MAX_SESSION_MS): the lower bound on start_ms changes nothing in the result, it only keeps the
+  // search from walking the past.
   overlapping(startMs, endMs, excludeId, roomId = null) {
+    const since = startMs - MAX_SESSION_MS;
     if (roomId != null) {
       return this.all(
-        `${RES_SELECT} WHERE r.status <> 'annulee' AND COALESCE(r.room_id, 1) = ? AND r.start_ms < ? AND r.end_ms > ? AND r.id <> ? ORDER BY r.start_ms`,
-        roomId, endMs, startMs, excludeId ?? 0,
+        `${RES_SELECT} WHERE r.status <> 'annulee' AND COALESCE(r.room_id, 1) = ? AND r.start_ms > ? AND r.start_ms < ? AND r.end_ms > ? AND r.id <> ? ORDER BY r.start_ms`,
+        roomId, since, endMs, startMs, excludeId ?? 0,
       ).map((r) => this.reservationDTO(r));
     }
     return this.all(
-      `${RES_SELECT} WHERE r.status <> 'annulee' AND r.start_ms < ? AND r.end_ms > ? AND r.id <> ? ORDER BY r.start_ms`,
-      endMs, startMs, excludeId ?? 0,
+      `${RES_SELECT} WHERE r.status <> 'annulee' AND r.start_ms > ? AND r.start_ms < ? AND r.end_ms > ? AND r.id <> ? ORDER BY r.start_ms`,
+      since, endMs, startMs, excludeId ?? 0,
     ).map((r) => this.reservationDTO(r));
   }
 
@@ -1240,14 +1250,16 @@ export class Club {
   // The bookings of a room that [startMs, endMs) would sit too close to: they do not strictly overlap
   // it (that is `overlapping`, which takes priority) but begin less than `gap_min` minutes after it
   // ends or end less than `gap_min` minutes before it begins. A gap of exactly `gap_min` is enough.
-  // Cancelled bookings do not count, and nothing is too close when the gap is 0.
+  // Cancelled bookings do not count, and nothing is too close when the gap is 0. One that ends after
+  // startMs less the gap began after startMs less the gap and 24 hours (MAX_SESSION_MS): that lower bound on
+  // start_ms changes nothing in the result, it only keeps the search from walking the past.
   gapConflicts(startMs, endMs, excludeId, roomId) {
     const gapMs = this.settings().booking.gap_min * 60000;
     if (!gapMs) return [];
     return this.all(
-      `${RES_SELECT} WHERE r.status <> 'annulee' AND COALESCE(r.room_id, 1) = ? AND r.id <> ?
+      `${RES_SELECT} WHERE r.status <> 'annulee' AND COALESCE(r.room_id, 1) = ? AND r.id <> ? AND r.start_ms > ?
          AND r.start_ms < ? AND r.end_ms > ? AND (r.start_ms >= ? OR r.end_ms <= ?) ORDER BY r.start_ms`,
-      roomId, excludeId ?? 0, endMs + gapMs, startMs - gapMs, endMs, startMs,
+      roomId, excludeId ?? 0, startMs - gapMs - MAX_SESSION_MS, endMs + gapMs, startMs - gapMs, endMs, startMs,
     ).map((r) => this.reservationDTO(r));
   }
 
@@ -1298,12 +1310,13 @@ export class Club {
   ensureMembersAvailable(memberIds, startMs, endMs, excludeId = null) {
     const ids = [...new Set(memberIds)];
     const placeholders = ids.map(() => '?').join(',');
+    // Same lower bound on start_ms as `overlapping`: it leaves the past out without changing the result.
     const conflicts = this.all(
-      `${RES_SELECT} WHERE r.status <> 'annulee' AND r.start_ms < ? AND r.end_ms > ? AND r.id <> ?
+      `${RES_SELECT} WHERE r.status <> 'annulee' AND r.start_ms > ? AND r.start_ms < ? AND r.end_ms > ? AND r.id <> ?
        AND (r.member_id IN (${placeholders}) OR EXISTS (
          SELECT 1 FROM reservation_attendees ra WHERE ra.reservation_id = r.id AND ra.member_id IN (${placeholders})
        )) ORDER BY r.start_ms`,
-      endMs, startMs, excludeId ?? 0, ...ids, ...ids,
+      startMs - MAX_SESSION_MS, endMs, startMs, excludeId ?? 0, ...ids, ...ids,
     ).map((r) => this.reservationDTO(r));
     if (!conflicts.length) return;
     const first = conflicts[0];
@@ -1387,22 +1400,21 @@ export class Club {
     if (!conflicts.length) this.ensureMembersAvailable([...seenIds], startMs, endMs);
     const busyRoomIds = new Set(allOverlaps.map((r) => r.room_id));
     // A room is also refused when a booking of its own sits too close; a strict overlap comes first, so
-    // a busy room reports its overlap alone.
-    const tooClose = (roomId) => (busyRoomIds.has(roomId) ? [] : this.gapConflicts(startMs, endMs, null, roomId));
-    const roomsAvailability = this.rooms().map((rm) => {
-      const near = tooClose(rm.id);
-      return {
-        ...rm,
-        available: !busyRoomIds.has(rm.id) && !near.length,
-        conflict: allOverlaps.find((r) => r.room_id === rm.id) ?? null,
-        gap_conflict: near[0] ?? null,
-      };
-    });
+    // a busy room reports its overlap alone. Each room's list is made once: the chosen room is one of the
+    // rooms offered (resolveRoom takes the active, unarchived ones, which are the ones `rooms()` lists).
+    const offered = this.rooms();
+    const near = new Map(offered.map((rm) => [rm.id, busyRoomIds.has(rm.id) ? [] : this.gapConflicts(startMs, endMs, null, rm.id)]));
+    const roomsAvailability = offered.map((rm) => ({
+      ...rm,
+      available: !busyRoomIds.has(rm.id) && !near.get(rm.id).length,
+      conflict: allOverlaps.find((r) => r.room_id === rm.id) ?? null,
+      gap_conflict: near.get(rm.id)[0] ?? null,
+    }));
     return {
       member, sub, room, partySize, extraAttendees, credit, startMs, endMs, duration, place, included, paid,
       supplement: supplementAmount(paid, tariff), tariff,
       conflicts,
-      gap_conflicts: tooClose(room.id),
+      gap_conflicts: near.get(room.id),
       rooms_availability: roomsAvailability,
     };
   }
