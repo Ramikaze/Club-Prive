@@ -13,6 +13,7 @@ export const ACTION_LABELS = {
   'utilisateur.modifier': 'Utilisateur modifié',
   'utilisateur.mot_de_passe_reinitialise': 'Mot de passe réinitialisé',
   'utilisateur.mot_de_passe_modifie': 'Mot de passe modifié',
+  'utilisateur.acces_reinitialise': 'Accès du propriétaire réinitialisé',
   'membre.creer': 'Membre créé',
   'membre.modifier': 'Fiche membre modifiée',
   'membre.supprimer': 'Membre supprimé',
@@ -110,6 +111,8 @@ export function auditSummary(a) {
       return `${d.mois} ; résultat ${money(d.resultat)}`;
     case 'periode.rouvrir':
       return `${d.mois} — ${d.motif}`;
+    case 'utilisateur.acces_reinitialise':
+      return `Identifiant ${d.avant} → ${d.apres}, avec le code d’installation`;
     default:
       return '';
   }

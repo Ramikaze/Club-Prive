@@ -61,7 +61,8 @@ export function FormError({ error }) {
 }
 
 // Password field with an eye that shows or hides what was typed; other props go to the <input>.
-// The eye stays outside the <label>, so the field is announced by its label alone.
+// The eye stays outside the <label>, so the field is announced by its label alone. Shown as text, the
+// password is never capitalised nor corrected by the keyboard.
 export function PasswordField({ label, help, ...input }) {
   const id = useId();
   const field = useRef(null);
@@ -78,7 +79,10 @@ export function PasswordField({ label, help, ...input }) {
     <div className="field">
       <label className="field-label" htmlFor={id}>{label}</label>
       <div className="password-input">
-        <input {...input} ref={field} id={id} type={shown ? 'text' : 'password'} aria-describedby={help ? `${id}-help` : undefined} />
+        <input
+          {...input} ref={field} id={id} type={shown ? 'text' : 'password'}
+          autoCapitalize="none" autoCorrect="off" spellCheck={false} aria-describedby={help ? `${id}-help` : undefined}
+        />
         <button
           type="button"
           className="password-eye"

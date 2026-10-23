@@ -40,6 +40,24 @@ test('15. installation : le premier administrateur exige le code SETUP_TOKEN', a
   assert.ok(categories.some((c) => c.kind === 'depense' && c.name === 'Loyer'));
 });
 
+test('15 bis. identifiants perdus : le code d’installation redonne l’accès au premier administrateur', async () => {
+  const anonymous = new Client(server);
+  const reset = (body) => anonymous.post('/api/setup/reset', { setup_token: SETUP_TOKEN, login: 'patronne', password: 'nouveau-mot-de-passe', ...body });
+  assert.equal((await reset({ setup_token: 'faux' })).status, 403);
+  assert.equal((await reset({ password: 'court' })).status, 400);
+  assert.equal((await reset({ login: 'gerant' })).status, 409);
+  const owner = new Client(server);
+  const bundle = ok(await owner.post('/api/setup/reset', { setup_token: SETUP_TOKEN, login: 'patronne', password: 'nouveau-mot-de-passe' }));
+  assert.equal(bundle.user.login, 'patronne');
+  assert.equal(bundle.user.role, 'admin');
+  assert.equal((await admin.get('/api/me')).status, 401); // the owner's other sessions are closed
+  ok(await manager.get('/api/me')); // other accounts keep theirs
+  assert.equal((await anonymous.post('/api/login', { login: 'patron', password: 'mot-de-passe-patron' })).status, 401);
+  const entry = ok(await owner.get('/api/audit')).find((a) => a.action === 'utilisateur.acces_reinitialise');
+  assert.deepEqual(entry.details, { avant: 'patron', apres: 'patronne' });
+  admin = owner;
+});
+
 test('16. dépenses, entrées et transferts : droits et contrôles', async () => {
   ok(await admin.put('/api/settings', { opening_balances: { date: null, amounts: { 'Espèces': 100000 * UM } } }));
   const member = ok(await manager.post('/api/members', { first_name: 'Paul', last_name: 'Test', phone: '+000 00 00 00 00' }));

@@ -646,6 +646,12 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 }
 .login-card h1 { font-size: 1.6rem; }
 .login-eyebrow { margin: 0; color: var(--bronze-text); font-size: 0.74rem; font-weight: 600; letter-spacing: 0.24em; text-transform: uppercase; }
+.login-link {
+  justify-self: center; border: 0; background: none; padding: 6px 8px; border-radius: 6px;
+  font: inherit; font-size: 0.88rem; color: var(--text-2); cursor: pointer;
+  text-decoration: underline; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+}
+.login-link:hover { color: var(--text); }
 .login-stack { width: min(400px, 100%); display: grid; gap: 12px; justify-items: center; position: relative; z-index: 1; }
 
 /* Cigar smoke behind the card: a filmed loop (public/login-smoke.mp4, smoke on black). Screen blending

@@ -142,23 +142,27 @@ export function createApi({ db, env = {} }) {
     },
   }, (ctx) => club.changeOwnPassword(ctx.user, ctx.passwordHash, ctx.tokenHash));
 
-  // First start online: the first administrator is created with the SETUP_TOKEN secret.
+  // First start online: the first administrator is created with the SETUP_TOKEN secret. The same
+  // installation code gives that account a new identifier and password when they are lost.
+  const checkSetupToken = async (ctx) => {
+    const key = `${ctx.ip}|installation`;
+    checkThrottle(key);
+    if (!env.SETUP_TOKEN) {
+      throw new AppError(503, 'CODE_ABSENT', "Le code d'installation (secret SETUP_TOKEN) n'est pas configuré sur le serveur.");
+    }
+    if (await sha256Hex(String(ctx.body.setup_token ?? '')) !== await sha256Hex(env.SETUP_TOKEN)) {
+      recordFailure(key);
+      throw new AppError(403, 'CODE_INCORRECT', "Code d'installation incorrect.");
+    }
+  };
   add('GET', '/api/setup', { public: true }, () => ({
     needed: !club.hasUsers(), token_configured: !!env.SETUP_TOKEN, instance_label: club.instanceLabel,
   }));
   add('POST', '/api/setup', {
     public: true,
     prepare: async (ctx) => {
-      const key = `${ctx.ip}|installation`;
-      checkThrottle(key);
       if (club.hasUsers()) throw conflict('DEJA_INSTALLE', 'Le club est déjà configuré : connectez-vous.');
-      if (!env.SETUP_TOKEN) {
-        throw new AppError(503, 'CODE_ABSENT', "Le code d'installation (secret SETUP_TOKEN) n'est pas configuré sur le serveur.");
-      }
-      if (await sha256Hex(String(ctx.body.setup_token ?? '')) !== await sha256Hex(env.SETUP_TOKEN)) {
-        recordFailure(key);
-        throw new AppError(403, 'CODE_INCORRECT', "Code d'installation incorrect.");
-      }
+      await checkSetupToken(ctx);
       await preparePassword(ctx, 'password');
       await prepareSession(ctx);
     },
@@ -167,6 +171,15 @@ export function createApi({ db, env = {} }) {
     const user = club.createUser(null, { ...ctx.body, role: 'admin', password_hash: ctx.passwordHash });
     return openSession(ctx, user);
   });
+  add('POST', '/api/setup/reset', {
+    public: true,
+    prepare: async (ctx) => {
+      if (!club.hasUsers()) throw conflict('NON_INSTALLE', "Le club n'est pas encore installé : créez d'abord le premier compte.");
+      await checkSetupToken(ctx);
+      await preparePassword(ctx, 'password');
+      await prepareSession(ctx);
+    },
+  }, (ctx) => openSession(ctx, club.resetOwnerAccess({ login: ctx.body.login, password_hash: ctx.passwordHash })));
 
   // Administration
   add('PUT', '/api/settings', ADMIN, (ctx) => {

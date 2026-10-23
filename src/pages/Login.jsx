@@ -1,5 +1,6 @@
 // Sign-in, and on a brand-new club the first installation: the first administrator account is
-// created with the installation code (SETUP_TOKEN secret on Cloudflare).
+// created with the installation code (SETUP_TOKEN secret on Cloudflare). The same code gives that
+// account a new identifier and password when they are lost.
 import { useEffect, useRef, useState } from 'react';
 import { FormError, Notice, PasswordField, Skeleton } from '../components/ui/ui.jsx';
 import { prefersReducedMotion } from '../lib/smoke.js';
@@ -7,7 +8,7 @@ import { api } from '../lib/api.js';
 import { useSubmit } from '../lib/hooks.js';
 import { useStore } from '../store/useStore.js';
 
-function LoginForm({ onSignedIn }) {
+function LoginForm({ onSignedIn, onForgot }) {
   const [v, setV] = useState({ login: '', password: '' });
   const { busy, error, submit } = useSubmit();
   const set = (k) => (e) => setV({ ...v, [k]: e.target.value });
@@ -27,6 +28,7 @@ function LoginForm({ onSignedIn }) {
       <PasswordField label="Mot de passe" autoComplete="current-password" required value={v.password} onChange={set('password')} />
       <FormError error={error} />
       <button className="btn btn-primary btn-block" type="submit" disabled={busy} aria-busy={busy}>Se connecter</button>
+      <button type="button" className="login-link" onClick={onForgot}>Identifiant ou mot de passe oublié ?</button>
     </form>
   );
 }
@@ -73,12 +75,51 @@ function SetupForm({ tokenConfigured, onSignedIn }) {
   );
 }
 
+function ResetForm({ tokenConfigured, onSignedIn, onBack }) {
+  const [v, setV] = useState({ setup_token: '', login: '', password: '', confirm: '' });
+  const { busy, error, submit } = useSubmit();
+  const set = (k) => (e) => setV({ ...v, [k]: e.target.value });
+  const onSubmit = (e) => {
+    e.preventDefault();
+    submit(async () => {
+      if (!v.setup_token || !v.login || !v.password) throw new Error('Remplissez tous les champs.');
+      if (v.password !== v.confirm) throw new Error('La confirmation ne correspond pas au mot de passe.');
+      const { confirm, ...body } = v;
+      onSignedIn(await api.post('/api/setup/reset', body));
+    });
+  };
+  return (
+    <form className="login-card" onSubmit={onSubmit} noValidate>
+      <p className="login-eyebrow">Limen · Club privé</p>
+      <div>
+        <h1>Identifiants oubliés</h1>
+        <p className="muted">Avec le code d’installation, choisissez un nouvel identifiant et un nouveau mot de passe pour le compte du propriétaire.</p>
+      </div>
+      {!tokenConfigured && (
+        <Notice kind="warn">Le code d’installation n’est pas configuré sur le serveur : la réinitialisation est impossible.</Notice>
+      )}
+      <PasswordField label="Code d’installation" help="La valeur du secret SETUP_TOKEN, choisie lors de la mise en ligne."
+        autoComplete="off" required autoFocus value={v.setup_token} onChange={set('setup_token')} />
+      <label className="field"><span>Nouvel identifiant</span>
+        <input autoComplete="username" autoCapitalize="none" spellCheck="false" required value={v.login} onChange={set('login')} />
+        <span className="help">3 à 40 caractères : lettres, chiffres, point, tiret.</span></label>
+      <PasswordField label="Nouveau mot de passe" help="10 caractères minimum."
+        autoComplete="new-password" minLength={10} required value={v.password} onChange={set('password')} />
+      <PasswordField label="Confirmation" autoComplete="new-password" required value={v.confirm} onChange={set('confirm')} />
+      <FormError error={error} />
+      <button className="btn btn-primary btn-block" type="submit" disabled={busy || !tokenConfigured} aria-busy={busy}>Réinitialiser et entrer</button>
+      <button type="button" className="login-link" onClick={onBack}>Retour à la connexion</button>
+    </form>
+  );
+}
+
 // Once signed in, the card and the smoke zoom towards the viewer, then the app comes out of the
 // dark (AppShell, `entering`). With reduced motion, a short fade only.
 const LEAVE_MS = 420;
 
 export default function Login() {
   const [setup, setSetup] = useState(null);
+  const [forgot, setForgot] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const smoke = useRef(null);
   const onSignedIn = (bundle) => {
@@ -109,7 +150,9 @@ export default function Login() {
         {!setup && <div className="login-card"><Skeleton /></div>}
         {setup && (setup.needed
           ? <SetupForm tokenConfigured={setup.token_configured} onSignedIn={onSignedIn} />
-          : <LoginForm onSignedIn={onSignedIn} />)}
+          : forgot
+            ? <ResetForm tokenConfigured={setup.token_configured} onSignedIn={onSignedIn} onBack={() => setForgot(false)} />
+            : <LoginForm onSignedIn={onSignedIn} onForgot={() => setForgot(true)} />)}
       </div>
     </div>
   );

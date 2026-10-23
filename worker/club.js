@@ -456,6 +456,23 @@ export class Club {
     return { ok: true };
   }
 
+  // Lost access: the installation code (checked by the API layer) gives the club's first administrator
+  // a new identifier and password; the account is reactivated and its open sessions are closed.
+  resetOwnerAccess(input) {
+    const login = text(input.login, 'Identifiant', { required: true, max: 40 });
+    if (!/^[a-zA-Z0-9._-]{3,40}$/.test(login)) throw invalid('Identifiant : 3 à 40 caractères (lettres, chiffres, point, tiret).');
+    if (typeof input.password_hash !== 'string' || !input.password_hash) throw invalid('Mot de passe manquant.');
+    const owner = this.get("SELECT * FROM users WHERE role = 'admin' ORDER BY id LIMIT 1");
+    if (!owner) throw notFound('Administrateur');
+    if (this.get('SELECT 1 AS x FROM users WHERE login = ? AND id <> ?', login, owner.id)) {
+      throw conflict('IDENTIFIANT_PRIS', 'Cet identifiant est déjà utilisé.');
+    }
+    this.run('UPDATE users SET login = ?, password_hash = ?, active = 1 WHERE id = ?', login, input.password_hash, owner.id);
+    this.run('DELETE FROM sessions WHERE user_id = ?', owner.id);
+    this.audit(null, 'utilisateur.acces_reinitialise', 'user', owner.id, { avant: owner.login, apres: login });
+    return this.userRow(owner.id);
+  }
+
   userByLogin(loginName) {
     return this.get('SELECT * FROM users WHERE login = ?', String(loginName ?? '').trim()) ?? null;
   }
