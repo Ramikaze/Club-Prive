@@ -1,8 +1,11 @@
 // Guided tour of the main screens: one highlighted element per step, after opening its page.
 // Screens reserved to administrators are skipped for the manager. Arrow keys move, Escape quits.
+// The tour opens by itself on the first visit to the demo space, where a few controls are hidden or
+// replaced: a step then words itself differently (`inDemo` replaces the fields it names).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Icon from './Icon.jsx';
+import { useStore } from '../../store/useStore.js';
 
 export const TOUR_DONE_KEY = 'club-tour-done';
 
@@ -81,7 +84,14 @@ const STEPS = [
   },
   {
     admin: true, route: '/parametres', targets: ['[data-tour="settings"]'], icon: 'settings', title: 'Paramètres',
-    body: 'Horaires, tarifs et formules, moyens de paiement, soldes d’ouverture, catégories de dépenses, utilisateurs, journal des actions et données de démonstration.',
+    body: 'Horaires, tarifs et formules, moyens de paiement, soldes d’ouverture, catégories de dépenses, utilisateurs et journal des actions.',
+    inDemo: {
+      body: 'Horaires, tarifs et formules, moyens de paiement, soldes d’ouverture, catégories de dépenses et journal des actions. Les changements faits ici restent dans la démo.',
+      features: [
+        '« Remettre la démo à neuf » (onglet Équipe & Système) efface les essais et remet des données fictives neuves',
+        'Les comptes utilisateurs se gèrent hors du mode démo',
+      ],
+    },
   },
   {
     admin: true, route: '/tresorerie', targets: ['.account-cards', '[data-tour="treasury"]'], icon: 'bank', title: 'Trésorerie',
@@ -98,6 +108,12 @@ const STEPS = [
   {
     route: '/', targets: ['[data-tour="account"]', '[data-tour="menu"]'], icon: 'key', title: 'Votre compte',
     body: 'Changez votre mot de passe, passez en thème sombre pour le service du soir (la bascule se fait dans une fumée de cigare), relancez cette visite ou déconnectez-vous.',
+    features: ['Le chapeau de diplômé orange ouvre le mode démo : s’entraîner sans toucher aux vraies données'],
+    inDemo: {
+      icon: 'demo',
+      body: 'Passez en thème sombre pour le service du soir (la bascule se fait dans une fumée de cigare), relancez cette visite ou déconnectez-vous.',
+      features: ['« Quitter la démo » vous ramène au vrai club', 'Le mot de passe se change hors du mode démo'],
+    },
   },
 ];
 
@@ -142,7 +158,11 @@ const markDone = () => {
 };
 
 export default function GuidedTour({ active, onClose, isAdmin, clubName }) {
-  const steps = useMemo(() => STEPS.filter((s) => isAdmin || !s.admin), [isAdmin]);
+  const demo = useStore((s) => s.demo);
+  const steps = useMemo(
+    () => STEPS.filter((s) => isAdmin || !s.admin).map((s) => (demo && s.inDemo ? { ...s, ...s.inDemo } : s)),
+    [isAdmin, demo],
+  );
   const [index, setIndex] = useState(-1); // -1: welcome, steps.length: finished
   const [rect, setRect] = useState(null);
   const [size, setSize] = useState({ w: 380, h: 240 });

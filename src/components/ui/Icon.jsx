@@ -3,7 +3,7 @@ import {
   Home, CalendarDays, Users, Package, Wallet, SlidersHorizontal, LogOut, Plus, ChevronLeft, ChevronRight, Search,
   CreditCard, TriangleAlert, Info, Check, X, Moon, Printer, Download, Clock, Menu, KeyRound, Pencil, List, Receipt,
   Landmark, BookOpen, Lock, LockOpen, FileSpreadsheet, Compass, ArrowLeftRight, Ban, Undo2, Play, CircleStop,
-  RotateCcw, Database, UserPlus, HandCoins, Thermometer, Droplets, Archive, ArrowDownToLine, ArrowUpFromLine, Trash2,
+  RotateCcw, UserPlus, HandCoins, Thermometer, Droplets, Archive, ArrowDownToLine, ArrowUpFromLine, Trash2,
   DoorOpen, Eye, EyeOff, GraduationCap,
 } from 'lucide-react';
 
@@ -13,7 +13,7 @@ const ICONS = {
   alert: TriangleAlert, info: Info, check: Check, x: X, moon: Moon, printer: Printer, download: Download,
   clock: Clock, menu: Menu, key: KeyRound, edit: Pencil, list: List, receipt: Receipt, bank: Landmark,
   book: BookOpen, lock: Lock, unlock: LockOpen, excel: FileSpreadsheet, tour: Compass, transfer: ArrowLeftRight,
-  ban: Ban, undo: Undo2, play: Play, stop: CircleStop, reset: RotateCcw, database: Database, 'user-plus': UserPlus,
+  ban: Ban, undo: Undo2, play: Play, stop: CircleStop, reset: RotateCcw, 'user-plus': UserPlus,
   cash: HandCoins, humidor: Archive, humidity: Droplets, temperature: Thermometer,
   deposit: ArrowDownToLine, withdraw: ArrowUpFromLine, trash: Trash2, eye: Eye, 'eye-off': EyeOff,
   demo: GraduationCap,
