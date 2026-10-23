@@ -2,6 +2,7 @@
 // Business data is never cached here: each page loads it from the API.
 import { create } from 'zustand';
 import { clearSpace } from '../lib/space.js';
+import { clearActionToasts } from '../components/ui/toast.jsx';
 
 export const useStore = create((set) => ({
   status: 'boot', // boot | login | ready | offline
@@ -31,9 +32,10 @@ export const useStore = create((set) => ({
     });
   },
   // Signing out, by choice or because the API answered 401, also ends the demo session: signing in
-  // again lands on the real site.
+  // again lands on the real site. The toasts with a button end with it: none outlives its session.
   signOut: () => {
     clearSpace();
+    clearActionToasts();
     document.title = 'Connexion — Limen';
     set({ status: 'login', me: null, demo: false });
   },

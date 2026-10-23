@@ -338,9 +338,7 @@ function BookingDialog({ close, preset, onDone }) {
       // A booking for later offers the confirmation to the member, one click away in the toast (members
       // installed in the room right now have nothing to be told). The dialog closes as it always did; the
       // booking's page keeps a « Renvoyer la confirmation » button.
-      const confirmation = detail.reservation.status === 'reservee'
-        ? { label: 'Envoyer la confirmation WhatsApp', icon: 'message', onClick: () => sendWhatsAppConfirmation(detail) }
-        : null;
+      const confirmation = detail.reservation.status === 'reservee' ? confirmationToastAction(detail) : null;
       toast(`${detail.reservation.status === 'en_cours' ? 'Membres installés' : 'Réservation confirmée'} : ${detail.reservation.member_name} (${detail.reservation.room_name}, ${detail.reservation.party_size} membre(s)).`, 'ok', confirmation);
       onDone?.(detail);
     });
@@ -598,14 +596,22 @@ function DemoMessageDialog({ close, text }) {
 // The only way a confirmation leaves the application, and only on the manager's click: WhatsApp opens on the
 // message, addressed to the member's number, and waits for him to press « Envoyer ». A number that cannot be
 // used opens WhatsApp without a recipient, and he picks the contact. The demo never opens the link: it shows
-// the message.
-export function sendWhatsAppConfirmation(detail) {
+// the message. `demo` is whether the booking belongs to the demo: a button pressed on the page asks the store,
+// a toast's button passes the answer it was made with.
+export function sendWhatsAppConfirmation(detail, demo = useStore.getState().demo) {
   const text = confirmationText(detail);
-  if (useStore.getState().demo) {
+  if (demo) {
     openDialog(DemoMessageDialog, { text });
     return;
   }
   window.open(waLink(waDigits(detail.member_phone), text), '_blank', 'noopener');
+}
+
+// The button of the toast shown after a booking for later. It stays 20 seconds, long enough for the session to
+// change under it, so it keeps the space it was made in: made in the demo, it can never open WhatsApp.
+export function confirmationToastAction(detail) {
+  const demo = useStore.getState().demo;
+  return { label: 'Envoyer la confirmation WhatsApp', icon: 'message', onClick: () => sendWhatsAppConfirmation(detail, demo) };
 }
 
 // ---------------------------------------------------------------- add/remove member in room

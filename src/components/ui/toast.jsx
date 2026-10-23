@@ -9,6 +9,13 @@ let seq = 0;
 
 const dismiss = (id) => useToasts.setState((s) => ({ list: s.list.filter((t) => t.id !== id) }));
 
+// The toasts that carry an action, gone. Their button runs code made for the session that showed them (a
+// WhatsApp confirmation, on the real club or in the demo): signing out ends them, the login screen shows
+// toasts too and must not offer that button. Plain messages stay and are read there.
+export function clearActionToasts() {
+  useToasts.setState((s) => ({ list: s.list.filter((t) => !t.action) }));
+}
+
 export function toast(message, kind = 'ok', action = null) {
   const id = (seq += 1);
   useToasts.setState((s) => ({ list: [...s.list, { id, message, kind, action }] }));
