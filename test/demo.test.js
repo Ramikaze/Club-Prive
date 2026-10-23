@@ -4,8 +4,9 @@
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { addMonths } from '../shared/time.js';
+import { sha256Hex } from '../worker/auth.js';
 import { DEMO_AUTHOR_ID } from '../worker/club.js';
-import { Server, Client, ok, UM } from './harness.js';
+import { Server, Client, ok, ORIGIN, UM } from './harness.js';
 
 const servers = [];
 afterEach(() => {
@@ -13,6 +14,7 @@ afterEach(() => {
 });
 
 const PROPRIO = 'mot-de-passe-proprio';
+const GERANT = 'mot-de-passe-gerant';
 
 // A real club with its administrator (logged in) and a manager, and an empty demo space beside it.
 async function clubs() {
@@ -22,7 +24,7 @@ async function clubs() {
   await real.start();
   await demo.start();
   await real.addUser('proprietaire', 'Propriétaire', 'admin', PROPRIO);
-  await real.addUser('gerant', 'Gérant', 'gerant', 'mot-de-passe-gerant');
+  await real.addUser('gerant', 'Gérant', 'gerant', GERANT);
   const admin = new Client(real);
   const bundle = await admin.login('proprietaire', PROPRIO);
   return { real, demo, admin, bundle };
@@ -252,4 +254,267 @@ test('comptes de la démo : copies sans mot de passe, auteur fictif', async () =
   assert.equal(author.role, 'admin');
   assert.equal(author.password_hash, '!');
   assert.deepEqual(demo.club.all('SELECT DISTINCT created_by FROM members').map((r) => r.created_by), [DEMO_AUTHOR_ID]);
+});
+
+// ---------------------------------------------------------------------------- the demo space's API
+// The Worker's two steps for a request made in the demo space, called directly here, without the
+// routing: the real club vouches for the session and hands out the account and the configuration
+// (demoContext), the demo club serves the request as that account (handleDemo).
+
+const TRIAL = { first_name: 'Essai', last_name: 'Gérant', phone: '+242 06 111 2222' };
+
+// Hash of a signed-in client's session cookie, as the Worker computes it.
+const sessionHash = (client) => sha256Hex(decodeURIComponent(client.cookie.split('=')[1]));
+
+const contextOf = async (real, client) => real.api.demoContext(await sessionHash(client));
+
+// A client of the demo club: no cookie, the identity comes with each call.
+const inDemo = (demo, ctx) => new Client({
+  fetch: (url, init) => demo.api.handleDemo(new Request(ORIGIN + url, init), ctx),
+});
+
+async function managerOf(real) {
+  const manager = new Client(real);
+  await manager.login('gerant', GERANT);
+  return manager;
+}
+
+test('contexte démo : le vrai club répond de la session, rien sans session valide', async () => {
+  const { real, admin, bundle } = await clubs();
+  assert.equal(real.api.demoContext(null), null);
+  assert.equal(real.api.demoContext(await sha256Hex('jeton-inconnu')), null);
+
+  const hash = await sessionHash(admin);
+  const ctx = real.api.demoContext(hash);
+  // The identity only, no password hash; the configuration is the real club's.
+  assert.deepEqual(ctx.user, { id: bundle.user.id, name: 'Propriétaire', role: 'admin' });
+  assert.deepEqual(ctx.config, real.club.demoConfig());
+
+  // An expired session and a deactivated account give nothing either (the rows are still there).
+  real.db.run('UPDATE sessions SET expires_at = ? WHERE token_hash = ?', '2000-01-01T00:00:00.000Z', hash);
+  assert.equal(real.api.demoContext(hash), null);
+  const managerHash = await sessionHash(await managerOf(real));
+  assert.equal(real.api.demoContext(managerHash).user.role, 'gerant');
+  real.db.run("UPDATE users SET active = 0 WHERE login = 'gerant'");
+  assert.equal(real.api.demoContext(managerHash), null);
+});
+
+test('une écriture faite dans la démo reste dans la démo', async () => {
+  const { real, demo, admin, bundle } = await clubs();
+  const auditBefore = real.club.all('SELECT * FROM audit_log');
+  const asAdmin = inDemo(demo, await contextOf(real, admin));
+
+  // The first request prepares the space (5 fictitious members), then creates a sixth.
+  const created = ok(await asAdmin.post('/api/members', TRIAL));
+  assert.equal(created.name, 'Essai Gérant');
+  assert.deepEqual(memberNames(demo.club), [...FICTITIOUS, 'Essai Gérant'].sort());
+  assert.equal(demo.club.memberRow(created.id).created_by, bundle.user.id);
+  assert.equal(ok(await asAdmin.get('/api/members')).length, 6);
+
+  assert.deepEqual(memberNames(real.club), []);
+  assert.ok(real.club.isEmpty());
+  assert.deepEqual(real.club.all('SELECT * FROM audit_log'), auditBefore);
+});
+
+test('en démo, la gestion des comptes est refusée, comptes et mots de passe intacts', async () => {
+  const { real, demo, admin } = await clubs();
+  const manager = await managerOf(real);
+  const managerId = real.club.userByLogin('gerant').id;
+  const accountsBefore = real.club.listUsers();
+  const attempts = [
+    ['GET', '/api/users'],
+    ['POST', '/api/users', { login: 'intrus', name: 'Intrus', role: 'admin', password: 'mot-de-passe-intrus' }],
+    ['PUT', `/api/users/${managerId}`, { active: false }],
+    ['POST', `/api/users/${managerId}/password`, { password: 'nouveau-mot-de-passe' }],
+    ['POST', '/api/me/password', { current_password: PROPRIO, new_password: 'nouveau-mot-de-passe' }],
+    ['POST', '/api/admin/reset', { confirm: 'EFFACER' }],
+  ];
+
+  // The message does not depend on the role.
+  for (const client of [admin, manager]) {
+    const asUser = inDemo(demo, await contextOf(real, client));
+    for (const [method, url, body] of attempts) {
+      const r = await asUser.call(method, url, body);
+      assert.equal(r.status, 403, `${method} ${url}`);
+      assert.equal(r.data.error.code, 'MODE_DEMO', `${method} ${url}`);
+      assert.equal(r.data.error.message, 'Les comptes se gèrent hors du mode démo.');
+    }
+  }
+
+  // Nothing moved, in the real club or in the demo: the data was not wiped either.
+  assert.deepEqual(real.club.listUsers(), accountsBefore);
+  await new Client(real).login('proprietaire', PROPRIO);
+  assert.equal(demo.club.get("SELECT COUNT(*) AS n FROM users WHERE login = 'intrus'").n, 0);
+  assert.equal(demo.club.userRow(managerId).active, 1);
+  assert.equal(demo.club.userRow(managerId).password_hash, '!');
+  assert.equal(demo.club.listMembers().length, 5);
+});
+
+test('« Remettre la démo à neuf » : réservé aux administrateurs, absent du vrai club', async () => {
+  const { real, demo, admin, bundle } = await clubs();
+  const asAdmin = inDemo(demo, await contextOf(real, admin));
+  const asManager = inDemo(demo, await contextOf(real, await managerOf(real)));
+  ok(await asAdmin.post('/api/members', TRIAL));
+  assert.equal(demo.club.listMembers().length, 6);
+
+  // The manager is turned away and the trials stay.
+  assert.equal((await asManager.post('/api/demo/reset', {})).status, 403);
+  assert.equal(demo.club.listMembers().length, 6);
+
+  // The administrator gets the original space back, with the real club's settings as they are now.
+  ok(await admin.put('/api/settings', { club_name: 'Nom actuel' }));
+  const refreshed = inDemo(demo, await contextOf(real, admin));
+  const reset = ok(await refreshed.post('/api/demo/reset', {}));
+  assert.deepEqual(memberNames(demo.club), FICTITIOUS);
+  assert.equal(reset.demo, true);
+  assert.equal(reset.settings.club_name, 'Nom actuel');
+  assert.equal(reset.user.name, 'Propriétaire');
+  assert.equal(demo.club.auditLog().find((a) => a.action === 'demo.remettre_a_neuf').user_id, bundle.user.id);
+
+  // The real club has no such route, and nothing of the demo reached it.
+  assert.equal((await admin.post('/api/demo/reset', {})).status, 404);
+  assert.deepEqual(memberNames(real.club), []);
+  assert.equal(real.club.auditLog().some((a) => a.action === 'demo.remettre_a_neuf'), false);
+});
+
+test('exports en démo : le nom du fichier commence par DEMO_', async () => {
+  const { real, demo, admin } = await clubs();
+  const asAdmin = inDemo(demo, await contextOf(real, admin));
+  const today = ok(await asAdmin.get('/api/me')).biz_today;
+  const period = `from=${addMonths(today, -3)}&to=${today}`;
+
+  const csv = await asAdmin.get(`/api/export/grand-livre?${period}`);
+  assert.equal(csv.status, 200);
+  assert.match(csv.headers.get('content-disposition'), /^attachment; filename="DEMO_grand-livre_.*\.csv"$/);
+  // The Excel export is named by the server too.
+  assert.match(ok(await asAdmin.get(`/api/export/grand-livre?${period}&format=json`)).filename, /^DEMO_grand-livre_.*\.xlsx$/);
+
+  // The real club keeps the plain names.
+  const own = `/api/export/grand-livre?from=${today}&to=${today}`;
+  assert.match((await admin.get(own)).headers.get('content-disposition'), /^attachment; filename="grand-livre_/);
+  assert.match(ok(await admin.get(`${own}&format=json`)).filename, /^grand-livre_.*\.xlsx$/);
+});
+
+test('en démo, ni le cookie ni le rôle transmis ne comptent : seul le compte recopié décide', async () => {
+  const { real, demo, admin } = await clubs();
+  const ctx = await contextOf(real, await managerOf(real));
+  const asManager = inDemo(demo, ctx);
+
+  // The administrator's real session cookie rides along with a request made as the manager.
+  const carried = { cookie: admin.cookie };
+  assert.equal((await asManager.post('/api/demo/reset', {}, carried)).status, 403);
+  const me = ok(await asManager.call('GET', '/api/me', undefined, carried));
+  assert.equal(me.user.name, 'Gérant');
+  assert.equal(me.user.role, 'gerant');
+
+  // The role sent along with the identity is not believed: the mirrored account has the last word.
+  const forged = inDemo(demo, { ...ctx, user: { ...ctx.user, role: 'admin' } });
+  assert.equal((await forged.post('/api/demo/reset', {})).status, 403);
+  assert.equal(ok(await forged.get('/api/me')).user.role, 'gerant');
+});
+
+test('en démo, un compte suit le vrai club : nouveau rôle, puis accès retiré', async () => {
+  const { real, demo, admin } = await clubs();
+  const manager = await managerOf(real);
+  const ctx = await contextOf(real, manager);
+  const managerId = ctx.user.id;
+  assert.equal(ok(await inDemo(demo, ctx).get('/api/me')).user.role, 'gerant');
+
+  // Promoted in the real club: the next request, which carries the configuration as it is now.
+  ok(await admin.put(`/api/users/${managerId}`, { role: 'admin' }));
+  const promoted = inDemo(demo, { user: ctx.user, config: real.club.demoConfig() });
+  assert.equal(ok(await promoted.get('/api/me')).user.role, 'admin');
+  assert.equal((await promoted.post('/api/demo/reset', {})).status, 200);
+
+  // Deactivated: the demo space turns the account away.
+  ok(await admin.put(`/api/users/${managerId}`, { active: false }));
+  const deactivated = await inDemo(demo, { user: ctx.user, config: real.club.demoConfig() }).get('/api/me');
+  assert.equal(deactivated.status, 401);
+  assert.equal(deactivated.data.error.code, 'NON_CONNECTE');
+});
+
+test('en démo, le contrôle CSRF et l’idempotence sont ceux du vrai club', async () => {
+  const { real, demo, admin } = await clubs();
+  const asAdmin = inDemo(demo, await contextOf(real, admin));
+
+  assert.equal((await asAdmin.post('/api/members', TRIAL, { origin: 'http://autre-site.test' })).status, 403);
+  assert.equal((await asAdmin.post('/api/members', TRIAL, { 'content-type': 'text/plain' })).status, 415);
+  assert.equal(demo.club.listMembers().length, 5);
+
+  // The same key twice: one member, and the second answer is the first one replayed.
+  const key = { 'idempotency-key': 'cle-demo-0001' };
+  const first = await asAdmin.post('/api/members', TRIAL, key);
+  const second = await asAdmin.post('/api/members', TRIAL, key);
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 200);
+  assert.equal(second.headers.get('idempotent-replayed'), 'true');
+  assert.deepEqual(second.data, first.data);
+  assert.equal(demo.club.listMembers().length, 6);
+});
+
+test('en démo, un compte inconnu de la configuration reçoit une erreur, pas une exception', async () => {
+  const { real, demo, admin } = await clubs();
+  const ctx = await contextOf(real, admin);
+
+  const stranger = await inDemo(demo, { ...ctx, user: { id: 999 } }).get('/api/me');
+  assert.equal(stranger.status, 404);
+  assert.equal(stranger.data.error.code, 'INTROUVABLE');
+});
+
+test('en démo, un remplissage refusé répond par son erreur, pas par une exception', async () => {
+  const { real, demo, admin } = await clubs();
+  // A space that holds a record but was never filled: the filling will not mix it with fictitious ones.
+  demo.db.run(
+    "INSERT INTO members (member_no, first_name, last_name, phone, created_at) VALUES ('M-0001', 'Resté', 'Là', '+242 06 000 0000', ?)",
+    new Date().toISOString(),
+  );
+
+  const refused = await inDemo(demo, await contextOf(real, admin)).get('/api/me');
+  assert.equal(refused.status, 409);
+  assert.equal(refused.data.error.code, 'DONNEES_EXISTANTES');
+  assert.deepEqual(memberNames(demo.club), ['Resté Là']);
+  assert.equal(demo.club.get("SELECT COUNT(*) AS n FROM meta WHERE key = 'demo_seeded'").n, 0);
+});
+
+test('chaque point d’entrée refuse l’autre espace', async () => {
+  const { real, demo, admin } = await clubs();
+  const hash = await sessionHash(admin);
+  const ctx = real.api.demoContext(hash);
+
+  assert.throws(() => demo.api.demoContext(hash), /real club/);
+  await assert.rejects(real.api.handleDemo(new Request(ORIGIN + '/api/me'), ctx), /demo space/);
+  // The real club never takes an identity along with a request: its session decides.
+  const account = real.club.userRow(ctx.user.id);
+  await assert.rejects(real.api.handle(new Request(ORIGIN + '/api/me'), { user: account }), /demo space/);
+  assert.equal(real.club.listMembers().length, 0); // nothing was prepared on the real club
+});
+
+test('un vrai club aux tarifs souples (scénarios) reste le vrai club', async () => {
+  const lenient = new Server({}, { lenientTariffs: true });
+  servers.push(lenient);
+  await lenient.start();
+  await lenient.addUser('proprietaire', 'Propriétaire', 'admin', PROPRIO);
+  const admin = new Client(lenient);
+  await admin.login('proprietaire', PROPRIO);
+  assert.equal(lenient.club.demo, true); // what lenientTariffs sets
+  const today = lenient.club.bizToday();
+
+  // The demo-only behaviours follow the space the API was created for, not that flag.
+  ok(await admin.get('/api/users'));
+  const csv = await admin.get(`/api/export/grand-livre?from=${today}&to=${today}`);
+  assert.match(csv.headers.get('content-disposition'), /^attachment; filename="grand-livre_/);
+  assert.equal((await admin.post('/api/demo/reset', {})).status, 404);
+  const ctx = lenient.api.demoContext(await sessionHash(admin));
+  assert.equal(ctx.user.name, 'Propriétaire');
+  await assert.rejects(lenient.api.handleDemo(new Request(ORIGIN + '/api/me'), ctx), /demo space/);
+});
+
+test('l’espace démo ne crée pas les comptes de démonstration locaux', async () => {
+  const local = new Server({ DEMO_ACCOUNTS: '1' }, { demo: true });
+  servers.push(local);
+  await local.start();
+
+  assert.equal(local.club.hasUsers(), false);
+  const visitor = new Client(local);
+  assert.equal((await visitor.post('/api/login', { login: 'proprietaire', password: 'demo-proprio-2026' })).status, 401);
 });
