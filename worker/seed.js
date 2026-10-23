@@ -138,13 +138,24 @@ function fill(club, { actor }) {
     }
   };
 
+  // A booking the room refuses is left out and the demo fills all the same: the room held by the session in
+  // progress, or two of the seed's own bookings closer than the club's gap between bookings (up to 4 hours).
+  const unlessTaken = (create) => {
+    try {
+      create();
+    } catch (err) {
+      if (!(err instanceof AppError)) throw err;
+    }
+  };
+
   live(book(client2, addDays(today, -20), '18:00', 180, { partySize: 4 }), [[champagne, 1], [robusto, 2]], 'Carte bancaire');
   live(book(client1, addDays(today, -8), '20:00', 60, { partySize: 2 }), [[whisky, 1]], 'Espèces');
   live(book(client4, addDays(today, -3), '19:00', 120, { partySize: 2 }), [], null);
   // The example from the brief: 25 000 of room time + 40 000 bottle + 10 000 cigar = 75 000 in one payment.
-  live(book(client4, addDays(today, -1), '21:00', 60, { partySize: 3, notes: 'Crédit épuisé : heure entièrement payante' }),
-    [[whisky, 1], [robusto, 1]], 'Espèces');
-  live(book(client3, addDays(today, -1), '15:00', 150, { partySize: 4 }), [[corona, 2]], null);
+  unlessTaken(() => live(book(client4, addDays(today, -1), '21:00', 60, { partySize: 3, notes: 'Crédit épuisé : heure entièrement payante' }),
+    [[whisky, 1], [robusto, 1]], 'Espèces'));
+  // Ending 3 h 30 before the one above (15:00-17:30): a gap between bookings beyond that leaves this one out.
+  unlessTaken(() => live(book(client3, addDays(today, -1), '15:00', 150, { partySize: 4 }), [[corona, 2]], null));
   const cancelled = book(client2, addDays(today, -2), '17:00', 120, { partySize: 2 });
   club.at = cancelled.start_ms - DAY;
   club.cancelReservation(manager, cancelled.id, { reason: 'Empêchement du membre (démo)' });
@@ -188,13 +199,6 @@ function fill(club, { actor }) {
   }
 
   // Today's and later bookings, skipped where the session in progress already holds the room.
-  const unlessTaken = (create) => {
-    try {
-      create();
-    } catch (err) {
-      if (!(err instanceof AppError)) throw err;
-    }
-  };
   unlessTaken(() => live(book(client2, today, '12:00', 120, { partySize: 3 }), [[robusto, 1]], 'Carte bancaire'));
   unlessTaken(() => live(book(client5, today, '16:00', 90, { partySize: 4 }), [], null));
   unlessTaken(() => live(book(client1, today, '20:00', 60, { partySize: 5 }), [[champagne, 1]], null));
