@@ -22,6 +22,16 @@ export class Server {
     this.db = nodeDb(this.file);
     this.api = createApi({ db: this.db, env: this.env });
     await this.api.init();
+    // Tests book on dates relative to today, whatever the weekday, so on a fresh database the
+    // weekend minimum (2 h on Friday and Saturday from 18:00) starts equal to the weekday one; the
+    // weekend test raises it. A restart keeps whatever the test set.
+    if (!this.started) {
+      this.db.run(
+        "UPDATE settings SET value = json_set(value, '$.weekend_min_duration_min', json_extract(value, '$.min_duration_min')) WHERE key = 'booking'",
+      );
+      this.club.cachedSettings = null;
+      this.started = true;
+    }
   }
 
   // Same database file, fresh process state: what a Durable Object restart looks like.

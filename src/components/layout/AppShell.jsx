@@ -2,9 +2,9 @@
 // account menu, password change and the guided tour.
 import { useEffect, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import Icon, { BrandMark } from '../ui/Icon.jsx';
+import Icon from '../ui/Icon.jsx';
 import { Modal, openDialog, closeAllDialogs } from '../ui/Modal.jsx';
-import { FormError } from '../ui/ui.jsx';
+import { FormError, PasswordField } from '../ui/ui.jsx';
 import { toast } from '../ui/toast.jsx';
 import GuidedTour, { TOUR_DONE_KEY } from '../ui/GuidedTour.jsx';
 import { api } from '../../lib/api.js';
@@ -52,13 +52,10 @@ function PasswordDialog({ close }) {
   return (
     <Modal title="Changer mon mot de passe" onClose={close}>
       <form className="form-grid" onSubmit={onSubmit} noValidate>
-        <label className="field"><span>Mot de passe actuel</span>
-          <input type="password" autoComplete="current-password" required value={v.current_password} onChange={set('current_password')} /></label>
-        <label className="field"><span>Nouveau mot de passe</span>
-          <input type="password" autoComplete="new-password" minLength={10} required value={v.new_password} onChange={set('new_password')} />
-          <span className="help">10 caractères minimum.</span></label>
-        <label className="field"><span>Confirmation</span>
-          <input type="password" autoComplete="new-password" required value={v.confirm} onChange={set('confirm')} /></label>
+        <PasswordField label="Mot de passe actuel" autoComplete="current-password" required value={v.current_password} onChange={set('current_password')} />
+        <PasswordField label="Nouveau mot de passe" help="10 caractères minimum."
+          autoComplete="new-password" minLength={10} required value={v.new_password} onChange={set('new_password')} />
+        <PasswordField label="Confirmation" autoComplete="new-password" required value={v.confirm} onChange={set('confirm')} />
         <FormError error={error} />
         <div className="modal-actions">
           <button type="button" className="btn" onClick={close}>Annuler</button>
@@ -100,6 +97,13 @@ function AccountMenu({ close, onTour }) {
 export default function AppShell() {
   const me = useStore((s) => s.me);
   const settings = useStore((s) => s.settings);
+  const instanceLabel = useStore((s) => s.instanceLabel);
+  const entering = useStore((s) => s.entering);
+  useEffect(() => {
+    if (!entering) return undefined;
+    const t = setTimeout(() => useStore.setState({ entering: false }), 700);
+    return () => clearTimeout(t);
+  }, [entering]);
   const isAdmin = me.role === 'admin';
   const { pathname } = useLocation();
   const current = navFor(pathname);
@@ -125,11 +129,10 @@ export default function AppShell() {
   const aria = (path) => (path === current ? 'page' : undefined);
 
   return (
-    <div className="shell">
+    <div className={`shell${entering ? ' is-entering' : ''}`}>
       <aside className="sidebar" aria-label="Navigation principale">
         <div className="brand">
-          <BrandMark />
-          <div><div className="brand-name">{settings.club_name}</div><div className="brand-sub">Gestion du club</div></div>
+          <div><div className="brand-name">{settings.club_name}</div><div className="brand-sub">Club privé</div></div>
         </div>
         <nav className="side-nav" data-tour="nav">
           {NAV.filter((n) => !n.admin || isAdmin).map((n) => (n.group
@@ -150,10 +153,16 @@ export default function AppShell() {
       </aside>
       <div className="main-col">
         <header className="topbar">
-          <div className="brand"><BrandMark /><div className="brand-name">{settings.club_name}</div></div>
+          <div className="brand"><div className="brand-name">{settings.club_name}</div></div>
           <button type="button" className="icon-btn" data-tour="menu" aria-label="Compte, rubriques et réglages"
             onClick={() => openDialog(AccountMenu, { onTour: startTour })}><Icon name="menu" /></button>
         </header>
+        {instanceLabel && (
+          <div className="banner banner-test" role="note">
+            <Icon name="alert" />
+            <span><strong>{instanceLabel}</strong> — site d’essai, séparé du site des clients : ses comptes et ses données ne sont pas les leurs.</span>
+          </div>
+        )}
         {settings.demo_mode && (
           <div className="banner" role="note">
             <Icon name="info" />

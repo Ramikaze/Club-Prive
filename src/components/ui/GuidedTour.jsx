@@ -48,7 +48,7 @@ const STEPS = [
   },
   {
     route: '/agenda', targets: ['.tl-slot:not([disabled])', '[data-tour="agenda"]'], icon: 'calendar', title: 'Réserver depuis l’agenda',
-    body: 'Touchez un créneau libre pour réserver à cette heure. Minimum une heure ; les zones hachurées sont hors horaires habituels (jusqu’à 5 h, avec une autorisation explicite).',
+    body: 'Touchez un créneau libre pour réserver à cette heure : la salle se réserve à toute heure, de jour comme de nuit. Minimum une heure, deux heures le vendredi et le samedi à partir de 18 h.',
     features: ['Le devis affiche crédit utilisé et supplément avant confirmation', 'Une salle ne peut pas être réservée deux fois sur le même créneau'],
   },
   {

@@ -13,6 +13,7 @@ export const ACTION_LABELS = {
   'utilisateur.modifier': 'Utilisateur modifié',
   'utilisateur.mot_de_passe_reinitialise': 'Mot de passe réinitialisé',
   'utilisateur.mot_de_passe_modifie': 'Mot de passe modifié',
+  'utilisateur.acces_reinitialise': 'Accès du propriétaire réinitialisé',
   'membre.creer': 'Membre créé',
   'membre.modifier': 'Fiche membre modifiée',
   'membre.supprimer': 'Membre supprimé',
@@ -33,6 +34,7 @@ export const ACTION_LABELS = {
   'reservation.demarrer': 'Arrivée : réservation démarrée',
   'reservation.terminer': 'Réservation terminée',
   'reservation.annuler': 'Réservation annulée',
+  'reservation.absence': 'Absence du membre : réservation close',
   'reservation.consommation.ajouter': 'Consommation ajoutée',
   'paiement.enregistrer': 'Encaissement',
   'ligne.annuler': 'Ligne annulée',
@@ -80,7 +82,8 @@ export function auditSummary(a) {
     case 'reservation.terminer':
       return `${fmtDuration(d.minutes_consommees ?? 0)} consommées`;
     case 'reservation.annuler':
-      return `${d.motif ?? ''} ; ${fmtDuration(d.minutes_liberees ?? 0)} libérées`;
+    case 'reservation.absence':
+      return `${d.motif ?? ''} ; ${fmtDuration(d.minutes_liberees ?? 0)} libérées${d.acompte_conserve ? ` ; acompte de ${money(d.acompte_conserve)} conservé` : ''}`;
     case 'reservation.consommation.ajouter':
       return `${d.produit} × ${d.quantite} (${money(d.montant)}, ${ACCOUNT_LABEL[d.sous_compte] ?? ''})`;
     case 'paiement.enregistrer':
@@ -108,6 +111,8 @@ export function auditSummary(a) {
       return `${d.mois} ; résultat ${money(d.resultat)}`;
     case 'periode.rouvrir':
       return `${d.mois} — ${d.motif}`;
+    case 'utilisateur.acces_reinitialise':
+      return `Identifiant ${d.avant} → ${d.apres}, avec le code d’installation`;
     default:
       return '';
   }

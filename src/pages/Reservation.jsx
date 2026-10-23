@@ -53,7 +53,15 @@ function ReservationDetail({ d, products, reload }) {
   );
 
   const onStart = () => start.run(async () => {
-    await api.post(`/api/reservations/${r.id}/start`, {});
+    try {
+      await api.post(`/api/reservations/${r.id}/start`, {});
+    } catch (e) {
+      // A booking secured by a deposit: its balance is taken before the arrival.
+      if (e.code !== 'SOLDE_REQUIS') throw e;
+      toast(e.message, 'error');
+      openPaymentDialog({ lines: d.charges, memberName: r.member_name }, reload);
+      return;
+    }
     toast('Arrivée enregistrée : réservation en cours.');
     reload();
   });
@@ -96,6 +104,7 @@ function ReservationDetail({ d, products, reload }) {
           <>
             <span className="chip">{r.room_name || 'Salon Principal'}</span> · {attendees.length} membre(s) · {dayLabel(r.biz_day, 'title')} · {r.start_time} → {r.end_time}{nextDay} · {fmtDuration(r.duration_min)} <Chip group="res" value={r.status} />
             {r.off_hours ? <>{' '}<span className="chip chip-bronze">hors horaires</span></> : null}
+            {r.deposit_amount ? <>{' '}<span className="chip chip-bronze">{`acompte ${money(r.deposit_amount)}`}</span></> : null}
           </>
         )}
         back={{ to: `/agenda?date=${r.biz_day}`, label: 'Agenda' }}
@@ -104,7 +113,7 @@ function ReservationDetail({ d, products, reload }) {
             <Link className="btn" to={`/membres/${r.member_id}`}><Icon name="users" /> Fiche membre</Link>
             {r.status === 'reservee' ? (
               <>
-                <button type="button" className="btn btn-danger" onClick={() => openCancelReservationDialog(d, reload)}>Annuler</button>
+                <button type="button" className="btn btn-danger" onClick={() => openCancelReservationDialog(d, reload)}>{r.late_cancellation ? 'Absence' : 'Annuler'}</button>
                 <button type="button" className="btn" onClick={onExtend}>Prolonger</button>
                 <button type="button" className="btn btn-primary" onClick={onStart} disabled={start.busy} aria-busy={start.busy}><Icon name="check" /> Arrivée du membre</button>
               </>
@@ -256,6 +265,10 @@ function ReservationDetail({ d, products, reload }) {
             <dt>Crédit du membre</dt><dd>{fmtDuration(sub.credit.available)} disponibles · {fmtDuration(sub.credit.committed)} engagées · {fmtDuration(sub.credit.consumed)} consommées</dd>
             <dt>Tarif appliqué</dt><dd>{money(r.tariff.hour)} / h · {money(r.tariff.half)} / 30 min</dd>
             {r.off_hours ? <><dt>Hors horaires</dt><dd>Autorisé par {r.off_hours_authorized_by_name ?? '—'}</dd></> : null}
+            {r.deposit_amount ? <><dt>Acompte (50 %)</dt><dd>{`${money(r.deposit_amount)}, acquis au club ; le solde se règle avant l’entrée en salle`}</dd></> : null}
+            {r.cancellable_until && r.status === 'reservee'
+              ? <><dt>Annulable jusqu’au</dt><dd>{r.late_cancellation ? 'Délai dépassé : seule l’absence peut être enregistrée' : dateTime(r.cancellable_until)}</dd></>
+              : null}
             <dt>Saisie</dt><dd>{r.created_by_name ?? '—'}, {dateTime(r.created_at)}</dd>
             {r.notes ? <><dt>Remarque</dt><dd>{r.notes}</dd></> : null}
             {r.status === 'annulee' ? <><dt>Annulation</dt><dd>{r.cancel_reason} ({dateTime(r.cancelled_at)})</dd></> : null}

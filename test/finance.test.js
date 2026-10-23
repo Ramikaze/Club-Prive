@@ -17,7 +17,7 @@ after(() => server.destroy());
 
 test('15. installation : le premier administrateur exige le code SETUP_TOKEN', async () => {
   const anonymous = new Client(server);
-  assert.deepEqual(ok(await anonymous.get('/api/setup')), { needed: true, token_configured: true });
+  assert.deepEqual(ok(await anonymous.get('/api/setup')), { needed: true, token_configured: true, instance_label: null });
   assert.equal((await anonymous.post('/api/login', { login: 'x', password: 'y' })).status, 401);
   const wrong = await anonymous.post('/api/setup', { setup_token: 'faux', login: 'patron', name: 'Patron', password: 'mot-de-passe-patron' });
   assert.equal(wrong.status, 403);
@@ -38,6 +38,24 @@ test('15. installation : le premier administrateur exige le code SETUP_TOKEN', a
   await manager.login('gerant', 'gerant-password-1');
   categories = ok(await manager.get('/api/ledger/categories'));
   assert.ok(categories.some((c) => c.kind === 'depense' && c.name === 'Loyer'));
+});
+
+test('15 bis. identifiants perdus : le code d’installation redonne l’accès au premier administrateur', async () => {
+  const anonymous = new Client(server);
+  const reset = (body) => anonymous.post('/api/setup/reset', { setup_token: SETUP_TOKEN, login: 'patronne', password: 'nouveau-mot-de-passe', ...body });
+  assert.equal((await reset({ setup_token: 'faux' })).status, 403);
+  assert.equal((await reset({ password: 'court' })).status, 400);
+  assert.equal((await reset({ login: 'gerant' })).status, 409);
+  const owner = new Client(server);
+  const bundle = ok(await owner.post('/api/setup/reset', { setup_token: SETUP_TOKEN, login: 'patronne', password: 'nouveau-mot-de-passe' }));
+  assert.equal(bundle.user.login, 'patronne');
+  assert.equal(bundle.user.role, 'admin');
+  assert.equal((await admin.get('/api/me')).status, 401); // the owner's other sessions are closed
+  ok(await manager.get('/api/me')); // other accounts keep theirs
+  assert.equal((await anonymous.post('/api/login', { login: 'patron', password: 'mot-de-passe-patron' })).status, 401);
+  const entry = ok(await owner.get('/api/audit')).find((a) => a.action === 'utilisateur.acces_reinitialise');
+  assert.deepEqual(entry.details, { avant: 'patron', apres: 'patronne' });
+  admin = owner;
 });
 
 test('16. dépenses, entrées et transferts : droits et contrôles', async () => {

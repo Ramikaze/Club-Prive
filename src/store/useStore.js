@@ -10,8 +10,11 @@ export const useStore = create((set) => ({
   plans: [],
   rooms: [],
   accounts: [],
+  instanceLabel: null, // « Version de test » on the test site, null on the clients' site
+  entering: false, // true just after signing in: the app zooms in out of the dark
   setBundle: (bundle) => {
-    document.title = `${bundle.settings.club_name} — Gestion`;
+    const instanceLabel = bundle.instance_label ?? null;
+    document.title = `${instanceLabel ? `[${instanceLabel}] ` : ''}${bundle.settings.club_name} — Gestion`;
     set({
       status: 'ready',
       me: bundle.user,
@@ -19,11 +22,12 @@ export const useStore = create((set) => ({
       plans: bundle.plans,
       rooms: bundle.rooms ?? [],
       accounts: bundle.accounts,
+      instanceLabel,
       bootError: null,
     });
   },
   signOut: () => {
-    document.title = 'Connexion — Club Privé';
+    document.title = 'Connexion — Limen';
     set({ status: 'login', me: null });
   },
   setOffline: (error) => set({ status: 'offline', bootError: error }),

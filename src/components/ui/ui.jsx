@@ -1,5 +1,7 @@
 // Small building blocks shared by every page: status chips, empty / loading / error states,
-// notices and the page header. Class names come from src/club.css.
+// notices, the password field and the page header. Class names come from src/club.css.
+import { useId, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { Link, useLocation } from 'react-router-dom';
 import Icon from './Icon.jsx';
 import { STATUS, ACCOUNT_LABEL } from '../../lib/format.js';
@@ -56,6 +58,45 @@ export function Notice({ kind = 'info', icon, children }) {
 
 export function FormError({ error }) {
   return error ? <div className="form-error" role="alert">{error}</div> : null;
+}
+
+// Password field with an eye that shows or hides what was typed; other props go to the <input>.
+// The eye stays outside the <label>, so the field is announced by its label alone. Shown as text, the
+// password is never capitalised nor corrected by the keyboard.
+export function PasswordField({ label, help, ...input }) {
+  const id = useId();
+  const field = useRef(null);
+  const [shown, setShown] = useState(false);
+  // Once the click is over, Chrome sends the caret of a field whose type changed back to the start:
+  // it is put back where it was.
+  const toggle = () => {
+    const el = field.current;
+    const { selectionStart, selectionEnd } = el;
+    flushSync(() => setShown((s) => !s));
+    setTimeout(() => { if (document.activeElement === el) el.setSelectionRange(selectionStart, selectionEnd); });
+  };
+  return (
+    <div className="field">
+      <label className="field-label" htmlFor={id}>{label}</label>
+      <div className="password-input">
+        <input
+          {...input} ref={field} id={id} type={shown ? 'text' : 'password'}
+          autoCapitalize="none" autoCorrect="off" spellCheck={false} aria-describedby={help ? `${id}-help` : undefined}
+        />
+        <button
+          type="button"
+          className="password-eye"
+          aria-label="Afficher le mot de passe"
+          aria-pressed={shown}
+          onMouseDown={(e) => e.preventDefault()} // keeps the focus (and the phone keyboard) in the field
+          onClick={toggle}
+        >
+          <Icon name={shown ? 'eye-off' : 'eye'} />
+        </button>
+      </div>
+      {help && <span className="help" id={`${id}-help`}>{help}</span>}
+    </div>
+  );
 }
 
 export function PageHead({ title, lead, back, actions, tour }) {

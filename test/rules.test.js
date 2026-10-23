@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { supplementAmount, bookingWindow, placeInWindow, validateHours } from '../shared/rules.js';
+import { supplementAmount, bookingWindow, placeInWindow, validateHours, depositFor, isWeekend } from '../shared/rules.js';
 import { localToUtcMs, localParts, addMonths, addDays, monthsElapsed, parseHHMM } from '../shared/time.js';
 
 const TARIFF = { hour: 2500000, half: 1500000 }; // 25 000 / 15 000 in hundredths
@@ -14,22 +14,20 @@ test('grille du temps supplémentaire : heure complète puis demi-heure', () => 
   assert.equal(supplementAmount(150, TARIFF), 6500000);
 });
 
-test('fenêtre horaire : 10:00 – 24:00, prolongation possible jusqu’à 05:00', () => {
-  const win = bookingWindow({ open: '10:00', close: '24:00', max_end: '05:00' });
-  assert.deepEqual(win, { open: 600, close: 1440, maxEnd: 1740 });
+test('pas d’horaires d’ouverture : la journée va de 06:00 à 06:00, la salle se réserve à toute heure', () => {
+  const win = bookingWindow({ open: '06:00' });
+  assert.deepEqual(win, { open: 360, close: 1800, maxEnd: 1800 });
   const tz = 'Africa/Brazzaville';
-  const start = localToUtcMs('2026-10-16', '22:00', tz);
-  const inHours = placeInWindow(start, start + 90 * 60000, tz, win);
-  assert.equal(inHours.inWindow, true);
-  assert.equal(inHours.offHours, false);
-  const pastMidnight = placeInWindow(start, start + 210 * 60000, tz, win);
-  assert.equal(pastMidnight.bizDay, '2026-10-16');
-  assert.equal(pastMidnight.endRel, 1530); // 01:30 the next day
-  assert.equal(pastMidnight.offHours, true);
-  assert.equal(pastMidnight.inWindow, true);
-  const tooLate = placeInWindow(start, start + 8 * 3600000, tz, win);
-  assert.equal(tooLate.inWindow, false);
-  assert.equal(validateHours({ open: '10:00', close: '09:00', max_end: '05:00' }) !== null, true);
+  const evening = localToUtcMs('2026-10-16', '22:00', tz);
+  const night = placeInWindow(evening, evening + 210 * 60000, tz, win);
+  assert.equal(night.bizDay, '2026-10-16');
+  assert.equal(night.endRel, 1530); // 01:30 the next day
+  const dawn = localToUtcMs('2026-10-17', '04:00', tz);
+  assert.equal(placeInWindow(dawn, dawn + 3600000, tz, win).bizDay, '2026-10-16'); // still the night of the 16th
+  const morning = localToUtcMs('2026-10-17', '08:00', tz);
+  assert.equal(placeInWindow(morning, morning + 3600000, tz, win).bizDay, '2026-10-17');
+  assert.equal(validateHours({ open: '06:00' }), null);
+  assert.notEqual(validateHours({ open: '25:00' }), null);
 });
 
 test('fuseau horaire configurable, y compris avec heure d’été', () => {
@@ -49,4 +47,14 @@ test('calendrier : mois, jours, heures', () => {
   assert.equal(monthsElapsed('2026-01-15', '2026-03-14'), 1);
   assert.equal(parseHHMM('24:00'), 1440);
   assert.equal(parseHHMM('24:30'), null);
+});
+
+test('acompte et soirées du vendredi et du samedi', () => {
+  assert.equal(depositFor(240, 5000000), 2500000); // half of the paid time
+  assert.equal(depositFor(240, 0), 0); // all covered by the credit: no deposit
+  assert.equal(depositFor(150, 5000000), 0); // under 3 hours: no deposit
+  assert.equal(isWeekend('2026-10-23', 18 * 60), true); // Friday 18:00
+  assert.equal(isWeekend('2026-10-23', 17 * 60 + 30), false); // Friday 17:30
+  assert.equal(isWeekend('2026-10-24', 1440 + 60), true); // Saturday night, 01:00 on Sunday
+  assert.equal(isWeekend('2026-10-25', 20 * 60), false); // Sunday evening
 });

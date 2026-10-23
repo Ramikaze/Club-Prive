@@ -220,3 +220,47 @@ test('carte de membre : génération du QR code SVG et recherche par URL de QR c
   assert.equal(found.length, 1);
   assert.equal(found[0].id, m.id);
 });
+
+test('migration v9 : le club s’appelle Limen, un nom choisi dans les paramètres est conservé', () => {
+  for (const [stored, expected] of [['Club Privé', 'Limen'], ['Le Cercle', 'Le Cercle']]) {
+    const db = nodeDb(':memory:');
+    try {
+      db.exec('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+      for (const version of MIGRATIONS.slice(0, 8)) for (const sql of version) db.exec(sql);
+      db.run("INSERT INTO meta VALUES ('schema_version', '8')");
+      db.run("INSERT INTO settings (key, value, updated_at) VALUES ('club_name', ?, '2026-01-01T00:00:00Z')", JSON.stringify(stored));
+      migrate(db);
+      assert.equal(JSON.parse(db.get("SELECT value FROM settings WHERE key = 'club_name'").value), expected);
+    } finally { db.close(); }
+  }
+});
+
+test('migration v10 : plus d’horaires d’ouverture, seul le début de journée reste', () => {
+  for (const [open, expected] of [['10:00', '06:00'], ['11:30', '11:30']]) {
+    const db = nodeDb(':memory:');
+    try {
+      db.exec('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+      for (const version of MIGRATIONS.slice(0, 9)) for (const sql of version) db.exec(sql);
+      db.run("INSERT INTO meta VALUES ('schema_version', '9')");
+      db.run("INSERT INTO settings (key, value, updated_at) VALUES ('hours', ?, '2026-01-01T00:00:00Z')", JSON.stringify({ open, close: '24:00', max_end: '05:00' }));
+      db.run("INSERT INTO settings (key, value, updated_at) VALUES ('manager_can_authorize_off_hours', 'true', '2026-01-01T00:00:00Z')");
+      migrate(db);
+      assert.deepEqual(JSON.parse(db.get("SELECT value FROM settings WHERE key = 'hours'").value), { open: expected });
+      assert.equal(db.get("SELECT COUNT(*) AS n FROM settings WHERE key = 'manager_can_authorize_off_hours'").n, 0);
+    } finally { db.close(); }
+  }
+});
+
+test('migration v11 : le minimum du week-end est ajouté aux réglages de réservation déjà enregistrés', () => {
+  for (const [min, expected] of [[60, 120], [150, 150]]) {
+    const db = nodeDb(':memory:');
+    try {
+      db.exec('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+      for (const version of MIGRATIONS.slice(0, 10)) for (const sql of version) db.exec(sql);
+      db.run("INSERT INTO meta VALUES ('schema_version', '10')");
+      db.run("INSERT INTO settings (key, value, updated_at) VALUES ('booking', ?, '2026-01-01T00:00:00Z')", JSON.stringify({ slot_min: 30, min_duration_min: min, extension_step_min: 30 }));
+      migrate(db);
+      assert.equal(JSON.parse(db.get("SELECT value FROM settings WHERE key = 'booking'").value).weekend_min_duration_min, expected);
+    } finally { db.close(); }
+  }
+});

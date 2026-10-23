@@ -67,6 +67,8 @@ Les seuils sont choisis par l’administrateur et sont obligatoires lors de la c
 
 ### Réservations et salles
 
+Le club n’a pas d’horaires d’ouverture : la salle se réserve à toute heure, de jour comme de nuit, sans autorisation particulière. Une séance dure au plus 24 heures. La journée commence à l’heure réglée dans les paramètres (06:00 par défaut) : une séance commencée avant cette heure compte, pour l’agenda et la caisse, dans la journée de la veille. Une réservation dure au moins une heure, deux heures le vendredi et le samedi à partir de 18 h, nuit comprise.
+
 Chaque réservation dispose d’un titulaire et peut accueillir plusieurs membres, avec un engagement de crédit propre à chacun. Les prolongations engagent le crédit disponible des participants ; la clôture le consomme, tandis que l’annulation ou le retrait d’un accompagnant libère son engagement. Les suppléments et consommations restent facturés au titulaire. Un abonnement rattaché à une séance active, même comme accompagnant, ne peut pas être annulé.
 
 L’effectif total, invités compris, respecte la capacité de la salle lors d’une création, d’un ajout de membre ou d’un transfert. Aucun membre ne peut participer à deux réservations qui se chevauchent, quelle que soit la salle. Une séance terminée conserve son effectif et sa salle.
@@ -103,6 +105,21 @@ Pour une installation réelle, ne pas définir `DEMO_ACCOUNTS`. Configurer le se
 npx wrangler secret put SETUP_TOKEN
 ```
 
-Ouvrir l’application et créer le premier compte avec ce code. Valider les tarifs et paramètres, puis désactiver le mode démonstration avant l’utilisation réelle. Le mode démonstration autorise les tarifs non validés ; il ne constitue pas une séparation entre bases de données.
+Ouvrir l’application et créer le premier compte avec ce code. Le même code sert si l’identifiant ou le mot de passe est perdu : sur la page de connexion, « Identifiant ou mot de passe oublié ? » donne un nouvel identifiant et un nouveau mot de passe au compte du premier administrateur et ferme ses sessions ouvertes. Ce code doit donc rester secret. Valider les tarifs et paramètres, puis désactiver le mode démonstration avant l’utilisation réelle. Le mode démonstration autorise les tarifs non validés ; il ne constitue pas une séparation entre bases de données.
 
 L’effacement des données depuis les paramètres inclut caves et relevés. Il conserve les utilisateurs, les paramètres, les formules et les catégories. Cette opération est définitive et ne remplace pas une sauvegarde.
+
+### Version de test
+
+Une seconde installation, séparée du site des clients, sert à essayer chaque changement avant sa mise en ligne. C’est l’environnement `test` de `wrangler.jsonc` : son propre Worker (`club-prive-test`), sa propre base et ses propres comptes. Un bandeau « Version de test » l’identifie à l’écran et dans le titre de l’onglet.
+
+| Site | Adresse | Mise en ligne |
+| --- | --- | --- |
+| Clients | `https://club-prive.ramikaze.workers.dev` | `npm run deploy` |
+| Test | `https://club-prive-test.ramikaze.workers.dev` | `npm run deploy:test` |
+
+Ordre conseillé : `npm test`, puis `npm run deploy:test`, vérification sur le site de test, puis `npm run deploy`. Le secret d’installation du site de test se configure à part :
+
+```sh
+npx wrangler secret put SETUP_TOKEN --env test
+```
