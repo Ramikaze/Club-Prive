@@ -56,7 +56,7 @@ Les prix d'achat viendront plus tard : un champ « prix d'achat » sera ajouté 
 - *En démo, ajouter ou retirer une photo est refusé (403 `MODE_DEMO`, « Les photos se gèrent hors du mode démo. »).
 - *À l'import, un produit qui existe déjà sous le même nom (sans tenir compte des majuscules ni des espaces autour) voit son prix, sa description et sa photo mis à jour. Sinon il est créé.
   - *Le reste ne change pas : référence, stock, catégorie, et un produit retiré de la vente le reste.
-  - *Si le produit existant est d'une autre catégorie, l'import le refuse (409 `CATEGORIE_DIFFERENTE`) sans rien écrire.
+  - *Le produit mis à jour est celui de ce nom dans la catégorie de la fiche. Si ce nom n'existe que dans l'autre catégorie, l'import refuse (409 `CATEGORIE_DIFFERENTE`) sans rien écrire.
 - *La description est un texte court (environ 250 caractères au plus) en français.
 
 ## Comment ça marche (orientation technique)
