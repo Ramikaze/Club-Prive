@@ -395,6 +395,14 @@
   background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%);
 }
 
+/* A session in its last 15 minutes carries the orange alert (EndingSoonNotice): the card takes its orange.
+   The alert already says why the session cannot be extended, so the card's own line is hidden. */
+.room-card.is-occupied:has(.notice-ending) {
+  border-color: var(--ending-line);
+  box-shadow: 0 0 0 1px var(--ending-line), var(--shadow-sm);
+}
+.room-card:has(.notice-ending) .room-extension-reason { display: none; }
+
 .room-card-head {
   display: flex;
   justify-content: space-between;
@@ -527,6 +535,14 @@
   opacity: 0.8;
 }
 
+/* « Trop proche d'une autre réservation » is longer than the button of a room: the chip wraps. */
+.room-pick-btn .chip {
+  max-width: 100%;
+  white-space: normal;
+  line-height: 1.35;
+  border-radius: 12px;
+}
+
 .room-party-box {
   display: flex;
   justify-content: space-between;
@@ -633,7 +649,7 @@
 }
 
 /* ------------------------------------------------------------------ session timer
-   Starts when the member's arrival is recorded; amber in the last ten minutes, red once over. */
+   Starts when the member's arrival is recorded; amber in the last fifteen minutes, red once over. */
 
 .session-timer {
   display: grid; gap: 8px; padding: 12px 14px; border-radius: var(--radius-sm);

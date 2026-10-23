@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
-import { AccountTag, Chip, Empty, FormError, Loaded, PageHead, Segmented } from '../components/ui/ui.jsx';
+import { AccountTag, Chip, Empty, FormError, Loaded, Notice, PageHead, Segmented } from '../components/ui/ui.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import { actionDialog } from '../components/ui/Modal.jsx';
 import SessionTimer, { isRunning } from '../components/ui/SessionTimer.jsx';
@@ -77,7 +77,12 @@ function ReservationDetail({ d, products, reload }) {
     },
   });
 
-  const onExtend = () => openExtendDialog(r, reload);
+  // What the server says about extending this booking. "Prolonger" is offered only when it can be (the reason
+  // is shown instead); a detail sent without the window keeps the button, and the server decides.
+  const extension = d.extension_window;
+  const canExtend = !extension || extension.possible;
+  const onExtend = () => openExtendDialog(r, reload, extension);
+  const extendButton = canExtend ? <button type="button" className="btn" onClick={onExtend}>Prolonger</button> : null;
 
   const forMember = attendees.find((a) => a.member_id === consumer) ?? attendees[0];
 
@@ -114,13 +119,13 @@ function ReservationDetail({ d, products, reload }) {
             {r.status === 'reservee' ? (
               <>
                 <button type="button" className="btn btn-danger" onClick={() => openCancelReservationDialog(d, reload)}>{r.late_cancellation ? 'Absence' : 'Annuler'}</button>
-                <button type="button" className="btn" onClick={onExtend}>Prolonger</button>
+                {extendButton}
                 <button type="button" className="btn btn-primary" onClick={onStart} disabled={start.busy} aria-busy={start.busy}><Icon name="check" /> Arrivée du membre</button>
               </>
             ) : null}
             {r.status === 'en_cours' ? (
               <>
-                <button type="button" className="btn" onClick={onExtend}>Prolonger</button>
+                {extendButton}
                 <button type="button" className="btn btn-primary" onClick={onFinish}>Terminer</button>
               </>
             ) : null}
@@ -128,6 +133,8 @@ function ReservationDetail({ d, products, reload }) {
         )}
         tour="reservation"
       />
+
+      {editableOccupancy && !canExtend && extension.reason && <div style={{ marginBottom: 18 }}><Notice kind="info">{extension.reason}</Notice></div>}
 
       {isRunning(r) && <div className="session-timer-block"><SessionTimer reservation={r} /></div>}
 

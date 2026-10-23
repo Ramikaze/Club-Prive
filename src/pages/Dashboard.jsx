@@ -5,6 +5,7 @@ import { money, fmtDuration, dayLabel } from '../lib/format.js';
 import { useIsAdmin } from '../store/useStore.js';
 import Icon from '../components/ui/Icon.jsx';
 import { TimeInRoom, isRunning } from '../components/ui/SessionTimer.jsx';
+import EndingSoonNotice from '../components/ui/EndingSoonNotice.jsx';
 import { Chip, AccountTag, Empty, Loaded, PageHead, Segmented } from '../components/ui/ui.jsx';
 import {
   openBookingDialog,
@@ -187,6 +188,7 @@ export default function Dashboard() {
                               </>
                             )}
                           </div>
+                          {r && <EndingSoonNotice reservation={r} onExtended={reload} />}
                         </div>
                       );
                     })}

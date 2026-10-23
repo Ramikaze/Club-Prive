@@ -41,7 +41,7 @@ const STEPS = [
   {
     route: '/salles', targets: ['.room-card .session-timer', '.room-card.is-occupied', '.rooms-grid'], icon: 'clock', title: 'Le compteur de séance',
     body: 'Il démarre dès l’arrivée du membre et défile à la seconde : heure d’arrivée, temps passé, temps restant jusqu’à la fin prévue.',
-    features: ['Orange dans les 10 dernières minutes', 'Rouge avec la durée du dépassement', '« Prolonger » depuis la carte de la salle'],
+    features: ['Orange dans les 15 dernières minutes', 'Rouge avec la durée du dépassement', '« Prolonger » depuis la carte de la salle'],
   },
   {
     route: '/salles', targets: ['.room-card .conso', '.room-card.is-occupied', '.rooms-grid'], icon: 'receipt', title: 'Consommations par membre',

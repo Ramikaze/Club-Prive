@@ -4,6 +4,7 @@ import Icon from '../components/ui/Icon.jsx';
 import { Empty, FormError, Loaded, PageHead, Segmented } from '../components/ui/ui.jsx';
 import { Modal, actionDialog, openDialog } from '../components/ui/Modal.jsx';
 import SessionTimer from '../components/ui/SessionTimer.jsx';
+import EndingSoonNotice from '../components/ui/EndingSoonNotice.jsx';
 import ConsumptionBreakdown from '../components/ui/ConsumptionBreakdown.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import { api, newKey } from '../lib/api.js';
@@ -100,6 +101,10 @@ function RoomCard({ room, bizDay, canManage, canDelete, onReload }) {
   }] : []);
   const occupancy = Math.max(r?.party_size ?? 0, attendees.length);
   const atCapacity = occupancy >= room.capacity;
+  // What the server says about extending this session. "Prolonger" is offered only when it can be (the
+  // reason is shown instead); a session sent without the window keeps the button, and the server decides.
+  const extension = r?.extension_window;
+  const canExtend = !extension || extension.possible;
 
   const onDelete = () => actionDialog({
     title: `Supprimer ${room.name}`,
@@ -148,6 +153,7 @@ function RoomCard({ room, bizDay, canManage, canDelete, onReload }) {
         </div>
       ) : occupied ? (
         <div className="room-card-body">
+          <EndingSoonNotice reservation={r} onExtended={onReload} />
           <div className="room-occupant-bar" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 10 }}>
             <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
@@ -229,14 +235,17 @@ function RoomCard({ room, bizDay, canManage, canDelete, onReload }) {
                 <Icon name="check" /> Arrivée
               </button>
             )}
-            <button type="button" className="btn btn-sm" onClick={() => openExtendDialog(r, onReload)}>
-              Prolonger
-            </button>
+            {canExtend && (
+              <button type="button" className="btn btn-sm" onClick={() => openExtendDialog(r, onReload, extension)}>
+                Prolonger
+              </button>
+            )}
             <button type="button" className="btn btn-sm" onClick={() => quickFinishReservation(r, onReload)}>
               Libérer la salle
             </button>
             <Link className="btn btn-sm btn-ghost" to={`/reservations/${r.id}`}>Fiche</Link>
           </div>
+          {!canExtend && extension.reason && <p className="subtle room-extension-reason">{extension.reason}</p>}
         </div>
       ) : (
         <div className="room-card-body">

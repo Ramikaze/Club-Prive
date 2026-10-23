@@ -63,6 +63,20 @@ export function memberRoomEligibility(m) {
 
 const conflictText = (conflicts) => conflicts.map((c) => `${c.member_name} (${c.start_time} – ${c.end_time})`).join(', ');
 
+// « Il faut 30 minutes entre deux réservations », as the server opens its BATTEMENT refusals: « N minutes »
+// under an hour, « 1 h 30 » from an hour on.
+const gapLead = (min) => `Il faut ${min < 60 ? `${min} minute${min > 1 ? 's' : ''}` : fmtDuration(min)} entre deux réservations`;
+
+// The bookings of the room that sit too close to a new one, in the words of the server's refusal. The
+// nearest time that would do is the server's to work out, so it is not repeated here.
+function gapText(q, gapMin) {
+  const startMs = Date.parse(q.start_at);
+  const facts = q.gap_conflicts.map((c) => (c.end_ms <= startMs
+    ? `la séance précédente se termine à ${c.end_time} (${c.member_name})`
+    : `la séance suivante commence à ${c.start_time} (${c.member_name})`));
+  return `${gapLead(gapMin)} : ${facts.join(' ; ')}. Choisissez un autre créneau ou une autre salle disponible ci-dessus.`;
+}
+
 // ---------------------------------------------------------------- new reservation
 
 // The club has no opening hours: any start of the business day can be booked, for any length.
@@ -89,6 +103,9 @@ function QuotePanel({ q, s, now }) {
   }
   if (q.conflicts.length) {
     warnings.push(<Notice key="conflicts" kind="danger">{`${q.room?.name ?? 'Salle'} déjà occupée sur ce créneau : ${conflictText(q.conflicts)}. Choisissez une autre salle disponible ci-dessus.`}</Notice>);
+  }
+  if (q.gap_conflicts.length) {
+    warnings.push(<Notice key="gap" kind="danger">{gapText(q, s.booking.gap_min)}</Notice>);
   }
   if (q.room && q.party_size > q.room.capacity) {
     warnings.push(<Notice key="cap" kind="warn">{`Le nombre de membres (${q.party_size}) dépasse la capacité de ${q.room.name} (${q.room.capacity} pers.).`}</Notice>);
@@ -345,7 +362,7 @@ function BookingDialog({ close, preset, onDone }) {
   const goingIn = startNow && date === bizToday();
 
   const ready = Boolean(member && quote && !quoteError);
-  const canSubmit = ready && !(quote.conflicts.length > 0 || quote.tariff_blocked);
+  const canSubmit = ready && !(quote.conflicts.length > 0 || quote.gap_conflicts.length > 0 || quote.tariff_blocked);
 
   const roomsList = quote?.rooms_availability ?? activeRooms.map((rm) => ({ ...rm, available: true, conflicts: [] }));
   const currentRoom = roomsList.find((rm) => rm.id === Number(roomId)) ?? activeRooms[0];
@@ -413,6 +430,9 @@ function BookingDialog({ close, preset, onDone }) {
             {roomsList.map((rm) => {
               const selected = Number(roomId) === rm.id;
               const free = rm.available !== false;
+              // Refused for the gap alone: no booking overlaps the slot, one of the room sits too close to it.
+              const tooClose = !free && !rm.conflict && Boolean(rm.gap_conflict);
+              const near = rm.conflicts?.[0] ?? rm.gap_conflict;
               return (
                 <button
                   key={rm.id}
@@ -422,10 +442,12 @@ function BookingDialog({ close, preset, onDone }) {
                 >
                   <div className="row" style={{ justifyContent: 'space-between', width: '100%' }}>
                     <strong>{rm.name}</strong>
-                    <span className={`chip ${free ? 'chip-ok' : 'chip-danger'}`}>{free ? 'Disponible' : 'Occupée'}</span>
+                    <span className={`chip ${free ? 'chip-ok' : tooClose ? 'chip-warn' : 'chip-danger'}`}>
+                      {free ? 'Disponible' : tooClose ? 'Trop proche d’une autre réservation' : 'Occupée'}
+                    </span>
                   </div>
                   <div className="subtle" style={{ fontSize: '0.78rem' }}>
-                    Jusqu’à {rm.capacity} membres{!free && rm.conflicts?.[0] ? ` · ${rm.conflicts[0].member_name}` : ''}
+                    Jusqu’à {rm.capacity} membres{!free && near ? ` · ${near.member_name}` : ''}
                   </div>
                 </button>
               );
@@ -704,6 +726,10 @@ function ExtendDialog({ close, r, onDone, options, endRel }) {
   else if (q) {
     const warnings = [];
     if (q.conflicts.length) warnings.push(<Notice key="conflicts" kind="danger">{`Créneau suivant occupé : ${conflictText(q.conflicts)}.`}</Notice>);
+    if (q.gap_conflicts.length) {
+      const next = q.gap_conflicts[0];
+      warnings.push(<Notice key="gap" kind="danger">{`${gapLead(s.booking.gap_min)} : la séance suivante commence à ${next.start_time} (${next.member_name}). Choisissez une durée plus courte.`}</Notice>);
+    }
     if (q.tariff_blocked) warnings.push(<Notice key="tariff" kind="danger">Le tarif de cette réservation n’a pas été validé par un administrateur : prolongation payante impossible.</Notice>);
     box = (
       <>
@@ -722,7 +748,7 @@ function ExtendDialog({ close, r, onDone, options, endRel }) {
     );
   }
 
-  const blocked = Boolean(quoteError) || !q || q.conflicts.length > 0 || q.tariff_blocked;
+  const blocked = Boolean(quoteError) || !q || q.conflicts.length > 0 || q.gap_conflicts.length > 0 || q.tariff_blocked;
 
   return (
     <Modal title="Prolonger la réservation" onClose={close}>
@@ -743,14 +769,22 @@ function ExtendDialog({ close, r, onDone, options, endRel }) {
   );
 }
 
-export function openExtendDialog(r, onDone) {
+// `extensionWindow` is what the server says the session can still be extended by (the `extension_window` of
+// the dashboard and of the booking's detail). The callers that have it pass it in, so the dialog offers
+// nothing the server would refuse; without it every length is offered, and the server decides.
+export function openExtendDialog(r, onDone, extensionWindow) {
+  if (extensionWindow && !extensionWindow.possible) {
+    toast(extensionWindow.reason || 'Prolongation impossible.', 'error');
+    return;
+  }
   const s = useStore.getState().settings;
   const step = s.booking.extension_step_min;
   const end = parts(r.end_ms);
   const endRel = daysBetween(r.biz_day, end.date) * 1440 + end.minutes;
   // No closing time: up to 6 hours more at a time, within the 24 hours a session can last.
+  const longest = Math.min(6 * 60, extensionWindow?.max_minutes ?? Infinity);
   const options = [];
-  for (let d = step; d <= 6 * 60 && r.duration_min + d <= 1440; d += step) options.push(d);
+  for (let d = step; d <= longest && r.duration_min + d <= 1440; d += step) options.push(d);
   if (!options.length) {
     toast('Prolongation impossible : une séance ne peut pas dépasser 24 heures.', 'error');
     return;
