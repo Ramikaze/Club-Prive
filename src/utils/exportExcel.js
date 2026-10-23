@@ -2,6 +2,7 @@
 // (GET /api/export/:kind?format=json: header, rows, amounts in currency units); several tables can
 // go into one workbook, one sheet each. The spreadsheet library is loaded on first use only.
 import { api, qs } from '../lib/api.js';
+import { useStore } from '../store/useStore.js';
 
 const MONEY_FORMAT = '#,##0';
 
@@ -29,12 +30,21 @@ const safeSheetName = (name, used) => {
   return candidate;
 };
 
+// In the demo space a file name starts with DEMO_, so nobody takes the file for the club's own. Every
+// workbook is saved from here: the server already names its own exports that way (such a name is kept
+// as is), and this covers the names the pages choose themselves (closing, treasury, humidor journal).
+// The space is the server's answer (store.demo), the same signal as the demo frame.
+const workbookName = (fileName) => {
+  const name = fileName.endsWith('.xlsx') ? fileName : `${fileName}.xlsx`;
+  return useStore.getState().demo && !name.startsWith('DEMO_') ? `DEMO_${name}` : name;
+};
+
 export async function writeWorkbook(tables, fileName) {
   const XLSX = await import('xlsx');
   const workbook = XLSX.utils.book_new();
   const used = new Set();
   for (const t of tables) XLSX.utils.book_append_sheet(workbook, sheetFor(XLSX, t), safeSheetName(t.sheet, used));
-  XLSX.writeFile(workbook, fileName.endsWith('.xlsx') ? fileName : `${fileName}.xlsx`);
+  XLSX.writeFile(workbook, workbookName(fileName));
 }
 
 // exports: [{ kind, params }] -> one workbook. With a single export the server's file name is used.

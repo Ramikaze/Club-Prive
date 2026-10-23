@@ -7,21 +7,32 @@ import path from 'node:path';
 import { createApi } from '../worker/api.js';
 import { nodeDb } from '../worker/db-node.js';
 import { hashPassword } from '../worker/auth.js';
+import { routeApi } from '../worker/space.js';
 
 export const UM = 100; // amounts are stored in hundredths
 export const ORIGIN = 'http://club.test';
 
 export class Server {
-  constructor(env = {}) {
+  // `demo`: the club runs as the demo space. `lenientTariffs`: see start().
+  constructor(env = {}, { demo = false, lenientTariffs = false } = {}) {
     this.env = env;
+    this.demo = demo;
+    this.lenientTariffs = lenientTariffs;
     this.dir = fs.mkdtempSync(path.join(os.tmpdir(), 'club-test-'));
     this.file = path.join(this.dir, 'test.sqlite');
   }
 
   async start() {
     this.db = nodeDb(this.file);
-    this.api = createApi({ db: this.db, env: this.env });
+    this.api = createApi({ db: this.db, env: this.env, demo: this.demo });
     await this.api.init();
+    // The scenarios run with unvalidated tariffs usable, as in the demo space: the default tariffs
+    // are unvalidated and the real club refuses to charge with them. Tests of the real club's own
+    // rules leave this off.
+    if (this.lenientTariffs) {
+      this.club.demo = true;
+      this.club.cachedSettings = null;
+    }
     // Tests book on dates relative to today, whatever the weekday, so on a fresh database the
     // weekend minimum (2 h on Friday and Saturday from 18:00) starts equal to the weekday one; the
     // weekend test raises it. A restart keeps whatever the test set.
@@ -54,6 +65,27 @@ export class Server {
 
   fetch(url, init) {
     return this.api.handle(new Request(ORIGIN + url, init));
+  }
+}
+
+// The Worker in front of two clubs: every /api/* request goes through routeApi, as worker/index.js
+// does with the two Durable Objects. The calls cross as an RPC does: always as promises, the real club
+// reached through `handle` and `demoContext` only, the demo space through `handleDemo` only, and only
+// data (a copy) going over with the request. A Client works on a Site as it does on a Server.
+export class Site {
+  constructor(real, demo) {
+    this.real = real;
+    this.demo = demo;
+  }
+
+  fetch(url, init) {
+    return routeApi(new Request(ORIGIN + url, init), {
+      real: {
+        handle: (request) => this.real.api.handle(request),
+        demoContext: async (tokenHash) => this.real.api.demoContext(tokenHash),
+      },
+      demo: { handleDemo: (request, context) => this.demo.api.handleDemo(request, structuredClone(context)) },
+    });
   }
 }
 

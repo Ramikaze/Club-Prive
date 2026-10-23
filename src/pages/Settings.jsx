@@ -153,7 +153,7 @@ function ResetDialog({ close, onDone }) {
   return (
     <Modal title="Effacer toutes les données" onClose={close}>
       <form className="form-grid" onSubmit={onSubmit} noValidate>
-        <Notice kind="danger">Opération définitive : les données effacées ne peuvent pas être récupérées. Utilisez-la pour repartir d’un club vide, par exemple après une démonstration.</Notice>
+        <Notice kind="danger">Opération définitive : les données effacées ne peuvent pas être récupérées. Utilisez-la pour repartir d’un club vide.</Notice>
         <dl className="kv">
           <dt>Supprimés</dt>
           <dd>membres, cartes, abonnements, réservations, encaissements, remboursements, produits, stocks, caves et relevés, dépenses, clôtures, historique et soldes d’ouverture.</dd>
@@ -519,45 +519,43 @@ function CategoriesSection({ list, onChange }) {
   );
 }
 
-function DemoSection({ save }) {
-  const s = useSettings();
-  const toggleDemo = () => actionDialog({
-    title: s.demo_mode ? 'Passer en utilisation réelle' : 'Réactiver le mode démonstration',
-    message: s.demo_mode
-      ? 'Les opérations fondées sur un tarif non validé ou un prix non défini seront refusées. Pensez à remplacer les données fictives et à valider les tarifs.'
-      : 'Les tarifs non validés redeviendront utilisables (signalés).',
-    confirmLabel: 'Confirmer',
-    run: () => save({ demo_mode: !s.demo_mode }, 'Mode mis à jour.'),
-  });
+// Real club only (the demo space refuses this route): its data is wiped from here.
+function DataSection({ onReset }) {
   return (
-    <section className="card settings-section" id="sec-demo">
-      <div className="card-head"><h2>Mode démonstration</h2>{s.demo_mode ? <span className="chip chip-bronze">activé</span> : <span className="chip chip-ok">utilisation réelle</span>}</div>
-      <p>En mode démonstration, les tarifs non validés et la formule annuelle sans prix restent utilisables et sont signalés. Hors démonstration, toute opération fondée sur un tarif non validé ou non défini est refusée par le serveur.</p>
-      <div className="row" style={{ marginTop: 12 }}>
-        <button type="button" className={`btn ${s.demo_mode ? 'btn-primary' : ''}`} onClick={toggleDemo}>{s.demo_mode ? 'Passer en utilisation réelle' : 'Réactiver le mode démonstration'}</button>
+    <section className="card settings-section" id="sec-data">
+      <div className="card-head"><h2>Données</h2></div>
+      <div className="stack">
+        <p>Pour repartir d’un club vide, effacez toutes les données : les comptes utilisateurs, les paramètres, les formules et les catégories sont conservés.</p>
+        <div className="row">
+          <button type="button" className="btn btn-danger" onClick={() => openDialog(ResetDialog, { onDone: onReset })}><Icon name="reset" /> Effacer toutes les données</button>
+        </div>
       </div>
     </section>
   );
 }
 
-function DataSection({ applyBundle, onReset }) {
-  const { busy, error, submit } = useSubmit();
-  const loadDemo = () => submit(async () => {
-    const bundle = await api.post('/api/admin/demo', {});
-    applyBundle(bundle);
-    toast('Données de démonstration chargées.');
+// Demo space only, in place of DataSection. The server empties the demo, fills it again with fictitious
+// data from the real club's current settings and answers with the new bundle.
+function DemoResetSection({ applyBundle }) {
+  const reset = () => actionDialog({
+    title: 'Remettre la démo à neuf',
+    danger: true, // it wipes everybody's trials: a red confirm button, like « Effacer toutes les données »
+    message: 'Toutes les données de la démo seront remplacées par des données fictives neuves, avec les réglages actuels du vrai club.',
+    confirmLabel: 'Remettre à neuf',
+    run: async () => {
+      applyBundle(await api.post('/api/demo/reset', {}));
+      toast('La démo est remise à neuf.');
+    },
   });
   return (
-    <section className="card settings-section" id="sec-data">
-      <div className="card-head"><h2>Données</h2></div>
+    <section className="card settings-section" id="sec-demo">
+      <div className="card-head"><h2>Espace démo</h2></div>
       <div className="stack">
-        <p>Les données de démonstration (membres, produits, caves et opérations fictifs) se chargent uniquement sur un club vide, en mode démonstration.
-          {' '}Pour démarrer en utilisation réelle, effacez toutes les données : les comptes utilisateurs, les paramètres, les formules et les catégories sont conservés.</p>
+        <p>La démo est un espace d’entraînement partagé : chacun y retrouve les essais des autres, et rien de ce qui s’y fait ne touche le vrai club.
+          {' '}Pour repartir de zéro, remettez-la à neuf.</p>
         <div className="row">
-          <button type="button" className="btn" onClick={loadDemo} disabled={busy} aria-busy={busy}><Icon name="database" /> Charger les données de démonstration</button>
-          <button type="button" className="btn btn-danger" onClick={() => openDialog(ResetDialog, { onDone: onReset })}><Icon name="reset" /> Effacer toutes les données</button>
+          <button type="button" className="btn btn-primary" onClick={reset}><Icon name="reset" /> Remettre la démo à neuf</button>
         </div>
-        <FormError error={error} />
       </div>
     </section>
   );
@@ -583,6 +581,17 @@ function UsersSection({ users, onChanged }) {
         ))}</tbody>
       </table></div>
       <p className="subtle" style={{ marginTop: 8 }}>Gérant : membres, cartes, réservations, consommations, encaissements et mouvements de stock. Administrateur : en plus, paramètres, tarifs, formules, produits, utilisateurs, sous-comptes et exports. Contrôlé côté serveur.</p>
+    </section>
+  );
+}
+
+// Demo space only, in place of UsersSection: its accounts are the real club's, which the server refuses
+// to touch from here (403 MODE_DEMO), so nothing to list or edit.
+function DemoUsersSection() {
+  return (
+    <section className="card settings-section" id="sec-users">
+      <div className="card-head"><h2>Utilisateurs</h2></div>
+      <p>Les comptes se gèrent hors du mode démo.</p>
     </section>
   );
 }
@@ -616,11 +625,13 @@ function AuditSection({ audit }) {
 
 function SettingsPage() {
   const setBundle = useStore((st) => st.setBundle);
+  const demo = useStore((st) => st.demo);
   const [searchParams, setSearchParams] = useSearchParams();
   const qTab = searchParams.get('onglet');
   const tab = SETTINGS_TABS.some(([k]) => k === qTab) ? qTab : 'club';
+  // The demo space refuses the account routes (403): there the users are not loaded (nothing to await).
   const state = useLoad(() => Promise.all([
-    api.get('/api/users'), api.get('/api/audit?limit=150'), api.get('/api/ledger/categories'),
+    demo ? null : api.get('/api/users'), api.get('/api/audit?limit=150'), api.get('/api/ledger/categories'),
   ]), []);
   const [version, setVersion] = useState(0);
   const [categories, setCategories] = useState(null);
@@ -684,9 +695,10 @@ function SettingsPage() {
 
         {tab === 'systeme' && (
           <>
-            <UsersSection users={users} onChanged={() => state.reload()} />
-            <DemoSection save={save} />
-            <DataSection applyBundle={(bundle) => { setCategories(null); applyBundle(bundle); }} onReset={onReset} />
+            {demo ? <DemoUsersSection /> : <UsersSection users={users} onChanged={() => state.reload()} />}
+            {demo
+              ? <DemoResetSection applyBundle={(bundle) => { setCategories(null); applyBundle(bundle); }} />
+              : <DataSection onReset={onReset} />}
             <AuditSection audit={audit} />
           </>
         )}

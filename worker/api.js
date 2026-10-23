@@ -3,11 +3,15 @@
 // (worker/index.js) and, unchanged, in the Node tests.
 // Each route may have an async `prepare` step (password hashing, token hashing) that runs first;
 // the handler itself is synchronous and, for writes, runs in one transaction with the idempotency record.
+// The same API also serves the demo space (`demo: true`, a second Durable Object with its own database).
+// That instance opens no session: the real club vouches for the signed-in account (demoContext) and the
+// demo space serves the request as that account (handleDemo).
 import { Club } from './club.js';
 import { migrate } from './schema.js';
-import { seedDemo, DEMO_ACCOUNTS } from './seed.js';
-import { AppError, forbidden, invalid, conflict } from './errors.js';
-import { hashPassword, verifyPassword, sha256Hex, newToken, checkPasswordStrength } from './auth.js';
+import { DEMO_ACCOUNTS } from './seed.js';
+import { AppError, forbidden, invalid, conflict, notSignedIn } from './errors.js';
+import { hashPassword, verifyPassword, sha256Hex, newToken, checkPasswordStrength, parseCookies } from './auth.js';
+import { ALWAYS_REAL } from './space.js';
 
 const MAX_BODY = 256 * 1024;
 const SECURITY_HEADERS = {
@@ -16,17 +20,6 @@ const SECURITY_HEADERS = {
   'X-Frame-Options': 'DENY',
   'Cache-Control': 'no-store',
 };
-
-function parseCookies(header) {
-  const out = {};
-  for (const part of String(header ?? '').split(';')) {
-    const i = part.indexOf('=');
-    if (i > 0) {
-      try { out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim()); } catch { /* malformed cookie */ }
-    }
-  }
-  return out;
-}
 
 function json(status, payload, { cookies = [], replayed = false } = {}) {
   const headers = new Headers({ ...SECURITY_HEADERS, 'Content-Type': 'application/json; charset=utf-8' });
@@ -64,9 +57,12 @@ async function readJson(request) {
   }
 }
 
-export function createApi({ db, env = {} }) {
+// `demo`: this API is the demo space's. Everything that differs there (accounts refused, exported file
+// names, the reset route, the two entry points below) follows this option, never `club.demo`, which
+// the tests also set on a real club to relax the tariffs.
+export function createApi({ db, env = {}, demo = false }) {
   migrate(db);
-  const club = new Club(db, { instanceLabel: env.INSTANCE_LABEL || null });
+  const club = new Club(db, { demo });
   club.bootstrap();
 
   const allowedOrigins = String(env.ALLOWED_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -109,6 +105,11 @@ export function createApi({ db, env = {} }) {
   };
   const ADMIN = { roles: ['admin'] };
   const READONLY = { readonly: true };
+  // Routes refused in the demo space: they manage accounts, which are mirrored from the real club there,
+  // or wipe the data (the demo has its own reset, POST /api/demo/reset).
+  const ACCOUNTS = { accounts: true };
+  // Exported files are named DEMO_... in the demo space, so nobody takes them for the club's own.
+  const exportName = (filename) => (demo ? `DEMO_${filename}` : filename);
 
   // Session
   add('POST', '/api/login', {
@@ -135,6 +136,7 @@ export function createApi({ db, env = {} }) {
   });
   add('GET', '/api/me', {}, (ctx) => club.bundle(ctx.user));
   add('POST', '/api/me/password', {
+    ...ACCOUNTS,
     prepare: async (ctx) => {
       const u = club.userRow(ctx.user.id);
       if (!(await verifyPassword(String(ctx.body.current_password ?? ''), u.password_hash))) throw invalid('Mot de passe actuel incorrect.');
@@ -155,9 +157,7 @@ export function createApi({ db, env = {} }) {
       throw new AppError(403, 'CODE_INCORRECT', "Code d'installation incorrect.");
     }
   };
-  add('GET', '/api/setup', { public: true }, () => ({
-    needed: !club.hasUsers(), token_configured: !!env.SETUP_TOKEN, instance_label: club.instanceLabel,
-  }));
+  add('GET', '/api/setup', { public: true }, () => ({ needed: !club.hasUsers(), token_configured: !!env.SETUP_TOKEN }));
   add('POST', '/api/setup', {
     public: true,
     prepare: async (ctx) => {
@@ -190,18 +190,22 @@ export function createApi({ db, env = {} }) {
     club.updatePlan(ctx.user, ctx.params.id, ctx.body);
     return club.bundle(ctx.user);
   });
-  add('GET', '/api/users', ADMIN, () => club.listUsers());
-  add('POST', '/api/users', { ...ADMIN, prepare: (ctx) => preparePassword(ctx, 'password') },
+  add('GET', '/api/users', { ...ADMIN, ...ACCOUNTS }, () => club.listUsers());
+  add('POST', '/api/users', { ...ADMIN, ...ACCOUNTS, prepare: (ctx) => preparePassword(ctx, 'password') },
     (ctx) => club.createUser(ctx.user, { ...ctx.body, password_hash: ctx.passwordHash }));
-  add('PUT', '/api/users/:id', ADMIN, (ctx) => club.updateUser(ctx.user, ctx.params.id, ctx.body));
-  add('POST', '/api/users/:id/password', { ...ADMIN, prepare: (ctx) => preparePassword(ctx, 'password') },
+  add('PUT', '/api/users/:id', { ...ADMIN, ...ACCOUNTS }, (ctx) => club.updateUser(ctx.user, ctx.params.id, ctx.body));
+  add('POST', '/api/users/:id/password', { ...ADMIN, ...ACCOUNTS, prepare: (ctx) => preparePassword(ctx, 'password') },
     (ctx) => club.setUserPassword(ctx.user, ctx.params.id, ctx.passwordHash));
   add('GET', '/api/audit', ADMIN, (ctx) => club.auditLog(ctx.query));
-  add('POST', '/api/admin/demo', ADMIN, (ctx) => {
-    seedDemo(club, { actor: ctx.user });
-    return club.bundle(ctx.user);
-  });
-  add('POST', '/api/admin/reset', ADMIN, (ctx) => club.wipeData(ctx.user, ctx.body.confirm));
+  add('POST', '/api/admin/reset', { ...ADMIN, ...ACCOUNTS }, (ctx) => club.wipeData(ctx.user, ctx.body.confirm));
+  // Demo space only (the real club answers 404): empties the space and fills it again from the real
+  // club's configuration, which handleDemo hands over with the request.
+  if (demo) {
+    add('POST', '/api/demo/reset', ADMIN, (ctx) => {
+      club.resetDemo(ctx.demoConfig, ctx.user);
+      return club.bundle(ctx.user);
+    });
+  }
 
   // Overview
   add('GET', '/api/dashboard', {}, (ctx) => club.dashboard(ctx.user));
@@ -265,9 +269,13 @@ export function createApi({ db, env = {} }) {
     return club.journal(ctx.query.from, ctx.query.to ?? ctx.query.from);
   });
   add('GET', '/api/finance/open', {}, () => club.openCharges());
-  add('GET', '/api/export/:kind', ADMIN, (ctx) => (ctx.query.format === 'json'
-    ? club.exportJson(ctx.params.kind, ctx.query)
-    : { __file: club.exportCsv(ctx.params.kind, ctx.query) }));
+  // The Excel export is built in the browser from this JSON, which names the file; the CSV is a download
+  // answered by `respond`. In the demo space both get the DEMO_ prefix.
+  add('GET', '/api/export/:kind', ADMIN, (ctx) => {
+    if (ctx.query.format !== 'json') return { __file: club.exportCsv(ctx.params.kind, ctx.query) };
+    const sheet = club.exportJson(ctx.params.kind, ctx.query);
+    return { ...sheet, filename: exportName(sheet.filename) };
+  });
 
   // Expenses, treasury, general ledger, monthly closing
   add('GET', '/api/ledger/categories', {}, () => club.listCategories());
@@ -325,7 +333,10 @@ export function createApi({ db, env = {} }) {
     if (origin && origin !== url.origin && !allowedOrigins.includes(origin)) throw forbidden('Requête refusée : origine inconnue.');
   }
 
-  async function handle(request) {
+  // `user` (the signed-in account's row) and `demoConfig` come from handleDemo alone, never from the
+  // network: the demo space reads no cookie and looks up no session, it serves the request as `user`.
+  async function handle(request, { user = null, demoConfig = null } = {}) {
+    if ((user || demoConfig) && !demo) throw new Error('handle: only the demo space is given an identity.');
     const url = new URL(request.url);
     const cookies = [];
     const secure = url.protocol === 'https:';
@@ -333,22 +344,26 @@ export function createApi({ db, env = {} }) {
       `sid=${encodeURIComponent(value)}`, 'Path=/', 'HttpOnly', 'SameSite=Lax', `Max-Age=${maxAge}`, secure ? 'Secure' : null,
     ].filter(Boolean).join('; ');
     try {
-      const found = match(request.method, url.pathname);
+      // Sign-in, sign-out and installation belong to the real club, where sessions live: with an identity
+      // handed over, the demo space does not know them. The Worker's router keeps them away already.
+      const found = user && ALWAYS_REAL.test(url.pathname) ? null : match(request.method, url.pathname);
       if (!found) throw new AppError(404, 'INTROUVABLE', 'Ressource inconnue.');
       const { route, params } = found;
       const writes = request.method !== 'GET';
       if (writes) checkCsrf(request, url);
       const body = writes ? await readJson(request) : {};
-      const token = parseCookies(request.headers.get('cookie')).sid || null;
+      const token = user ? null : (parseCookies(request.headers.get('cookie')).sid || null);
       const ctx = {
-        params, body, token, tokenHash: token ? await sha256Hex(token) : null, user: null,
+        params, body, token, tokenHash: token ? await sha256Hex(token) : null, user: null, demoConfig,
         ip: request.headers.get('cf-connecting-ip') ?? 'local',
         query: Object.fromEntries(url.searchParams),
         setCookie: (value, maxAge) => cookies.push(cookieHeader(value, maxAge)),
       };
       if (!route.opts.public) {
-        ctx.user = club.sessionUser(ctx.tokenHash);
-        if (!ctx.user) throw new AppError(401, 'NON_CONNECTE', 'Session expirée : veuillez vous reconnecter.');
+        ctx.user = user ?? club.sessionUser(ctx.tokenHash);
+        // A session's account is active by construction; the one handleDemo hands over may have been deactivated.
+        if (!ctx.user?.active) throw notSignedIn();
+        if (demo && route.opts.accounts) throw new AppError(403, 'MODE_DEMO', 'Les comptes se gèrent hors du mode démo.');
         if (route.opts.roles && !route.opts.roles.includes(ctx.user.role)) throw forbidden();
       }
 
@@ -404,20 +419,50 @@ export function createApi({ db, env = {} }) {
         headers: {
           ...SECURITY_HEADERS,
           'Content-Type': 'text/csv; charset=utf-8',
-          'Content-Disposition': `attachment; filename="${filename.replace(/[^\w.-]/g, '_')}"`,
+          'Content-Disposition': `attachment; filename="${exportName(filename).replace(/[^\w.-]/g, '_')}"`,
         },
       });
     }
     return json(200, payload, { cookies, replayed });
   }
 
-  // Local development only: a fresh database gets the demonstration with its known accounts.
+  // Local development only: a fresh database gets the accounts with known passwords, and no data.
+  // Never in the demo space: its accounts are mirrored from the real club (Club.mirrorUsers).
   async function init() {
-    if (env.DEMO_ACCOUNTS !== '1' || club.hasUsers()) return;
+    if (demo || env.DEMO_ACCOUNTS !== '1' || club.hasUsers()) return;
     const accounts = [];
     for (const a of DEMO_ACCOUNTS) accounts.push({ ...a, password_hash: await hashPassword(a.password) });
-    if (!club.hasUsers()) seedDemo(club, { accounts });
+    if (!club.hasUsers()) club.tx(() => accounts.forEach((a) => club.createUser(null, a)));
   }
 
-  return { club, handle, init };
+  // Real club. Step one of a request made in the demo space: the session (hash of the `sid` cookie) is
+  // checked here, where sessions live. Gives null without a valid session, else the account's identity
+  // and the configuration the demo space copies. Wrong space is a programming error, not a response.
+  function demoContext(tokenHash) {
+    if (demo) throw new Error('demoContext: only the real club vouches for a session.');
+    const account = club.sessionUser(tokenHash);
+    if (!account) return null;
+    return { user: { id: account.id, name: account.name, role: account.role }, config: club.demoConfig() };
+  }
+
+  // Demo space. Step two: prepares the space (once it is filled, only the accounts are mirrored again),
+  // then serves the request as the account the real club vouched for. Only the account's id is taken
+  // from `user`: its role and status are those of the mirrored row, so they follow the real club on
+  // every request. Without an account (the id of a real one is never 0), nothing is prepared and the
+  // answer is the usual 401. A preparation that fails answers like any other error, with a response.
+  async function handleDemo(request, context) {
+    if (!demo) throw new Error('handleDemo: only the demo space serves demo requests.');
+    const { user, config } = context ?? {};
+    if (!user?.id) return errorResponse(notSignedIn());
+    let account;
+    try {
+      club.prepareDemo(config);
+      account = club.userRow(user.id);
+    } catch (err) {
+      return errorResponse(err);
+    }
+    return handle(request, { user: account, demoConfig: config });
+  }
+
+  return { club, handle, init, demoContext, handleDemo };
 }

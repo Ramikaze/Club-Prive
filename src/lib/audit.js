@@ -50,6 +50,7 @@ export const ACTION_LABELS = {
   'periode.cloturer': 'Mois clôturé',
   'periode.rouvrir': 'Mois rouvert',
   'donnees.effacer': 'Données effacées',
+  'demo.remettre_a_neuf': 'Démo remise à neuf',
 };
 
 const ENTRY_KIND = { depense: 'Dépense', recette: 'Entrée diverse', transfert: 'Transfert' };

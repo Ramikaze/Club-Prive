@@ -140,6 +140,7 @@ function AdminCash() {
   const account = ['reservations', 'alcool', 'cigares'].includes(query.compte) ? query.compte : '';
   const setQuery = (q) => setSearchParams(Object.fromEntries(Object.entries(q).filter(([, v]) => v !== undefined && v !== null && v !== '')));
   const excel = useBusy();
+  const csv = useBusy();
 
   const state = useLoad(() => Promise.all([
     api.get(`/api/finance/summary${qs({ from, to })}`),
@@ -154,7 +155,9 @@ function AdminCash() {
   };
   const exportLink = (kind, label) => (
     <span key={kind} className="row">
-      <a className="btn btn-sm" href={`/api/export/${kind}${qs({ from, to, account })}`} download><Icon name="download" /> {label}</a>
+      <button type="button" className="btn btn-sm" disabled={csv.busy} aria-busy={csv.busy}
+        onClick={() => csv.run(() => api.download(`/api/export/${kind}${qs({ from, to, account })}`))}>
+        <Icon name="download" /> {label}</button>
       <button type="button" className="btn btn-sm" title={`${label} (Excel)`} disabled={excel.busy} aria-busy={excel.busy}
         onClick={() => excel.run(() => downloadExcel([{ kind, params: { from, to, account } }]))}>
         <Icon name="excel" /> Excel<span className="sr-only"> : {label}</span></button>

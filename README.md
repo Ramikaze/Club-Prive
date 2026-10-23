@@ -11,7 +11,7 @@ Prérequis : **Node.js 24 ou supérieur**, npm. Les tests utilisent `node:sqlite
 npm ci
 ```
 
-Pour une **base locale de démonstration**, créer un fichier `.dev.vars` (ignoré par Git) :
+Pour travailler en local avec des **comptes fictifs**, créer un fichier `.dev.vars` (ignoré par Git) :
 
 ```dotenv
 DEMO_ACCOUNTS=1
@@ -26,14 +26,14 @@ Ouvrir `http://localhost:8787`. Sur macOS, `start.command` lance également l’
 
 Comptes **fictifs, réservés au développement local** :
 
-| Identifiant | Mot de passe de démonstration | Rôle |
+| Identifiant | Mot de passe fictif | Rôle |
 | --- | --- | --- |
 | proprietaire | demo-proprio-2026 | Administrateur |
 | associe | demo-associe-2026 | Administrateur |
 | gerant | demo-gerant-2026 | Gérant |
 | admin | admin-club-2026 | Administrateur (accès rapide en local) |
 
-`DEMO_ACCOUNTS=1` ne crée ces comptes et les exemples que dans une base sans utilisateurs. Une base existante reste inchangée.
+`DEMO_ACCOUNTS=1` ne crée que ces comptes, et seulement dans une base sans utilisateurs : le club reste vide. Une base existante reste inchangée. Pour s’exercer sur des données fictives, se connecter puis ouvrir le mode démo (voir « Mode démo (entraînement) »).
 
 Pour développer avec rechargement immédiat, lancer dans deux terminaux :
 
@@ -52,6 +52,7 @@ Ouvrir ensuite `http://localhost:5173`. Les appels `/api` sont transmis au serve
 - **Cave** : plusieurs caves, seuils d’humidité et de température propres à chaque cave, fréquence des contrôles, relevés manuels horodatés, graphiques et journal exportable.
 - **Produits et caisse** : cigares et bouteilles, entrées de stock, ventes liées aux réservations, encaissements, remboursements et ventilation par activité.
 - **Administration** : dépenses, trésorerie, grand livre, clôtures mensuelles, rôles, journal d’audit, paramètres et exports Excel.
+- **Mode démo** : un espace d’entraînement aux données fictives, séparé du vrai club.
 
 ### Fonctionnement de la cave
 
@@ -77,14 +78,28 @@ La configuration des salles est réservée aux administrateurs. Fermer une salle
 
 Le QR code d’une carte ouvre la fiche du membre après authentification du personnel. L’URL complète ou le code de carte peut aussi être saisi dans la recherche des membres. Le QR code ne constitue pas une connexion ni une autorisation d’accès autonome.
 
+### Mode démo (entraînement)
+
+Le mode démo est un espace d’entraînement intégré au site : on y apprend l’application, ou on essaie une manipulation, sans risque pour le vrai club. Il a sa **propre base de données**, remplie de données entièrement fictives (membres « Client Test », produits, réservations, encaissements, relevés de cave). Il reprend les réglages du club : prix, formules, salles, moyens de paiement et catégories.
+
+- **Qui** : le gérant et les administrateurs, avec leur propre compte. Aucun compte à mot de passe connu n’existe en ligne.
+- **Entrer** : une fois connecté, cliquer sur le chapeau de diplômé orange « Mode démo (entraînement) », en bas du menu latéral ; sur téléphone, il se trouve dans le menu en haut à droite. La démo se crée et se remplit toute seule à la première entrée, et la visite guidée se propose à la première entrée dans un navigateur.
+- **Reconnaître la démo** : un cadre orange entoure l’écran, le mot « DÉMO » apparaît en filigrane, un bandeau rayé « MODE DÉMO » reste en haut de chaque page et le titre de l’onglet commence par « [DÉMO] ». Les fichiers exportés en démo commencent par `DEMO_`.
+- **Quitter** : le bouton « Quitter » du bandeau, ou « Quitter la démo » à la place du bouton d’entrée. Une page rechargée reste en démo ; se déconnecter ramène toujours au vrai site à la connexion suivante.
+- **Rien de réel n’est touché** : ce qui se fait en démo (réservations, encaissements, réglages, exports) reste dans la démo, et rien de ce qui se fait dans le vrai club n’y apparaît. Du vrai club, la démo ne copie que les réglages, ainsi que le nom et le rôle des comptes. Le vrai site n’est jamais en mode démo : un tarif non validé y est refusé, alors que la démo l’accepte.
+- **Comptes** : la gestion des comptes (créer ou modifier un compte, changer un mot de passe) se fait hors du mode démo ; Paramètres le rappelle : « Les comptes se gèrent hors du mode démo. » L’effacement complet des données n’existe pas non plus en démo, qui a sa propre remise à neuf.
+- **Remettre la démo à neuf** (administrateurs) : dans Paramètres, onglet « Équipe & Système », carte « Espace démo ». Après confirmation, la démo est vidée puis remplie de nouveau de données fictives, avec les réglages actuels du vrai club. Il n’y a qu’une démo, la même pour tous : chacun y retrouve les essais des autres, jusqu’à la prochaine remise à neuf. C’est aussi le seul moment où un changement de réglage du vrai club passe dans la démo.
+
 ## Architecture et validation
 
-React 18 + Vite, React Router et Zustand pour l’interface. L’API tourne dans un **Cloudflare Worker**, avec SQLite dans un **Durable Object**. La même logique métier s’exécute dans les tests Node.
+React 18 + Vite, React Router et Zustand pour l’interface. L’API tourne dans un **Cloudflare Worker**, avec SQLite dans un **Durable Object** ; un second Durable Object, avec sa propre base, porte le mode démo. La même logique métier s’exécute dans les tests Node.
 
 - `worker/schema.js` : migrations transactionnelles et contraintes SQL. La v2 ajoute caves et relevés ; la v3 supprime les anciennes tables de casiers ; la v4 ajoute salles et participants ; la v5 conserve les salles retirées pour l’historique et met à niveau les premières bases v4 sans table de participants.
 - `worker/api.js` : authentification, contrôle des rôles, vérification des origines et idempotence.
 - `worker/club.js`, `worker/ledger.js`, `worker/lounge.js` : règles métier côté serveur.
-- `test/` : scénarios API, montants, crédits, concurrence, rôles, conservation, migration et redémarrage.
+- `worker/space.js` : aiguille chaque requête vers le vrai club ou vers la démo (en-tête `X-Club-Espace`). La session reste celle du vrai club, qui garantit à la démo l’identité de la personne connectée ; la démo n’ouvre jamais de session.
+- `worker/seed.js` : données fictives de la démo et comptes du développement local.
+- `test/` : scénarios API, montants, crédits, concurrence, rôles, conservation, migration, redémarrage et isolation de la démo.
 
 ```sh
 npm test
@@ -97,7 +112,7 @@ Le workflow GitHub vérifie les tests et la compilation. Il ne déploie pas le s
 
 ## Installation sur Cloudflare
 
-Le déploiement se fait explicitement avec `npm run deploy` après configuration de l’accès Cloudflare. Le fichier `wrangler.jsonc` configure les ressources et la distribution de `dist/`.
+La mise en ligne se fait explicitement, après configuration de l’accès Cloudflare : `npm test`, puis `npm run deploy`. Il n’y a qu’un seul site, celui des clients (`https://club-prive.ramikaze.workers.dev`) ; pour s’exercer ou essayer une manipulation, on utilise le mode démo, intégré à ce site. Le fichier `wrangler.jsonc` configure les ressources (les Durable Objects du club et de la démo) et la distribution de `dist/`.
 
 Pour une installation réelle, ne pas définir `DEMO_ACCOUNTS`. Configurer le secret d’installation avant de créer le premier administrateur :
 
@@ -105,21 +120,6 @@ Pour une installation réelle, ne pas définir `DEMO_ACCOUNTS`. Configurer le se
 npx wrangler secret put SETUP_TOKEN
 ```
 
-Ouvrir l’application et créer le premier compte avec ce code. Le même code sert si l’identifiant ou le mot de passe est perdu : sur la page de connexion, « Identifiant ou mot de passe oublié ? » donne un nouvel identifiant et un nouveau mot de passe au compte du premier administrateur et ferme ses sessions ouvertes. Ce code doit donc rester secret. Valider les tarifs et paramètres, puis désactiver le mode démonstration avant l’utilisation réelle. Le mode démonstration autorise les tarifs non validés ; il ne constitue pas une séparation entre bases de données.
+Ouvrir l’application et créer le premier compte avec ce code. Le même code sert si l’identifiant ou le mot de passe est perdu : sur la page de connexion, « Identifiant ou mot de passe oublié ? » donne un nouvel identifiant et un nouveau mot de passe au compte du premier administrateur et ferme ses sessions ouvertes. Ce code doit donc rester secret. Valider ensuite les tarifs et les paramètres avant l’utilisation réelle : sur le vrai site, une vente fondée sur un tarif non validé ou sur un prix non défini est refusée par le serveur. Seul le mode démo, qui a sa propre base, les accepte.
 
-L’effacement des données depuis les paramètres inclut caves et relevés. Il conserve les utilisateurs, les paramètres, les formules et les catégories. Cette opération est définitive et ne remplace pas une sauvegarde.
-
-### Version de test
-
-Une seconde installation, séparée du site des clients, sert à essayer chaque changement avant sa mise en ligne. C’est l’environnement `test` de `wrangler.jsonc` : son propre Worker (`club-prive-test`), sa propre base et ses propres comptes. Un bandeau « Version de test » l’identifie à l’écran et dans le titre de l’onglet.
-
-| Site | Adresse | Mise en ligne |
-| --- | --- | --- |
-| Clients | `https://club-prive.ramikaze.workers.dev` | `npm run deploy` |
-| Test | `https://club-prive-test.ramikaze.workers.dev` | `npm run deploy:test` |
-
-Ordre conseillé : `npm test`, puis `npm run deploy:test`, vérification sur le site de test, puis `npm run deploy`. Le secret d’installation du site de test se configure à part :
-
-```sh
-npx wrangler secret put SETUP_TOKEN --env test
-```
+L’effacement des données depuis les paramètres inclut caves et relevés. Il conserve les utilisateurs, les paramètres, les formules et les catégories. Cette opération est définitive et ne remplace pas une sauvegarde. Elle ne concerne que le vrai club : l’espace démo a sa propre remise à neuf.

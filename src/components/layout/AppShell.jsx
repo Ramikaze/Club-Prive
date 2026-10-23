@@ -1,15 +1,16 @@
-// Application shell: side navigation (desktop), top bar and tab bar (phone), demonstration banner,
-// account menu, password change and the guided tour.
+// Application shell: side navigation (desktop), top bar and tab bar (phone), the signal of the demo
+// space (frame, watermark, banner) and its entry, account menu, password change and the guided tour.
 import { useEffect, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Icon from '../ui/Icon.jsx';
 import { Modal, openDialog, closeAllDialogs } from '../ui/Modal.jsx';
 import { FormError, PasswordField } from '../ui/ui.jsx';
 import { toast } from '../ui/toast.jsx';
-import GuidedTour, { TOUR_DONE_KEY } from '../ui/GuidedTour.jsx';
+import GuidedTour, { TOUR_DEMO_DONE_KEY } from '../ui/GuidedTour.jsx';
 import { api } from '../../lib/api.js';
 import { useSubmit } from '../../lib/hooks.js';
 import { toggleTheme } from '../../lib/theme.js';
+import { enterDemo, leaveDemo } from '../../lib/space.js';
 import { ROLE_LABEL } from '../../lib/format.js';
 import { useStore } from '../../store/useStore.js';
 
@@ -71,21 +72,29 @@ const openPasswordDialog = () => openDialog(PasswordDialog);
 // On phones: the rubrics that are not in the tab bar, then the account actions.
 function AccountMenu({ close, onTour }) {
   const me = useStore((s) => s.me);
+  // In the demo space the account is mirrored from the real club (its login there is just u<id>) and
+  // its password cannot be changed: neither is shown.
+  const demo = useStore((s) => s.demo);
   const navigate = useNavigate();
   const isAdmin = me.role === 'admin';
   const go = (path) => {
     close();
     navigate(path);
   };
+  const switchSpace = demo ? leaveDemo : enterDemo;
   return (
     <Modal title={me.name} onClose={close}>
       <div className="menu-list">
-        <p className="muted">{ROLE_LABEL[me.role]} · identifiant {me.login}</p>
+        <p className="muted">{ROLE_LABEL[me.role]}{!demo && ` · identifiant ${me.login}`}</p>
         {NAV.filter((n) => n.path && !n.tab && (!n.admin || isAdmin)).map((n) => (
           <button key={n.path} type="button" className="btn btn-block" onClick={() => go(n.path)}><Icon name={n.icon} /> {n.label}</button>
         ))}
         <hr />
-        <button type="button" className="btn btn-block" onClick={() => { close(); openPasswordDialog(); }}><Icon name="key" /> Changer mon mot de passe</button>
+        <button type="button" className="btn btn-block btn-demo" onClick={() => { close(); switchSpace(); }}>
+          <Icon name="demo" /> {demo ? 'Quitter la démo' : 'Mode démo (entraînement)'}</button>
+        {!demo && (
+          <button type="button" className="btn btn-block" onClick={() => { close(); openPasswordDialog(); }}><Icon name="key" /> Changer mon mot de passe</button>
+        )}
         <button type="button" className="btn btn-block" onClick={toggleTheme}><Icon name="moon" /> Thème clair / sombre</button>
         <button type="button" className="btn btn-block" onClick={() => { close(); onTour(); }}><Icon name="tour" /> Visite guidée</button>
         <button type="button" className="btn btn-block btn-danger" onClick={() => { close(); logout(); }}><Icon name="logout" /> Se déconnecter</button>
@@ -97,7 +106,9 @@ function AccountMenu({ close, onTour }) {
 export default function AppShell() {
   const me = useStore((s) => s.me);
   const settings = useStore((s) => s.settings);
-  const instanceLabel = useStore((s) => s.instanceLabel);
+  // Every signal of the demo space hangs on the server's answer (bundle.demo), never on the space stored
+  // in the browser: the frame must never show over the real club's data.
+  const demo = useStore((s) => s.demo);
   const entering = useStore((s) => s.entering);
   useEffect(() => {
     if (!entering) return undefined;
@@ -115,21 +126,22 @@ export default function AppShell() {
     document.getElementById('main')?.focus({ preventScroll: true });
   }, [pathname]);
 
-  // The tour opens by itself once per browser while the club is in demonstration mode.
+  // The tour opens by itself once per browser, in the demo space: the first entry, whatever the browser
+  // did with the tour on the real site (the demo has its own key).
   useEffect(() => {
-    if (!settings.demo_mode) return undefined;
+    if (!demo) return undefined;
     let done = false;
-    try { done = localStorage.getItem(TOUR_DONE_KEY) === '1'; } catch { /* storage unavailable */ }
+    try { done = localStorage.getItem(TOUR_DEMO_DONE_KEY) === '1'; } catch { /* storage unavailable */ }
     if (done) return undefined;
     const timer = setTimeout(() => setTour(true), 700);
     return () => clearTimeout(timer);
-  }, [settings.demo_mode]);
+  }, [demo]);
 
   const startTour = () => setTour(true);
   const aria = (path) => (path === current ? 'page' : undefined);
 
   return (
-    <div className={`shell${entering ? ' is-entering' : ''}`}>
+    <div className={`shell${entering ? ' is-entering' : ''}${demo ? ' is-demo' : ''}`}>
       <aside className="sidebar" aria-label="Navigation principale">
         <div className="brand">
           <div><div className="brand-name">{settings.club_name}</div><div className="brand-sub">Club privé</div></div>
@@ -143,8 +155,16 @@ export default function AppShell() {
           <div><div className="who">{me.name}</div><div className="role">{ROLE_LABEL[me.role]}</div></div>
           <button type="button" className="btn btn-sm btn-block" onClick={startTour}><Icon name="tour" /> Visite guidée</button>
           <div className="row">
-            <button type="button" className="btn btn-sm" onClick={openPasswordDialog} title="Changer mon mot de passe">
-              <Icon name="key" /><span className="sr-only">Mot de passe</span></button>
+            {demo ? (
+              <button type="button" className="btn btn-sm btn-block btn-demo" onClick={leaveDemo}><Icon name="demo" /> Quitter la démo</button>
+            ) : (
+              <button type="button" className="btn btn-sm btn-demo" onClick={enterDemo} title="Mode démo (entraînement)">
+                <Icon name="demo" /><span className="sr-only">Mode démo</span></button>
+            )}
+            {!demo && (
+              <button type="button" className="btn btn-sm" onClick={openPasswordDialog} title="Changer mon mot de passe">
+                <Icon name="key" /><span className="sr-only">Mot de passe</span></button>
+            )}
             <button type="button" className="btn btn-sm" onClick={toggleTheme} title="Thème clair / sombre">
               <Icon name="moon" /><span className="sr-only">Thème</span></button>
             <button type="button" className="btn btn-sm" onClick={logout}><Icon name="logout" /> Déconnexion</button>
@@ -157,17 +177,10 @@ export default function AppShell() {
           <button type="button" className="icon-btn" data-tour="menu" aria-label="Compte, rubriques et réglages"
             onClick={() => openDialog(AccountMenu, { onTour: startTour })}><Icon name="menu" /></button>
         </header>
-        {instanceLabel && (
-          <div className="banner banner-test" role="note">
-            <Icon name="alert" />
-            <span><strong>{instanceLabel}</strong> — site d’essai, séparé du site des clients : ses comptes et ses données ne sont pas les leurs.</span>
-          </div>
-        )}
-        {settings.demo_mode && (
-          <div className="banner" role="note">
-            <Icon name="info" />
-            <span><strong>Mode démonstration</strong> — données fictives ; tarifs non validés utilisables et signalés.</span>
-            {isAdmin && <Link to="/parametres">Paramètres</Link>}
+        {demo && (
+          <div className="banner banner-demo" role="note">
+            <span>MODE DÉMO — données fictives, rien n'est réel</span>
+            <button type="button" className="btn btn-sm" onClick={leaveDemo}>Quitter</button>
           </div>
         )}
         <main id="main" tabIndex={-1}><Outlet /></main>
@@ -178,6 +191,7 @@ export default function AppShell() {
         ))}
       </nav>
       <GuidedTour active={tour} onClose={() => setTour(false)} isAdmin={isAdmin} clubName={settings.club_name} />
+      {demo && <div className="demo-watermark" aria-hidden="true">DÉMO</div>}
     </div>
   );
 }

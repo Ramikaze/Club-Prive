@@ -7,6 +7,7 @@ import { invalid, forbidden, notFound, conflict } from './errors.js';
 import { text, int, toId, flag, frDate } from './validate.js';
 import { ledgerMethods, DEFAULT_CATEGORIES } from './ledger.js';
 import { loungeMethods } from './lounge.js';
+import { seedDemo } from './seed.js';
 import {
   localParts, localToUtcMs, addDays, addMonths, daysBetween, monthsElapsed, isValidDate, isValidTimeZone, parseHHMM,
 } from '../shared/time.js';
@@ -37,6 +38,10 @@ const WIPE_ORDER = [
   'reservation_attendees', 'reservations', 'cards', 'subscriptions', 'members', 'products', 'ledger_entries', 'closed_periods', 'audit_log',
 ];
 
+// The fictitious author of the demo space's records: an administrator account of the demo database
+// only. Real accounts start at id 1, so it never stands for one of them.
+export const DEMO_AUTHOR_ID = 0;
+
 export function defaultSettings() {
   return {
     club_name: 'Limen',
@@ -52,7 +57,6 @@ export function defaultSettings() {
     opening_balances: { date: null, amounts: {} },
     low_stock_default: 3,
     expiry_warning_days: 7,
-    demo_mode: true,
   };
 }
 
@@ -100,9 +104,9 @@ const CHARGE_SELECT = `
   LEFT JOIN refunds rf ON rf.charge_id = c.id`;
 
 export class Club {
-  constructor(db, { instanceLabel = null } = {}) {
+  constructor(db, { demo = false } = {}) {
     this.db = db;
-    this.instanceLabel = instanceLabel; // e.g. « Version de test » on the test Worker; null on the clients' site
+    this.demo = !!demo; // true only in the demo space (fictitious data); the real club is never in demo mode
     this.depth = 0;
     this.cachedSettings = null;
     this.at = null; // fixed clock (ms), used only by the demo seed to backdate history
@@ -202,6 +206,8 @@ export class Club {
     if (!this.cachedSettings) {
       const s = defaultSettings();
       for (const row of this.all('SELECT key, value FROM settings')) if (row.key in s) s[row.key] = JSON.parse(row.value);
+      // Not a stored setting: it follows the space the club runs in, whatever an older `demo_mode` row says.
+      s.demo_mode = this.demo;
       this.cachedSettings = s;
     }
     return this.cachedSettings;
@@ -241,7 +247,7 @@ export class Club {
       accounts: ACCOUNTS.map((key) => ({ key, label: ACCOUNT_LABELS[key] })),
       biz_today: this.bizToday(),
       server_time: this.nowIso(),
-      instance_label: this.instanceLabel,
+      demo: this.demo,
     };
   }
 
@@ -291,7 +297,6 @@ export class Club {
         return out;
       }
       case 'refunds_admin_only':
-      case 'demo_mode':
         return flag(v);
       case 'annual_allocation_mode':
         if (!['activation', 'mensuelle'].includes(v)) throw invalid("Mode d'attribution invalide.");
@@ -321,6 +326,8 @@ export class Club {
     const current = this.settings();
     const changes = {};
     for (const [key, value] of Object.entries(patch)) {
+      // `demo_mode` is in `current` (derived, see settings()) but has no case in normalizeSetting:
+      // it is refused like any unknown key.
       if (!(key in current)) throw invalid(`Paramètre inconnu : ${key}`);
       changes[key] = this.normalizeSetting(actor, key, value, current[key]);
     }
@@ -910,7 +917,7 @@ export class Club {
       );
     }
     if (plan.price == null && !s.demo_mode) {
-      throw conflict('TARIF_NON_DEFINI', `Le prix de la formule « ${plan.name} » n'est pas défini : activation impossible hors mode démonstration.`);
+      throw conflict('TARIF_NON_DEFINI', `Le prix de la formule « ${plan.name} » n'est pas défini : activation impossible tant qu'un administrateur n'a pas fixé le prix dans Paramètres.`);
     }
     if (plan.price != null && !plan.price_validated && !s.demo_mode) {
       throw conflict('TARIF_NON_VALIDE', `Le prix de la formule « ${plan.name} » n'a pas été validé par un administrateur.`);
@@ -2298,6 +2305,109 @@ export class Club {
     };
     const body = [header, ...rows].map((r) => r.map(cell).join(';')).join('\r\n');
     return { filename: `${t.name}.csv`, content: `\ufeff${body}\r\n` };
+  }
+
+  // ---------------------------------------------------------------- demo space
+
+  // The demo space is a second club (its own database, `demo` set) that copies the real club's
+  // configuration and holds fictitious data only. Its methods refuse to run on the real club: they
+  // rewrite accounts and wipe data.
+  assertDemo() {
+    if (!this.demo) throw conflict('MODE_DEMO_INACTIF', "Cette opération n'existe que dans l'espace démo.");
+  }
+
+  // What the demo space takes from the real club (this method runs on the real club). Accounts come
+  // as identities only (id, name, role, active): neither a login nor a password hash leaves the real
+  // club, and the demo space has no use for them (it gives each account the login u<id>). The treasury
+  // starting point stays out: the demo sets its own, with fictitious amounts. `demo_mode` is not a
+  // stored setting any more.
+  demoConfig() {
+    return {
+      users: this.all('SELECT id, name, role, active FROM users ORDER BY id'),
+      settings: this.all(
+        "SELECT key, value, updated_at, updated_by FROM settings WHERE key NOT IN ('demo_mode', 'opening_balances') ORDER BY key",
+      ),
+      plans: this.all('SELECT * FROM plans ORDER BY id'),
+      rooms: this.all('SELECT * FROM rooms ORDER BY id'),
+      categories: this.all('SELECT * FROM categories ORDER BY id'),
+    };
+  }
+
+  // The demo records and the copied settings point at accounts (created_by, updated_by...), so the
+  // real accounts exist here under the same ids. Identity only: the login is `u<id>` and the hash '!'
+  // is not the output of any password, so nobody can sign in to the demo space. This runs on every
+  // demo request: an account that already says the same is left alone (the WHERE of the update), so a
+  // request that changes nothing writes nothing.
+  mirrorUsers(users) {
+    this.assertDemo();
+    for (const u of users) {
+      this.run(
+        `INSERT INTO users (id, login, name, role, password_hash, active, created_at) VALUES (?, ?, ?, ?, '!', ?, ?)
+         ON CONFLICT(id) DO UPDATE SET login = excluded.login, name = excluded.name, role = excluded.role,
+           password_hash = excluded.password_hash, active = excluded.active
+         WHERE login IS NOT excluded.login OR name IS NOT excluded.name OR role IS NOT excluded.role
+           OR password_hash IS NOT excluded.password_hash OR active IS NOT excluded.active`,
+        u.id, `u${u.id}`, u.name, u.role, u.active ? 1 : 0, this.nowIso(),
+      );
+    }
+  }
+
+  // Replaces a table's rows by the given ones, ids included, column by column (the columns are those
+  // of the source rows, which only ever come from the real club's demoConfig).
+  replaceRows(table, rows) {
+    this.run(`DELETE FROM ${table}`);
+    for (const row of rows) {
+      const columns = Object.keys(row);
+      this.run(
+        `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`,
+        ...columns.map((column) => row[column]),
+      );
+    }
+  }
+
+  // Gets the demo space ready for a request. The first time (no `demo_seeded` mark) it copies the
+  // real club's configuration and fills the space with fictitious data, all in one transaction. After
+  // that only the accounts are mirrored again, so a new, renamed or deactivated account is followed at
+  // once, while the settings stay as copied until the next reset.
+  prepareDemo(config) {
+    this.assertDemo();
+    this.tx(() => {
+      // First, whatever the case: the rows copied below refer to these accounts.
+      this.mirrorUsers(config.users);
+      if (this.get("SELECT 1 AS x FROM meta WHERE key = 'demo_seeded'")) return;
+      // Nothing refers to these tables yet: the space is new, or resetDemo has just emptied it.
+      this.replaceRows('settings', config.settings);
+      this.replaceRows('plans', config.plans);
+      this.replaceRows('rooms', config.rooms);
+      this.replaceRows('categories', config.categories);
+      this.run(
+        `INSERT INTO users (id, login, name, role, password_hash, active, created_at)
+         VALUES (?, 'auteur.demo.0', 'Démonstration', 'admin', '!', 1, ?) ON CONFLICT(id) DO NOTHING`,
+        DEMO_AUTHOR_ID, this.nowIso(),
+      );
+      this.cachedSettings = null;
+      // The seed sells both plans, even if the real club has stopped offering one of them: that choice
+      // is put back once the data is in.
+      const withdrawn = config.plans.filter((p) => !p.active);
+      this.run('UPDATE plans SET active = 1');
+      seedDemo(this, { actor: this.get('SELECT * FROM users WHERE id = ?', DEMO_AUTHOR_ID) });
+      for (const p of withdrawn) this.run('UPDATE plans SET active = 0 WHERE id = ?', p.id);
+      this.run("INSERT INTO meta (key, value) VALUES ('demo_seeded', ?)", this.nowIso());
+    });
+  }
+
+  // Empties the demo space and fills it again from the real club's current configuration. The wipe
+  // and the refill commit together or not at all. The journal entry is written last: the wipe
+  // empties the journal.
+  resetDemo(config, actor) {
+    this.assertDemo();
+    this.tx(() => {
+      for (const table of WIPE_ORDER) this.run(`DELETE FROM ${table}`);
+      this.run("DELETE FROM meta WHERE key = 'demo_seeded'");
+      this.prepareDemo(config);
+      this.audit(actor, 'demo.remettre_a_neuf', null, null, null);
+    });
+    return { ok: true };
   }
 }
 

@@ -1,9 +1,11 @@
 // Cloudflare entry point. The interface (dist/) is served by Workers static assets; every /api/*
-// request goes to one Durable Object that owns the club's SQLite database, so writes are applied
-// one at a time, in a single place, with nothing else to host or pay for.
+// request goes to a Durable Object that owns a SQLite database: the real club's, or the demo space's,
+// a second club with fictitious data (worker/space.js chooses). Writes are applied one at a time, in a
+// single place, with nothing else to host or pay for.
 import { DurableObject } from 'cloudflare:workers';
 import { createApi } from './api.js';
 import { durableDb } from './db.js';
+import { routeApi } from './space.js';
 
 export class ClubDO extends DurableObject {
   constructor(ctx, env) {
@@ -14,6 +16,27 @@ export class ClubDO extends DurableObject {
 
   fetch(request) {
     return this.api.handle(request);
+  }
+
+  // RPC, first step of a request made in the demo space: sessions live here, so the session is checked
+  // here. Gives null, or the account's identity and the configuration the demo space copies.
+  demoContext(tokenHash) {
+    return this.api.demoContext(tokenHash);
+  }
+}
+
+// The demo space: the same API on its own database. Its one entry point is the RPC below, which serves a
+// request as an account the real club has vouched for. There is deliberately no fetch(): no request can
+// reach this object by itself. The request handed to handleDemo still carries the browser's cookie, but
+// the API ignores it once an identity comes with the call: no session is ever looked up here.
+export class DemoDO extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.api = createApi({ db: durableDb(ctx.storage), env, demo: true });
+  }
+
+  handleDemo(request, context) {
+    return this.api.handleDemo(request, context);
   }
 }
 
@@ -40,7 +63,14 @@ async function withRanges(request, env) {
 export default {
   fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname.startsWith('/api/')) return env.CLUB.get(env.CLUB.idFromName('club')).fetch(request);
+    if (url.pathname.startsWith('/api/')) {
+      const club = env.CLUB.get(env.CLUB.idFromName('club'));
+      const demo = env.DEMO.get(env.DEMO.idFromName('demo'));
+      return routeApi(request, {
+        real: { handle: (r) => club.fetch(r), demoContext: (hash) => club.demoContext(hash) },
+        demo: { handleDemo: (r, context) => demo.handleDemo(r, context) },
+      });
+    }
     if (url.pathname === '/login-smoke.mp4') return withRanges(request, env);
     return env.ASSETS.fetch(request);
   },

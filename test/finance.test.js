@@ -1,23 +1,35 @@
-// First installation, expenses, treasury, general ledger, monthly closing, demonstration and reset.
+// First installation, expenses, treasury, general ledger, monthly closing, data reset, local accounts
+// and the real club never being in demo mode.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { addMonths } from '../shared/time.js';
 import { Server, Client, ok, UM } from './harness.js';
 
 const SETUP_TOKEN = 'code-installation-test';
-const server = new Server({ SETUP_TOKEN });
+const server = new Server({ SETUP_TOKEN }, { lenientTariffs: true });
+// The club as it runs online: never in demo mode (test 21).
+const real = new Server({ SETUP_TOKEN });
 let admin;
 let manager;
+let realAdmin;
 let today;
 let categories;
 const cat = (name) => categories.find((c) => c.name === name).id;
 
-before(() => server.start());
-after(() => server.destroy());
+before(async () => {
+  await server.start();
+  await real.start();
+  realAdmin = new Client(real);
+  ok(await realAdmin.post('/api/setup', { setup_token: SETUP_TOKEN, login: 'reel', name: 'Administrateur réel', password: 'mot-de-passe-reel' }));
+});
+after(() => {
+  server.destroy();
+  real.destroy();
+});
 
 test('15. installation : le premier administrateur exige le code SETUP_TOKEN', async () => {
   const anonymous = new Client(server);
-  assert.deepEqual(ok(await anonymous.get('/api/setup')), { needed: true, token_configured: true, instance_label: null });
+  assert.deepEqual(ok(await anonymous.get('/api/setup')), { needed: true, token_configured: true });
   assert.equal((await anonymous.post('/api/login', { login: 'x', password: 'y' })).status, 401);
   const wrong = await anonymous.post('/api/setup', { setup_token: 'faux', login: 'patron', name: 'Patron', password: 'mot-de-passe-patron' });
   assert.equal(wrong.status, 403);
@@ -166,40 +178,37 @@ test('18. clôture mensuelle : la période fermée refuse toute écriture jusqu�
   for (const action of ['periode.cloturer', 'periode.rouvrir', 'operation.annuler']) assert.ok(audit.includes(action), action);
 });
 
-test('19. démonstration chargée par un administrateur, puis effacement des données', async () => {
-  assert.equal((await admin.post('/api/admin/demo')).data.error.code, 'DONNEES_EXISTANTES');
+test('19. effacement des données', async () => {
   assert.equal((await admin.post('/api/admin/reset', { confirm: 'oui' })).status, 400);
   ok(await admin.post('/api/admin/reset', { confirm: 'EFFACER' }));
   assert.equal(ok(await admin.get('/api/members')).length, 0);
   assert.equal(ok(await admin.get(`/api/treasury?from=${today}`)).total.closing, 0);
   ok(await manager.get('/api/dashboard')); // accounts and sessions are kept
-
-  ok(await admin.post('/api/admin/demo'));
-  const members = ok(await admin.get('/api/members'));
-  assert.equal(members.length, 5);
-  assert.ok(members.every((m) => m.is_demo));
-  assert.deepEqual(members.map((m) => m.name).sort(), ['Client Test 1', 'Client Test 2', 'Client Test 3', 'Client Test 4', 'Client Test 5']);
-  assert.equal(ok(await admin.get('/api/products')).length, 7);
-  const t = ok(await admin.get(`/api/treasury?from=${today}`));
-  assert.ok(t.accounts.every((a) => a.closing >= 0), JSON.stringify(t.accounts));
-  assert.ok(t.total.closing > 0);
-  const book = ok(await admin.get(`/api/ledger/book?from=${addMonths(today, -3)}&to=${today}`));
-  assert.ok(book.rows.some((r) => r.type === 'depense') && book.rows.some((r) => r.type === 'encaissement'));
-  assert.equal(book.closing, t.total.closing);
 });
 
-test('20. en local, DEMO_ACCOUNTS=1 crée la démonstration et ses comptes', async () => {
+test('20. en local, DEMO_ACCOUNTS=1 crée seulement les comptes', async () => {
   const local = new Server({ DEMO_ACCOUNTS: '1' });
   await local.start();
   try {
     const gerant = new Client(local);
     const bundle = await gerant.login('gerant', 'demo-gerant-2026');
     assert.equal(bundle.user.role, 'gerant');
-    assert.equal(ok(await gerant.get('/api/members')).length, 5);
+    assert.equal(bundle.demo, false);
+    assert.equal(bundle.settings.demo_mode, false);
+    assert.equal(ok(await gerant.get('/api/members')).length, 0);
+    await local.restart(); // a second start does not create the accounts twice
     await new Client(local).login('proprietaire', 'demo-proprio-2026');
-    await local.restart(); // a second start does not seed twice
-    assert.equal(ok(await gerant.get('/api/members')).length, 5);
   } finally {
     local.destroy();
   }
+});
+
+test('21. le vrai club ignore un ancien demo_mode stocké et refuse de le modifier', async () => {
+  real.db.run("INSERT INTO settings (key, value, updated_at) VALUES ('demo_mode', 'true', '2026-01-01') ON CONFLICT(key) DO UPDATE SET value = 'true'");
+  real.club.cachedSettings = null;
+  assert.equal(ok(await realAdmin.get('/api/me')).settings.demo_mode, false);
+  const r = await realAdmin.put('/api/settings', { demo_mode: true });
+  assert.equal(r.status, 400);
+  assert.equal(r.data.error.message, 'Paramètre inconnu : demo_mode');
+  assert.equal((await realAdmin.post('/api/admin/demo')).status, 404);
 });

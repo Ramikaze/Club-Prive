@@ -12,7 +12,7 @@ const thresholds = {
 };
 
 beforeEach(async () => {
-  server = new Server({ SETUP_TOKEN: 'installation-lounge' });
+  server = new Server({ SETUP_TOKEN: 'installation-lounge' }, { lenientTariffs: true });
   await server.start();
   admin = new Client(server);
   ok(await admin.post('/api/setup', { setup_token: 'installation-lounge', login: 'admin', name: 'Admin test', password: 'test-lounge-password' }));

@@ -704,7 +704,7 @@ function ExtendDialog({ close, r, onDone, options, endRel }) {
   else if (q) {
     const warnings = [];
     if (q.conflicts.length) warnings.push(<Notice key="conflicts" kind="danger">{`Créneau suivant occupé : ${conflictText(q.conflicts)}.`}</Notice>);
-    if (q.tariff_blocked) warnings.push(<Notice key="tariff" kind="danger">Le tarif de cette réservation n’est pas validé : prolongation payante impossible hors démonstration.</Notice>);
+    if (q.tariff_blocked) warnings.push(<Notice key="tariff" kind="danger">Le tarif de cette réservation n’a pas été validé par un administrateur : prolongation payante impossible.</Notice>);
     box = (
       <>
         <dl className="calc">

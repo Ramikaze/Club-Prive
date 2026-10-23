@@ -1,12 +1,13 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { addDays, localToUtcMs } from '../shared/time.js';
+import { seedDemo } from '../worker/seed.js';
 import { Server, Client, ok } from './harness.js';
 
 let server, admin, manager, rooms, members, today;
 
 beforeEach(async () => {
-  server = new Server();
+  server = new Server({}, { lenientTariffs: true });
   await server.start();
   await server.addUser('admin', 'Admin', 'admin', 'rooms-admin-password');
   await server.addUser('gerant', 'Gérant', 'gerant', 'rooms-manager-password');
@@ -265,11 +266,12 @@ test('désactivation d’un membre : historique conservé, accès bloqué, réac
 
 test('démonstration : une séance est déjà en cours au chargement, avec les consommations de chaque membre', async () => {
   ok(await admin.post('/api/admin/reset', { confirm: 'EFFACER' }));
+  const author = server.club.userRow(ok(await admin.get('/api/me')).user.id);
   const realNow = Date.now;
   const loadedAt = localToUtcMs(today, '15:10', server.club.settings().timezone);
   Date.now = () => loadedAt;
   try {
-    ok(await admin.post('/api/admin/demo'));
+    seedDemo(server.club, { actor: author });
     const live = ok(await manager.get('/api/dashboard')).rooms_status.filter((rm) => rm.current?.status === 'en_cours');
     assert.equal(live.length, 1, JSON.stringify(live.map((rm) => rm.name)));
     const session = live[0].current;
@@ -307,17 +309,16 @@ test('salle unique : une fois, les autres salles sont retirées et leurs réserv
   assert.deepEqual(ok(await manager.get('/api/rooms')).map((r) => r.id), [main.id, vip.id]);
 });
 
-test('version de test : l’étiquette de l’instance est transmise à la connexion et à l’interface', async () => {
-  assert.equal(ok(await new Client(server).get('/api/setup')).instance_label, null);
-  assert.equal(ok(await admin.get('/api/me')).instance_label, null);
-  const testSite = new Server({ INSTANCE_LABEL: 'Version de test' });
-  await testSite.start();
+test('le vrai club n’est jamais en mode démonstration : le bundle annonce demo à faux', async () => {
+  const real = new Server(); // without lenientTariffs: the club as it runs online
+  await real.start();
   try {
-    assert.equal(ok(await new Client(testSite).get('/api/setup')).instance_label, 'Version de test');
-    await testSite.addUser('essai', 'Essai', 'admin', 'test-site-password');
-    assert.equal((await new Client(testSite).login('essai', 'test-site-password')).instance_label, 'Version de test');
+    await real.addUser('essai', 'Essai', 'admin', 'real-club-password');
+    const realAdmin = new Client(real);
+    await realAdmin.login('essai', 'real-club-password');
+    assert.equal(ok(await realAdmin.get('/api/me')).demo, false);
   } finally {
-    testSite.destroy();
+    real.destroy();
   }
 });
 
