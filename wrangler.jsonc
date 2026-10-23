@@ -1,5 +1,6 @@
 // Cloudflare configuration: one Worker serves the interface (dist/, built by Vite) and the API;
 // the club's data lives in a Durable Object with its own SQLite database (free plan compatible).
+// A second Durable Object, the demo space, holds the fictitious data of the training mode.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "club-prive",
@@ -12,22 +13,16 @@
     "run_worker_first": ["/api/*", "/login-smoke.mp4"]
   },
   "durable_objects": {
-    "bindings": [{ "name": "CLUB", "class_name": "ClubDO" }]
+    "bindings": [
+      { "name": "CLUB", "class_name": "ClubDO" },
+      { "name": "DEMO", "class_name": "DemoDO" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ClubDO"] }],
-  "observability": { "enabled": true },
-  // Test version, separate from the clients' site: its own Worker (club-prive-test) and its own data.
-  //   npm run deploy:test
-  //   npx wrangler secret put SETUP_TOKEN --env test
-  // Bindings and variables are not inherited by an environment: they are repeated here.
-  "env": {
-    "test": {
-      "durable_objects": {
-        "bindings": [{ "name": "CLUB", "class_name": "ClubDO" }]
-      },
-      "vars": { "INSTANCE_LABEL": "Version de test" }
-    }
-  }
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["ClubDO"] },
+    { "tag": "v2", "new_sqlite_classes": ["DemoDO"] }
+  ],
+  "observability": { "enabled": true }
   // Secret (not in this file): SETUP_TOKEN, the installation code for the first administrator.
   //   npx wrangler secret put SETUP_TOKEN
   // Local development reads .dev.vars (DEMO_ACCOUNTS=1 creates the demonstration accounts).

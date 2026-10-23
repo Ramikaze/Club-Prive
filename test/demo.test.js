@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { addMonths } from '../shared/time.js';
 import { sha256Hex } from '../worker/auth.js';
 import { DEMO_AUTHOR_ID } from '../worker/club.js';
-import { Server, Client, ok, ORIGIN, UM } from './harness.js';
+import { Server, Site, Client, ok, ORIGIN, UM } from './harness.js';
 
 const servers = [];
 afterEach(() => {
@@ -15,11 +15,13 @@ afterEach(() => {
 
 const PROPRIO = 'mot-de-passe-proprio';
 const GERANT = 'mot-de-passe-gerant';
+const INSTALL_CODE = 'code-installation-test'; // the Worker's SETUP_TOKEN secret, in the tests that need it
 
 // A real club with its administrator (logged in) and a manager, and an empty demo space beside it.
-async function clubs() {
-  const real = new Server();
-  const demo = new Server({}, { demo: true });
+// `env`: the secrets and variables of the Worker, which both clubs receive.
+async function clubs({ env = {} } = {}) {
+  const real = new Server(env);
+  const demo = new Server(env, { demo: true });
   servers.push(real, demo);
   await real.start();
   await demo.start();
@@ -396,9 +398,20 @@ test('exports en démo : le nom du fichier commence par DEMO_', async () => {
 });
 
 test('en démo, ni le cookie ni le rôle transmis ne comptent : seul le compte recopié décide', async () => {
-  const { real, demo, admin } = await clubs();
+  const { real, demo, admin, bundle } = await clubs();
   const ctx = await contextOf(real, await managerOf(real));
   const asManager = inDemo(demo, ctx);
+
+  // The demo database holds a session for the very cookie that rides along, pointing at the
+  // administrator's mirrored account. An implementation that read the cookie before the handed
+  // identity would serve the manager's request as the administrator, and fail this test.
+  demo.club.prepareDemo(ctx.config);
+  const hash = await sessionHash(admin);
+  demo.db.run(
+    'INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)',
+    hash, bundle.user.id, new Date().toISOString(), '2099-01-01T00:00:00.000Z',
+  );
+  assert.equal(demo.club.sessionUser(hash).id, bundle.user.id); // the trap is set
 
   // The administrator's real session cookie rides along with a request made as the manager.
   const carried = { cookie: admin.cookie };
@@ -489,6 +502,56 @@ test('chaque point d’entrée refuse l’autre espace', async () => {
   assert.equal(real.club.listMembers().length, 0); // nothing was prepared on the real club
 });
 
+// Second lock behind the Worker's routing (the router keeps these paths in the real club): sessions
+// live there only, so with an identity handed over the demo space has no sign-in, sign-out or setup.
+test('en démo, connexion, déconnexion et installation n’existent pas, même si la requête arrive jusque-là', async () => {
+  const { real, demo, admin } = await clubs({ env: { SETUP_TOKEN: INSTALL_CODE } });
+  const ctx = await contextOf(real, admin);
+  const asAdmin = inDemo(demo, ctx);
+  const intruder = { login: 'intrus', name: 'Intrus', password: 'mot-de-passe-intrus' };
+
+  for (const [method, url, body] of [
+    ['POST', '/api/login', { login: 'proprietaire', password: PROPRIO }],
+    ['GET', '/api/login'], // whatever the method: the path decides, not the route table
+    ['POST', '/api/logout', {}],
+    ['GET', '/api/setup'],
+    ['POST', '/api/setup', { ...intruder, setup_token: INSTALL_CODE }],
+    ['POST', '/api/setup/reset', { ...intruder, setup_token: INSTALL_CODE }],
+  ]) {
+    const r = await asAdmin.call(method, url, body);
+    assert.equal(r.status, 404, `${method} ${url}`);
+    assert.equal(r.data.error.code, 'INTROUVABLE', `${method} ${url}`);
+    assert.equal(r.data.error.message, 'Ressource inconnue.');
+    assert.equal(r.headers.get('set-cookie'), null, `${method} ${url}`); // no cookie opened, none cleared
+  }
+  // Nothing happened in the demo database: no session, no account changed or added.
+  assert.equal(demo.club.get('SELECT COUNT(*) AS n FROM sessions').n, 0);
+  assert.equal(demo.club.get("SELECT COUNT(*) AS n FROM users WHERE login = 'intrus'").n, 0);
+  assert.equal(demo.club.userRow(ctx.user.id).login, `u${ctx.user.id}`);
+});
+
+test('en démo, une identité sans compte donne 401, pas une exception', async () => {
+  const { real, demo, admin } = await clubs();
+  const { config } = await contextOf(real, admin);
+
+  for (const [label, context] of Object.entries({
+    'aucune identité': undefined,
+    'identité nulle': null,
+    'objet vide': {},
+    'sans compte': { config },
+    'compte nul': { user: null, config },
+    'compte sans id': { user: { name: 'Sans id', role: 'admin' }, config },
+    'identifiant zéro (l’auteur fictif)': { user: { id: DEMO_AUTHOR_ID }, config },
+  })) {
+    const r = await demo.api.handleDemo(new Request(ORIGIN + '/api/me'), context);
+    assert.equal(r.status, 401, label);
+    assert.equal((await r.json()).error.code, 'NON_CONNECTE', label);
+  }
+  // Turned away before anything was prepared.
+  assert.equal(demo.club.hasUsers(), false);
+  assert.equal(demo.club.listMembers().length, 0);
+});
+
 test('un vrai club aux tarifs souples (scénarios) reste le vrai club', async () => {
   const lenient = new Server({}, { lenientTariffs: true });
   servers.push(lenient);
@@ -517,4 +580,190 @@ test('l’espace démo ne crée pas les comptes de démonstration locaux', async
   assert.equal(local.club.hasUsers(), false);
   const visitor = new Client(local);
   assert.equal((await visitor.post('/api/login', { login: 'proprietaire', password: 'demo-proprio-2026' })).status, 401);
+});
+
+// ---------------------------------------------------------------------------- the Worker's routing
+// The browser asks for the demo space with one header and says nothing else about itself. The
+// Worker's router (worker/space.js) decides, in front of the two clubs: here they sit behind a Site,
+// which sends every request through routeApi as worker/index.js does with the Durable Objects.
+
+const DEMO_HEADER = { 'x-club-espace': 'demo' };
+
+// The real club's administrator and manager signed in through the site, as browsers would be.
+async function sites(env = {}) {
+  const { real, demo } = await clubs({ env });
+  const site = new Site(real, demo);
+  const admin = new Client(site);
+  await admin.login('proprietaire', PROPRIO);
+  const manager = new Client(site);
+  await manager.login('gerant', GERANT);
+  return { real, demo, site, admin, manager };
+}
+
+// The same signed-in client, asking for the demo space: the header is all that changes.
+const askingDemo = (client) => ({
+  get: (url, headers) => client.call('GET', url, undefined, { ...DEMO_HEADER, ...headers }),
+  post: (url, body, headers) => client.call('POST', url, body, { ...DEMO_HEADER, ...headers }),
+});
+
+test('aiguillage : avec l’en-tête démo on est dans la démo, sans lui dans le vrai club', async () => {
+  const { real, demo, manager } = await sites();
+  const auditBefore = real.club.all('SELECT * FROM audit_log');
+  const inTheDemo = askingDemo(manager);
+
+  const created = ok(await inTheDemo.post('/api/members', TRIAL));
+  assert.equal(created.name, 'Essai Gérant');
+  const names = (members) => members.map((m) => m.name).sort();
+  assert.deepEqual(names(ok(await inTheDemo.get('/api/members'))), [...FICTITIOUS, 'Essai Gérant'].sort());
+  // The same session without the header, or with any other value, is the real club's: no member there.
+  assert.deepEqual(ok(await manager.get('/api/members')), []);
+  assert.deepEqual(ok(await manager.call('GET', '/api/members', undefined, { 'x-club-espace': 'reel' })), []);
+
+  assert.equal(demo.club.memberRow(created.id).created_by, real.club.userByLogin('gerant').id);
+  assert.deepEqual(memberNames(real.club), []);
+  assert.ok(real.club.isEmpty());
+  assert.deepEqual(real.club.all('SELECT * FROM audit_log'), auditBefore);
+});
+
+test('aiguillage : la connexion reste réelle, même demandée avec l’en-tête démo', async () => {
+  const { demo, site } = await sites();
+  const visitor = new Client(site);
+
+  const login = await askingDemo(visitor).post('/api/login', { login: 'gerant', password: GERANT });
+  assert.equal(login.status, 200, JSON.stringify(login.data));
+  assert.equal(login.data.demo, false); // the bundle of the real club
+  assert.equal(login.data.settings.demo_mode, false);
+  assert.equal(ok(await visitor.get('/api/me')).user.name, 'Gérant'); // a real session: it works without the header
+  assert.equal(demo.club.get('SELECT COUNT(*) AS n FROM sessions').n, 0); // none was opened in the demo space
+  assert.equal(demo.club.hasUsers(), false); // which was not even prepared
+});
+
+test('aiguillage : sans session valide, la démo répond 401 comme le vrai club et n’est pas préparée', async () => {
+  const { real, demo, site, manager } = await sites();
+  const visitor = new Client(site);
+
+  const none = await askingDemo(visitor).get('/api/me');
+  assert.equal(none.status, 401);
+  assert.equal(none.data.error.code, 'NON_CONNECTE');
+  assert.equal(none.data.error.message, 'Session expirée : veuillez vous reconnecter.');
+  // Same answer, body and headers, as the real club gives a visitor without a session.
+  const own = await visitor.get('/api/me');
+  assert.equal(own.status, 401);
+  assert.deepEqual(none.data, own.data);
+  assert.deepEqual(Object.fromEntries(none.headers), Object.fromEntries(own.headers));
+
+  // A cookie nobody issued, then a session that has expired.
+  visitor.cookie = 'sid=jeton-inconnu';
+  assert.equal((await askingDemo(visitor).get('/api/me')).status, 401);
+  real.db.run('UPDATE sessions SET expires_at = ? WHERE token_hash = ?', '2000-01-01T00:00:00.000Z', await sessionHash(manager));
+  assert.equal((await askingDemo(manager).get('/api/me')).status, 401);
+
+  // Turned away at the door: no other check of the API comes first (here the content type, 415 without the header).
+  const notJson = { 'content-type': 'text/plain' };
+  assert.equal((await new Client(site).post('/api/members', TRIAL, notJson)).status, 415);
+  assert.equal((await askingDemo(new Client(site)).post('/api/members', TRIAL, notJson)).status, 401);
+
+  assert.equal(demo.club.hasUsers(), false);
+  assert.equal(demo.club.listMembers().length, 0);
+});
+
+test('aiguillage : une identité forgée dans un en-tête du navigateur ne compte pas', async () => {
+  const { real, site, manager } = await sites();
+  const adminId = real.club.userByLogin('proprietaire').id;
+  const forged = { 'x-club-demo-user': JSON.stringify({ id: adminId, name: 'Propriétaire', role: 'admin' }) };
+
+  // Without a session, the header gives nothing.
+  assert.equal((await askingDemo(new Client(site)).get('/api/me', forged)).status, 401);
+
+  // With the manager's session and the administrator's identity forged beside it, the manager is
+  // served as the manager: the demo space is not allowed to reset, and says who the account is.
+  assert.equal((await askingDemo(manager).post('/api/demo/reset', {}, forged)).status, 403);
+  const me = ok(await askingDemo(manager).get('/api/me', forged));
+  assert.equal(me.user.name, 'Gérant');
+  assert.equal(me.user.role, 'gerant');
+});
+
+test('aiguillage : en démo, un compte suit le vrai club (nom, rôle, puis accès retiré)', async () => {
+  const { real, admin, manager } = await sites();
+  const managerId = real.club.userByLogin('gerant').id;
+  const inTheDemo = askingDemo(manager);
+  assert.equal(ok(await inTheDemo.get('/api/me')).user.role, 'gerant');
+  assert.equal((await inTheDemo.post('/api/demo/reset', {})).status, 403);
+
+  // Renamed in the real club: the next request, with the same session, shows the new name.
+  ok(await admin.put(`/api/users/${managerId}`, { name: 'Gérante' }));
+  assert.equal(ok(await inTheDemo.get('/api/me')).user.name, 'Gérante');
+
+  // Promoted: the real club closes the account's sessions, the manager signs in again and the very
+  // next demo request gives the new role.
+  ok(await admin.put(`/api/users/${managerId}`, { role: 'admin' }));
+  await manager.login('gerant', GERANT);
+  assert.equal(ok(await inTheDemo.get('/api/me')).user.role, 'admin');
+  assert.equal((await inTheDemo.post('/api/demo/reset', {})).status, 200);
+
+  // Deactivated: the next demo request is turned away.
+  ok(await admin.put(`/api/users/${managerId}`, { active: false }));
+  const turnedAway = await inTheDemo.get('/api/me');
+  assert.equal(turnedAway.status, 401);
+  assert.equal(turnedAway.data.error.code, 'NON_CONNECTE');
+});
+
+test('aiguillage : /api/me en démo annonce la démo, et dans le vrai club non', async () => {
+  const { manager } = await sites();
+
+  const inTheDemo = ok(await askingDemo(manager).get('/api/me'));
+  assert.equal(inTheDemo.demo, true);
+  assert.equal(inTheDemo.settings.demo_mode, true);
+  assert.equal(inTheDemo.user.name, 'Gérant');
+
+  const own = ok(await manager.get('/api/me'));
+  assert.equal(own.demo, false);
+  assert.equal(own.settings.demo_mode, false);
+});
+
+test('aiguillage : déconnexion et installation demandées en démo vont au vrai club', async () => {
+  const { real, demo, site, manager } = await sites({ SETUP_TOKEN: INSTALL_CODE });
+  const managerId = real.club.userByLogin('gerant').id;
+  const sessionCookie = manager.cookie;
+
+  // Signing out closes the real session (the demo space has none) and clears the real cookie.
+  const out = await askingDemo(manager).post('/api/logout', {});
+  assert.equal(out.status, 200);
+  assert.match(out.headers.get('set-cookie'), /^sid=;.*Max-Age=0/);
+  assert.equal(real.club.get('SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?', managerId).n, 0);
+  const stale = new Client(site);
+  stale.cookie = sessionCookie;
+  assert.equal((await stale.get('/api/me')).status, 401); // the real club no longer knows that cookie
+  assert.equal((await askingDemo(stale).get('/api/me')).status, 401);
+
+  // The installation routes answer from the real club, which holds the code...
+  assert.deepEqual(ok(await askingDemo(new Client(site)).get('/api/setup')), { needed: false, token_configured: true });
+  const reset = { login: 'proprietaire', password: 'nouveau-mot-de-passe-proprio' };
+  const wrong = await askingDemo(new Client(site)).post('/api/setup/reset', { ...reset, setup_token: 'mauvais-code-installation' });
+  assert.equal(wrong.status, 403);
+  assert.equal(wrong.data.error.code, 'CODE_INCORRECT');
+  // ...and with the right one the real owner gets the new password.
+  ok(await askingDemo(new Client(site)).post('/api/setup/reset', { ...reset, setup_token: INSTALL_CODE }));
+  await new Client(site).login('proprietaire', reset.password);
+
+  // None of this reached the demo space: no session, no account, not even prepared.
+  assert.equal(demo.club.get('SELECT COUNT(*) AS n FROM sessions').n, 0);
+  assert.equal(demo.club.hasUsers(), false);
+});
+
+test('aiguillage : comptes et effacement demandés en démo sont refusés, le vrai club reste intact', async () => {
+  const { real, site, admin } = await sites();
+  ok(await admin.post('/api/members', { first_name: 'Vrai', last_name: 'Membre', phone: '+242 06 000 0000' }));
+  const accountsBefore = real.club.listUsers();
+  const inTheDemo = askingDemo(admin);
+
+  const password = await inTheDemo.post('/api/me/password', { current_password: PROPRIO, new_password: 'nouveau-mot-de-passe' });
+  const wipe = await inTheDemo.post('/api/admin/reset', { confirm: 'EFFACER' });
+  for (const refused of [password, wipe]) {
+    assert.equal(refused.status, 403);
+    assert.equal(refused.data.error.code, 'MODE_DEMO');
+  }
+  assert.deepEqual(memberNames(real.club), ['Vrai Membre']);
+  assert.deepEqual(real.club.listUsers(), accountsBefore);
+  await new Client(site).login('proprietaire', PROPRIO); // the real password is the old one
 });

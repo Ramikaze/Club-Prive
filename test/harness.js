@@ -7,6 +7,7 @@ import path from 'node:path';
 import { createApi } from '../worker/api.js';
 import { nodeDb } from '../worker/db-node.js';
 import { hashPassword } from '../worker/auth.js';
+import { routeApi } from '../worker/space.js';
 
 export const UM = 100; // amounts are stored in hundredths
 export const ORIGIN = 'http://club.test';
@@ -64,6 +65,27 @@ export class Server {
 
   fetch(url, init) {
     return this.api.handle(new Request(ORIGIN + url, init));
+  }
+}
+
+// The Worker in front of two clubs: every /api/* request goes through routeApi, as worker/index.js
+// does with the two Durable Objects. The calls cross as an RPC does: always as promises, the real club
+// reached through `handle` and `demoContext` only, the demo space through `handleDemo` only, and only
+// data (a copy) going over with the request. A Client works on a Site as it does on a Server.
+export class Site {
+  constructor(real, demo) {
+    this.real = real;
+    this.demo = demo;
+  }
+
+  fetch(url, init) {
+    return routeApi(new Request(ORIGIN + url, init), {
+      real: {
+        handle: (request) => this.real.api.handle(request),
+        demoContext: async (tokenHash) => this.real.api.demoContext(tokenHash),
+      },
+      demo: { handleDemo: (request, context) => this.demo.api.handleDemo(request, structuredClone(context)) },
+    });
   }
 }
 

@@ -9,8 +9,9 @@
 import { Club } from './club.js';
 import { migrate } from './schema.js';
 import { DEMO_ACCOUNTS } from './seed.js';
-import { AppError, forbidden, invalid, conflict } from './errors.js';
-import { hashPassword, verifyPassword, sha256Hex, newToken, checkPasswordStrength } from './auth.js';
+import { AppError, forbidden, invalid, conflict, notSignedIn } from './errors.js';
+import { hashPassword, verifyPassword, sha256Hex, newToken, checkPasswordStrength, parseCookies } from './auth.js';
+import { ALWAYS_REAL } from './space.js';
 
 const MAX_BODY = 256 * 1024;
 const SECURITY_HEADERS = {
@@ -19,17 +20,6 @@ const SECURITY_HEADERS = {
   'X-Frame-Options': 'DENY',
   'Cache-Control': 'no-store',
 };
-
-function parseCookies(header) {
-  const out = {};
-  for (const part of String(header ?? '').split(';')) {
-    const i = part.indexOf('=');
-    if (i > 0) {
-      try { out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim()); } catch { /* malformed cookie */ }
-    }
-  }
-  return out;
-}
 
 function json(status, payload, { cookies = [], replayed = false } = {}) {
   const headers = new Headers({ ...SECURITY_HEADERS, 'Content-Type': 'application/json; charset=utf-8' });
@@ -354,7 +344,9 @@ export function createApi({ db, env = {}, demo = false }) {
       `sid=${encodeURIComponent(value)}`, 'Path=/', 'HttpOnly', 'SameSite=Lax', `Max-Age=${maxAge}`, secure ? 'Secure' : null,
     ].filter(Boolean).join('; ');
     try {
-      const found = match(request.method, url.pathname);
+      // Sign-in, sign-out and installation belong to the real club, where sessions live: with an identity
+      // handed over, the demo space does not know them. The Worker's router keeps them away already.
+      const found = user && ALWAYS_REAL.test(url.pathname) ? null : match(request.method, url.pathname);
       if (!found) throw new AppError(404, 'INTROUVABLE', 'Ressource inconnue.');
       const { route, params } = found;
       const writes = request.method !== 'GET';
@@ -370,7 +362,7 @@ export function createApi({ db, env = {}, demo = false }) {
       if (!route.opts.public) {
         ctx.user = user ?? club.sessionUser(ctx.tokenHash);
         // A session's account is active by construction; the one handleDemo hands over may have been deactivated.
-        if (!ctx.user?.active) throw new AppError(401, 'NON_CONNECTE', 'Session expirée : veuillez vous reconnecter.');
+        if (!ctx.user?.active) throw notSignedIn();
         if (demo && route.opts.accounts) throw new AppError(403, 'MODE_DEMO', 'Les comptes se gèrent hors du mode démo.');
         if (route.opts.roles && !route.opts.roles.includes(ctx.user.role)) throw forbidden();
       }
@@ -456,9 +448,12 @@ export function createApi({ db, env = {}, demo = false }) {
   // Demo space. Step two: prepares the space (once it is filled, only the accounts are mirrored again),
   // then serves the request as the account the real club vouched for. Only the account's id is taken
   // from `user`: its role and status are those of the mirrored row, so they follow the real club on
-  // every request. A preparation that fails answers like any other error, with a response.
-  async function handleDemo(request, { user, config }) {
+  // every request. Without an account (the id of a real one is never 0), nothing is prepared and the
+  // answer is the usual 401. A preparation that fails answers like any other error, with a response.
+  async function handleDemo(request, context) {
     if (!demo) throw new Error('handleDemo: only the demo space serves demo requests.');
+    const { user, config } = context ?? {};
+    if (!user?.id) return errorResponse(notSignedIn());
     let account;
     try {
       club.prepareDemo(config);

@@ -40,6 +40,18 @@ export async function sha256Hex(s) {
   return [...digest].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+// The session cookie is read the same way by the API and by the Worker's router (worker/space.js).
+export function parseCookies(header) {
+  const out = {};
+  for (const part of String(header ?? '').split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0) {
+      try { out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim()); } catch { /* malformed cookie */ }
+    }
+  }
+  return out;
+}
+
 export function newToken() {
   return toBase64(crypto.getRandomValues(new Uint8Array(32))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
