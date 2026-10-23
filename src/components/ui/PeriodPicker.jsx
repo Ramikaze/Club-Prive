@@ -68,9 +68,10 @@ export default function PeriodPicker({ period }) {
           </button>
         ))}
       </div>
+      {/* While one day is shown, a date chosen in « Du » shows that day instead; « au » then widens it. */}
       <div className="date-nav">
         <label className="row"><span className="subtle">Du</span>
-          <DateInput value={from} max={today} aria-label="Début de la période" onCommit={(d) => setPeriod({ from: d, to })} /></label>
+          <DateInput value={from} max={today} aria-label="Début de la période" onCommit={(d) => setPeriod({ from: d, to: from === to ? d : to })} /></label>
         <label className="row"><span className="subtle">au</span>
           <DateInput value={to} max={today} aria-label="Fin de la période" onCommit={(d) => setPeriod({ from, to: d })} /></label>
       </div>

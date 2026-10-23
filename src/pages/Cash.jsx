@@ -1,6 +1,7 @@
 import { Link, useSearchParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
 import { AccountTag, CashTabs, Empty, Loaded, PageHead, Segmented } from '../components/ui/ui.jsx';
+import { DateInput } from '../components/ui/PeriodPicker.jsx';
 import { api, qs } from '../lib/api.js';
 import { ACCOUNT_LABEL, bizToday, dateTime, dayLabel, money } from '../lib/format.js';
 import { useBusy, useLoad } from '../lib/hooks.js';
@@ -84,17 +85,24 @@ function AccountCard({ a, total = false }) {
   );
 }
 
+// The page's period: a preset, or the dates chosen in « Du » and « au » (one day or several). Chosen dates that
+// match a preset show that preset selected.
 function periodFor(query) {
   const today = bizToday();
-  const p = query.p ?? 'jour';
-  if (p === 'semaine') return { p, from: addDays(today, -6), to: today };
-  if (p === 'mois') return { p, from: `${today.slice(0, 8)}01`, to: today };
-  if (p === 'mois-precedent') {
-    const to = addDays(`${today.slice(0, 8)}01`, -1);
-    return { p, from: `${to.slice(0, 8)}01`, to };
+  const first = `${today.slice(0, 8)}01`;
+  const lastMonthEnd = addDays(first, -1);
+  const presets = {
+    jour: [today, today],
+    semaine: [addDays(today, -6), today],
+    mois: [first, today],
+    'mois-precedent': [`${lastMonthEnd.slice(0, 8)}01`, lastMonthEnd],
+  };
+  if (query.p === 'perso' && isValidDate(query.du) && isValidDate(query.au) && query.du <= query.au) {
+    const same = Object.keys(presets).find((k) => presets[k][0] === query.du && presets[k][1] === query.au);
+    return { p: same ?? 'perso', from: query.du, to: query.au };
   }
-  if (p === 'perso' && isValidDate(query.du) && isValidDate(query.au) && query.du <= query.au) return { p, from: query.du, to: query.au };
-  return { p: 'jour', from: today, to: today };
+  const p = Object.hasOwn(presets, query.p ?? '') ? query.p : 'jour';
+  return { p, from: presets[p][0], to: presets[p][1] };
 }
 
 const payGroup = (g, onDone) => openPaymentDialog({ lines: g.lines, memberName: g.member_name }, onDone);
@@ -128,7 +136,7 @@ function ManagerCash() {
   );
 }
 
-const PRESETS = [['jour', 'Aujourd’hui'], ['semaine', '7 jours'], ['mois', 'Mois en cours'], ['mois-precedent', 'Mois précédent'], ['perso', 'Personnalisée']];
+const PRESETS = [['jour', 'Aujourd’hui'], ['semaine', '7 jours'], ['mois', 'Mois en cours'], ['mois-precedent', 'Mois précédent']];
 const EXPORTS = [['synthese', 'Synthèse'], ['lignes', 'Lignes facturées'], ['encaissements', 'Encaissements'],
   ['remboursements', 'Remboursements'], ['reservations', 'Réservations'], ['stock', 'Mouvements de stock']];
 
@@ -148,11 +156,9 @@ function AdminCash() {
     api.get('/api/finance/open'),
   ]), [from, to]);
 
-  const onCustom = (e) => {
-    e.preventDefault();
-    const v = Object.fromEntries(new FormData(e.currentTarget));
-    if (isValidDate(v.du) && isValidDate(v.au) && v.du <= v.au) setQuery({ p: 'perso', du: v.du, au: v.au, compte: account });
-  };
+  // « Du » and « au » apply as soon as a date is chosen, in either order. While one day is shown, a date chosen
+  // in « Du » shows that day instead; « au » then widens it into several days.
+  const setDates = (du, au) => setQuery({ p: 'perso', du: du <= au ? du : au, au: du <= au ? au : du, compte: account });
   const exportLink = (kind, label) => (
     <span key={kind} className="row">
       <button type="button" className="btn btn-sm" disabled={csv.busy} aria-busy={csv.busy}
@@ -174,13 +180,13 @@ function AdminCash() {
           tour="cash"
         />
         <div className="toolbar">
-          <Segmented label="Période" value={p} options={PRESETS} onChange={(k) => setQuery({ p: k, du: from, au: to, compte: account })} />
-          {p === 'perso' && (
-            <form className="row" onSubmit={onCustom}>
-              <input type="date" name="du" defaultValue={from} aria-label="Du" style={{ width: 'auto' }} /><input type="date" name="au" defaultValue={to} aria-label="Au" style={{ width: 'auto' }} />
-              <button className="btn btn-sm" type="submit">Appliquer</button>
-            </form>
-          )}
+          <Segmented label="Période" value={p} options={PRESETS} onChange={(k) => setQuery({ p: k, compte: account })} />
+          <div className="date-nav">
+            <label className="row"><span className="subtle">Du</span>
+              <DateInput value={from} max={bizToday()} aria-label="Début de la période" onCommit={(d) => setDates(d, from === to ? d : to)} /></label>
+            <label className="row"><span className="subtle">au</span>
+              <DateInput value={to} max={bizToday()} aria-label="Fin de la période" onCommit={(d) => setDates(from, d)} /></label>
+          </div>
         </div>
 
         <div className="account-cards">
