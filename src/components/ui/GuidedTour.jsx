@@ -7,7 +7,10 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import Icon from './Icon.jsx';
 import { useStore } from '../../store/useStore.js';
 
-export const TOUR_DONE_KEY = 'club-tour-done';
+// The tour proposes itself by itself on the first entry to the demo space (AppShell), once per browser. The
+// key is its own, set only when the tour is closed in the demo: the older `club-tour-done` was set
+// wherever the tour was closed, so a browser that had seen it on the real site would never be offered it.
+export const TOUR_DEMO_DONE_KEY = 'club-tour-demo-done';
 
 // Each step points at the precise control or block it explains, with fallbacks to the page header
 // when that element is not on screen (no occupied room, empty agenda, phone layout...).
@@ -153,8 +156,8 @@ function placeCard(rect, w, h) {
   };
 }
 
-const markDone = () => {
-  try { localStorage.setItem(TOUR_DONE_KEY, '1'); } catch { /* storage unavailable */ }
+const markDemoDone = () => {
+  try { localStorage.setItem(TOUR_DEMO_DONE_KEY, '1'); } catch { /* storage unavailable */ }
 };
 
 export default function GuidedTour({ active, onClose, isAdmin, clubName }) {
@@ -224,7 +227,7 @@ export default function GuidedTour({ active, onClose, isAdmin, clubName }) {
   }, [active, index]);
 
   const quit = () => {
-    markDone();
+    if (demo) markDemoDone();
     onClose();
   };
   const next = () => setIndex((i) => Math.min(i + 1, steps.length));

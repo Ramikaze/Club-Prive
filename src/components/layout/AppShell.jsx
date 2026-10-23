@@ -6,7 +6,7 @@ import Icon from '../ui/Icon.jsx';
 import { Modal, openDialog, closeAllDialogs } from '../ui/Modal.jsx';
 import { FormError, PasswordField } from '../ui/ui.jsx';
 import { toast } from '../ui/toast.jsx';
-import GuidedTour, { TOUR_DONE_KEY } from '../ui/GuidedTour.jsx';
+import GuidedTour, { TOUR_DEMO_DONE_KEY } from '../ui/GuidedTour.jsx';
 import { api } from '../../lib/api.js';
 import { useSubmit } from '../../lib/hooks.js';
 import { toggleTheme } from '../../lib/theme.js';
@@ -126,11 +126,12 @@ export default function AppShell() {
     document.getElementById('main')?.focus({ preventScroll: true });
   }, [pathname]);
 
-  // The tour opens by itself once per browser, in the demo space.
+  // The tour opens by itself once per browser, in the demo space: the first entry, whatever the browser
+  // did with the tour on the real site (the demo has its own key).
   useEffect(() => {
     if (!demo) return undefined;
     let done = false;
-    try { done = localStorage.getItem(TOUR_DONE_KEY) === '1'; } catch { /* storage unavailable */ }
+    try { done = localStorage.getItem(TOUR_DEMO_DONE_KEY) === '1'; } catch { /* storage unavailable */ }
     if (done) return undefined;
     const timer = setTimeout(() => setTour(true), 700);
     return () => clearTimeout(timer);

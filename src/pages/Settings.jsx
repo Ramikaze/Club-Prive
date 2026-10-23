@@ -539,6 +539,7 @@ function DataSection({ onReset }) {
 function DemoResetSection({ applyBundle }) {
   const reset = () => actionDialog({
     title: 'Remettre la démo à neuf',
+    danger: true, // it wipes everybody's trials: a red confirm button, like « Effacer toutes les données »
     message: 'Toutes les données de la démo seront remplacées par des données fictives neuves, avec les réglages actuels du vrai club.',
     confirmLabel: 'Remettre à neuf',
     run: async () => {

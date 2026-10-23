@@ -44,6 +44,9 @@
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --slot-h: 34px;
   --tabbar-h: 64px;
+  /* The phone top bar: a 44px button between two 10px paddings (the notch comes on top). The demo banner
+     sticks right under it. */
+  --topbar-h: 64px;
   --sidebar-w: 254px;
   /* The demo space's own orange, the same in both themes (rules at the end of this file): --demo is the
      frame and the watermark (3.1:1 against the cream page, 5.2:1 against the dark one); --demo-deep is
@@ -224,6 +227,7 @@ main:focus { outline: none; }
   .topbar {
     display: flex; align-items: center; gap: 10px;
     position: sticky; top: 0; z-index: 20;
+    height: calc(var(--topbar-h) + env(safe-area-inset-top));
     color-scheme: dark;
     background: var(--charcoal); color: var(--on-charcoal); accent-color: var(--bronze);
     padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
@@ -705,13 +709,18 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 /* The mockup's bright stripes with dark text, the same in both themes: #2b1400 is 5.8:1 on #e07b00 and
    8.4:1 on #f2a33a (white would be 3.0 and 2.1), and every letter crosses both stripes. The Quitter
    button is white with #7a3e00 text (8.3:1). On wide screens the banner is the first thing under the top
-   edge of the frame, so its content starts below it; on phones the top bar is above it. */
+   edge of the frame, so its content starts below it; on phones the top bar is above it.
+   It stays at the top while the page scrolls: over the content and the watermark (10), under the bars
+   (20) and the dialogs (50). On phones it sticks right under the top bar. */
 .banner-demo {
+  position: sticky; top: 0; z-index: 15;
   padding-top: calc(6px + var(--demo-frame));
   background: repeating-linear-gradient(135deg, #e07b00 0 10px, #f2a33a 10px 20px);
   color: #2b1400; font-weight: 800; letter-spacing: 0.02em;
 }
-@media (max-width: 899px) { .banner-demo { padding-top: 6px; } }
+@media (max-width: 899px) {
+  .banner-demo { top: calc(var(--topbar-h) + env(safe-area-inset-top)); padding-top: 6px; }
+}
 .banner-demo .btn { background: #fff; border-color: #fff; color: #7a3e00; font-weight: 700; }
 .banner-demo .btn:hover { background: #fff1de; }
 /* Two tones, the dark one outside: it stands out from both stripes (5.8:1 and 8.4:1). */
