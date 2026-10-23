@@ -45,6 +45,9 @@ export const DEMO_AUTHOR_ID = 0;
 export function defaultSettings() {
   return {
     club_name: 'Limen',
+    // The club's WhatsApp number, as an administrator types it. It closes the booking confirmation sent to members
+    // (« Pour toute question : … ») and is left out of the message while empty. Set in Settings, never in the code.
+    club_whatsapp: '',
     currency: { label: 'FCFA', decimals: 0 },
     timezone: 'Africa/Brazzaville',
     hours: { open: '06:00' }, // start of the business day; the room can be booked at any hour
@@ -261,6 +264,9 @@ export class Club {
     switch (key) {
       case 'club_name':
         return text(v, 'Nom du club', { required: true, max: 80 });
+      case 'club_whatsapp':
+        // Free text, trimmed; empty clears the number.
+        return text(v, 'Numéro WhatsApp du club', { max: 30 }) ?? '';
       case 'currency': {
         if (!v || typeof v !== 'object') throw invalid('Devise invalide.');
         return {
@@ -1874,6 +1880,10 @@ export class Club {
       subscription: this.subscriptionDTO(sub, this.bizToday()),
       charges, payments, credit_movements, history, totals,
       extension_window: this.extensionWindow(r.id),
+      // What the WhatsApp confirmation to the booking's holder is addressed from. They are in this detail only:
+      // the lists of bookings do not spread the members' phone numbers.
+      member_first_name: r.first_name,
+      member_phone: this.memberRow(r.member_id).phone,
     };
   }
 

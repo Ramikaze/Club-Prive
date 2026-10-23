@@ -13,6 +13,7 @@ import { useLoad, useSubmit } from '../lib/hooks.js';
 import { openPaymentDialog } from './moneyDialogs.jsx';
 import { daysBetween, parseHHMM } from '../../shared/time.js';
 import { minDurationFor, supplementDetail } from '../../shared/rules.js';
+import { waDigits, waLink, bookingConfirmationText } from '../../shared/whatsapp.js';
 
 export function supplementText(paid, tariff) {
   if (!paid) return 'aucun';
@@ -334,7 +335,13 @@ function BookingDialog({ close, preset, onDone }) {
       if (!member) throw new Error('Choisissez un membre titulaire.');
       const detail = await api.post('/api/reservations', payload(), key);
       close();
-      toast(`${detail.reservation.status === 'en_cours' ? 'Membres installés' : 'Réservation confirmée'} : ${detail.reservation.member_name} (${detail.reservation.room_name}, ${detail.reservation.party_size} membre(s)).`);
+      // A booking for later offers the confirmation to the member, one click away in the toast (members
+      // installed in the room right now have nothing to be told). The dialog closes as it always did; the
+      // booking's page keeps a « Renvoyer la confirmation » button.
+      const confirmation = detail.reservation.status === 'reservee'
+        ? { label: 'Envoyer la confirmation WhatsApp', icon: 'message', onClick: () => sendWhatsAppConfirmation(detail) }
+        : null;
+      toast(`${detail.reservation.status === 'en_cours' ? 'Membres installés' : 'Réservation confirmée'} : ${detail.reservation.member_name} (${detail.reservation.room_name}, ${detail.reservation.party_size} membre(s)).`, 'ok', confirmation);
       onDone?.(detail);
     });
   };
@@ -552,6 +559,53 @@ function BookingDialog({ close, preset, onDone }) {
 
 export function openBookingDialog(preset = {}, onDone) {
   openDialog(BookingDialog, { preset: preset ?? {}, onDone });
+}
+
+// ---------------------------------------------------------------- WhatsApp confirmation
+
+// What the confirmation says, from a booking's detail (the server's answer when it is made, or its page) and the
+// club's settings. The day is the one the session starts on, as the member reads it in his calendar: a session
+// at 01:00 after a Friday evening is Saturday's.
+function confirmationText(detail) {
+  const r = detail.reservation;
+  const { club_name: clubName, club_whatsapp: clubWhatsapp } = useStore.getState().settings;
+  return bookingConfirmationText({
+    firstName: detail.member_first_name,
+    dayLabel: dayLabel(r.start_date, 'title').toLowerCase(),
+    startTime: r.start_time,
+    endTime: r.end_time,
+    roomName: r.room_name,
+    partySize: r.party_size,
+    clubName,
+    clubWhatsapp,
+  });
+}
+
+// The demo shows the message and sends nothing.
+function DemoMessageDialog({ close, text }) {
+  return (
+    <Modal title="Confirmation WhatsApp" onClose={close}>
+      <div className="form-grid">
+        <Notice kind="info">En démo, aucun message n'est envoyé.</Notice>
+        <p className="subtle">Voici le message que WhatsApp afficherait, prêt à envoyer au client :</p>
+        <blockquote className="wa-message">{text}</blockquote>
+        <div className="modal-actions"><button type="button" className="btn btn-primary" onClick={close}>Fermer</button></div>
+      </div>
+    </Modal>
+  );
+}
+
+// The only way a confirmation leaves the application, and only on the manager's click: WhatsApp opens on the
+// message, addressed to the member's number, and waits for him to press « Envoyer ». A number that cannot be
+// used opens WhatsApp without a recipient, and he picks the contact. The demo never opens the link: it shows
+// the message.
+export function sendWhatsAppConfirmation(detail) {
+  const text = confirmationText(detail);
+  if (useStore.getState().demo) {
+    openDialog(DemoMessageDialog, { text });
+    return;
+  }
+  window.open(waLink(waDigits(detail.member_phone), text), '_blank', 'noopener');
 }
 
 // ---------------------------------------------------------------- add/remove member in room

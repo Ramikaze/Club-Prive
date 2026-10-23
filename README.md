@@ -74,6 +74,8 @@ Chaque réservation dispose d’un titulaire et peut accueillir plusieurs membre
 
 L’effectif total, invités compris, respecte la capacité de la salle lors d’une création, d’un ajout de membre ou d’un transfert. Aucun membre ne peut participer à deux réservations qui se chevauchent, quelle que soit la salle. Une séance terminée conserve son effectif et sa salle.
 
+Après une réservation, le gérant envoie lui-même la confirmation au client sur WhatsApp, en un clic : le bouton ouvre WhatsApp avec le message déjà écrit pour le numéro du membre, et il ne reste qu’à appuyer sur « Envoyer » (rien ne part automatiquement, et le mode démo montre seulement le texte). Le numéro du club qui termine ce message se règle dans Paramètres, onglet « Club & Horaires », champ « Numéro WhatsApp du club » (par exemple +242 06 000 00 00) : il se saisit dans l’application, jamais dans le code.
+
 La configuration des salles est réservée aux administrateurs. Fermer une salle ou réduire sa capacité exige de traiter au préalable les réservations actives concernées. Une salle fermée reste visible dans « Salles fermées » pour être rouverte. La suppression retire la salle de l’exploitation et conserve ses réservations historiques dans leur salle d’origine. Au moins une salle reste ouverte.
 
 Le QR code d’une carte ouvre la fiche du membre après authentification du personnel. L’URL complète ou le code de carte peut aussi être saisi dans la recherche des membres. Le QR code ne constitue pas une connexion ni une autorisation d’accès autonome.

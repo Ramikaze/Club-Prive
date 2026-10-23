@@ -175,14 +175,20 @@ function ResetDialog({ close, onDone }) {
 function ClubSection({ save }) {
   const s = useSettings();
   const { busy, error, onSubmit } = useFormAction((v) => save({
-    club_name: v.club_name, currency: { label: v.currency_label, decimals: Number(v.currency_decimals) }, timezone: v.timezone,
+    club_name: v.club_name, club_whatsapp: v.club_whatsapp,
+    currency: { label: v.currency_label, decimals: Number(v.currency_decimals) }, timezone: v.timezone,
   }));
   return (
     <section className="card settings-section" id="sec-club">
       <div className="card-head"><h2>Identité du club</h2></div>
       <form className="form-grid" onSubmit={onSubmit} noValidate>
-        <label className="field"><span>Nom du club</span>
-          <input name="club_name" defaultValue={s.club_name} required maxLength={80} /></label>
+        <div className="form-row">
+          <label className="field"><span>Nom du club</span>
+            <input name="club_name" defaultValue={s.club_name} required maxLength={80} /></label>
+          <label className="field"><span>Numéro WhatsApp du club</span>
+            <input type="tel" name="club_whatsapp" defaultValue={s.club_whatsapp ?? ''} maxLength={30} autoComplete="off" placeholder="+242 06 000 00 00" />
+            <span className="help">Au format international. Il figure en bas du message de confirmation WhatsApp envoyé aux clients ; laissé vide, il est omis.</span></label>
+        </div>
         <div className="form-row">
           <label className="field"><span>Libellé de la devise</span>
             <input name="currency_label" defaultValue={s.currency.label} required maxLength={12} /></label>

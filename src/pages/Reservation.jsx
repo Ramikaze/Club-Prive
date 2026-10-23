@@ -13,7 +13,7 @@ import { useBusy, useLoad } from '../lib/hooks.js';
 import { useIsAdmin, useRooms } from '../store/useStore.js';
 import {
   openExtendDialog, openCancelReservationDialog, openPaymentDialog, openRefundDialog, cancelChargeDialog, supplementText, canRefund,
-  quickChangeRoom, openAddAttendeeDialog, quickRemoveAttendee,
+  quickChangeRoom, openAddAttendeeDialog, quickRemoveAttendee, sendWhatsAppConfirmation,
 } from '../dialogs/index.js';
 
 const CAT_FILTERS = [['tous', 'Tous'], ['cigare', 'Cigares'], ['bouteille', 'Bouteilles']];
@@ -116,6 +116,9 @@ function ReservationDetail({ d, products, reload }) {
         actions={(
           <>
             <Link className="btn" to={`/membres/${r.member_id}`}><Icon name="users" /> Fiche membre</Link>
+            {r.status === 'reservee' || r.status === 'en_cours' ? (
+              <button type="button" className="btn" onClick={() => sendWhatsAppConfirmation(d)}><Icon name="message" /> Renvoyer la confirmation</button>
+            ) : null}
             {r.status === 'reservee' ? (
               <>
                 <button type="button" className="btn btn-danger" onClick={() => openCancelReservationDialog(d, reload)}>{r.late_cancellation ? 'Absence' : 'Annuler'}</button>

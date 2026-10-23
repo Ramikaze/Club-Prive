@@ -527,7 +527,23 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 }
 .toast.error { border-left-color: var(--danger); }
 .toast svg { width: 18px; height: 18px; flex: none; margin-top: 1px; }
+.toast-body { display: grid; gap: 8px; justify-items: start; min-width: 0; }
+/* The action of a toast, under its message (the toast is charcoal in both themes). */
+.toast-action {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px; border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--on-charcoal) 55%, transparent); background: transparent; color: var(--on-charcoal);
+  font: inherit; font-weight: 600; cursor: pointer;
+}
+.toast-action:hover { background: color-mix(in srgb, var(--on-charcoal) 14%, transparent); }
+.toast-action:focus-visible { box-shadow: 0 0 0 2px var(--charcoal), 0 0 0 4px var(--bronze-on-charcoal); }
+.toast-action svg { margin-top: 0; }
 @media (max-width: 899px) { .toasts { bottom: calc(var(--tabbar-h) + 12px + env(safe-area-inset-bottom)); left: 16px; right: 16px; max-width: none; } }
+
+/* The confirmation message the demo shows instead of opening WhatsApp. */
+.wa-message {
+  margin: 0; padding: 12px 14px; border-left: 3px solid var(--bronze); border-radius: var(--radius-sm);
+  background: var(--surface-2); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text;
+}
 
 /* ------------------------------------------------------------------ segmented & toolbar */
 
