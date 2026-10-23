@@ -485,7 +485,23 @@ const V12 = [
   'ALTER TABLE charges ADD COLUMN deposit INTEGER NOT NULL DEFAULT 0 CHECK (deposit IN (0, 1))',
 ];
 
-export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12];
+// Product photos live apart from the products, so that a list of products never reads a picture. One photo
+// per product, replaced in place (JPEG, PNG or WebP, 200 KB at most: the API checks the size and the
+// content). `data` comes last on purpose: SQLite reads a row's columns in order, and the version of a photo
+// (`updated_at`), which every list of products asks for, would otherwise be read through all the pages that
+// the picture takes.
+const V13 = [
+  `CREATE TABLE product_photos (
+    product_id INTEGER PRIMARY KEY REFERENCES products(id),
+    mime TEXT NOT NULL CHECK (mime IN ('image/jpeg', 'image/png', 'image/webp')),
+    bytes INTEGER NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by INTEGER REFERENCES users(id),
+    data BLOB NOT NULL
+  )`,
+];
+
+export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13];
 
 export function migrate(db) {
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');

@@ -14,6 +14,9 @@ import { hashPassword, verifyPassword, sha256Hex, newToken, checkPasswordStrengt
 import { ALWAYS_REAL } from './space.js';
 
 const MAX_BODY = 256 * 1024;
+// A photo travels in base64, a third bigger than the picture: 200 KB of picture is 273 KB of text. The routes that
+// carry one (a photo, the catalogue import) read a larger body than the 256 KB the others are held to.
+const MAX_PHOTO_BODY = 300 * 1024;
 const SECURITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'same-origin',
@@ -43,10 +46,10 @@ function errorResponse(err) {
   return json(500, { error: { code: 'ERREUR_SERVEUR', message: "Erreur interne. L'opération n'a pas été enregistrée." } });
 }
 
-async function readJson(request) {
-  if (Number(request.headers.get('content-length') ?? 0) > MAX_BODY) throw new AppError(413, 'TROP_VOLUMINEUX', 'Requête trop volumineuse.');
+async function readJson(request, limit = MAX_BODY) {
+  if (Number(request.headers.get('content-length') ?? 0) > limit) throw new AppError(413, 'TROP_VOLUMINEUX', 'Requête trop volumineuse.');
   const raw = await request.text();
-  if (raw.length > MAX_BODY) throw new AppError(413, 'TROP_VOLUMINEUX', 'Requête trop volumineuse.');
+  if (raw.length > limit) throw new AppError(413, 'TROP_VOLUMINEUX', 'Requête trop volumineuse.');
   if (!raw) return {};
   try {
     const data = JSON.parse(raw);
@@ -108,6 +111,10 @@ export function createApi({ db, env = {}, demo = false }) {
   // Routes refused in the demo space: they manage accounts, which are mirrored from the real club there,
   // or wipe the data (the demo has its own reset, POST /api/demo/reset).
   const ACCOUNTS = { accounts: true };
+  // Photos are kept by the real club alone (the demo space only copies the products, and the interface asks the
+  // real club for their pictures): adding or removing one is refused in the demo space.
+  const PHOTOS = { photos: true };
+  const WITH_PHOTO = { maxBody: MAX_PHOTO_BODY };
   // Exported files are named DEMO_... in the demo space, so nobody takes them for the club's own.
   const exportName = (filename) => (demo ? `DEMO_${filename}` : filename);
 
@@ -144,19 +151,36 @@ export function createApi({ db, env = {}, demo = false }) {
     },
   }, (ctx) => club.changeOwnPassword(ctx.user, ctx.passwordHash, ctx.tokenHash));
 
-  // First start online: the first administrator is created with the SETUP_TOKEN secret. The same
-  // installation code gives that account a new identifier and password when they are lost.
-  const checkSetupToken = async (ctx) => {
-    const key = `${ctx.ip}|installation`;
+  // A secret of the Worker (SETUP_TOKEN, IMPORT_TOKEN) against the code a caller gives, compared by SHA-256
+  // digest. Without the secret configured the answer is 503, and five wrong codes in a row lock the caller's
+  // address for a minute (each secret has its own count).
+  const checkSecret = async (ctx, { scope, secret, given, absent, wrong }) => {
+    const key = `${ctx.ip}|${scope}`;
     checkThrottle(key);
-    if (!env.SETUP_TOKEN) {
-      throw new AppError(503, 'CODE_ABSENT', "Le code d'installation (secret SETUP_TOKEN) n'est pas configuré sur le serveur.");
-    }
-    if (await sha256Hex(String(ctx.body.setup_token ?? '')) !== await sha256Hex(env.SETUP_TOKEN)) {
+    if (!secret) throw new AppError(503, 'CODE_ABSENT', absent);
+    if (await sha256Hex(String(given ?? '')) !== await sha256Hex(secret)) {
       recordFailure(key);
-      throw new AppError(403, 'CODE_INCORRECT', "Code d'installation incorrect.");
+      throw new AppError(403, 'CODE_INCORRECT', wrong);
     }
   };
+
+  // First start online: the first administrator is created with the SETUP_TOKEN secret. The same
+  // installation code gives that account a new identifier and password when they are lost.
+  const checkSetupToken = (ctx) => checkSecret(ctx, {
+    scope: 'installation',
+    secret: env.SETUP_TOKEN,
+    given: ctx.body.setup_token,
+    absent: "Le code d'installation (secret SETUP_TOKEN) n'est pas configuré sur le serveur.",
+    wrong: "Code d'installation incorrect.",
+  });
+  // The catalogue import door: the code comes in a header of its own, since the door has no session.
+  const checkImportToken = (ctx) => checkSecret(ctx, {
+    scope: 'import',
+    secret: env.IMPORT_TOKEN,
+    given: ctx.headers.get('x-import-token'),
+    absent: "Le code d'import (secret IMPORT_TOKEN) n'est pas configuré sur le serveur.",
+    wrong: "Code d'import incorrect.",
+  });
   add('GET', '/api/setup', { public: true }, () => ({ needed: !club.hasUsers(), token_configured: !!env.SETUP_TOKEN }));
   add('POST', '/api/setup', {
     public: true,
@@ -198,6 +222,12 @@ export function createApi({ db, env = {}, demo = false }) {
     (ctx) => club.setUserPassword(ctx.user, ctx.params.id, ctx.passwordHash));
   add('GET', '/api/audit', ADMIN, (ctx) => club.auditLog(ctx.query));
   add('POST', '/api/admin/reset', { ...ADMIN, ...ACCOUNTS }, (ctx) => club.wipeData(ctx.user, ctx.body.confirm));
+  // Catalogue import: a temporary door for a script on the owner's computer, one product per call, open only
+  // while the IMPORT_TOKEN secret exists. There is no session: the code is the whole credential, so the door
+  // belongs to the real club alone (the demo space answers 404).
+  if (!demo) {
+    add('POST', '/api/admin/catalog-import', { public: true, ...WITH_PHOTO, prepare: checkImportToken }, (ctx) => club.importCatalog(ctx.body));
+  }
   // Demo space only (the real club answers 404): empties the space and fills it again from the real
   // club's configuration, which handleDemo hands over with the request.
   if (demo) {
@@ -295,6 +325,11 @@ export function createApi({ db, env = {}, demo = false }) {
   add('POST', '/api/products', ADMIN, (ctx) => club.createProduct(ctx.user, ctx.body));
   add('PUT', '/api/products/:id', ADMIN, (ctx) => club.updateProduct(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/products/:id/stock', {}, (ctx) => club.stockOperation(ctx.user, ctx.params.id, ctx.body));
+  // The picture itself, for a browser's <img> (signed in, no demo header: the real club answers). The address carries
+  // the photo's version (?v=) for the browser's cache and the server does not read it.
+  add('GET', '/api/products/:id/photo', {}, (ctx) => ({ __image: club.productPhoto(ctx.params.id) }));
+  add('PUT', '/api/products/:id/photo', { ...ADMIN, ...PHOTOS, ...WITH_PHOTO }, (ctx) => club.setProductPhoto(ctx.user, ctx.params.id, ctx.body));
+  add('DELETE', '/api/products/:id/photo', { ...ADMIN, ...PHOTOS }, (ctx) => club.removeProductPhoto(ctx.user, ctx.params.id));
   add('GET', '/api/stock-movements', {}, (ctx) => club.stockMovements(ctx.query));
 
   // Lounge: conservation checks of the humidors.
@@ -351,10 +386,11 @@ export function createApi({ db, env = {}, demo = false }) {
       const { route, params } = found;
       const writes = request.method !== 'GET';
       if (writes) checkCsrf(request, url);
-      const body = writes ? await readJson(request) : {};
+      const body = writes ? await readJson(request, route.opts.maxBody) : {};
       const token = user ? null : (parseCookies(request.headers.get('cookie')).sid || null);
       const ctx = {
         params, body, token, tokenHash: token ? await sha256Hex(token) : null, user: null, demoConfig,
+        headers: request.headers,
         ip: request.headers.get('cf-connecting-ip') ?? 'local',
         query: Object.fromEntries(url.searchParams),
         setCookie: (value, maxAge) => cookies.push(cookieHeader(value, maxAge)),
@@ -364,6 +400,7 @@ export function createApi({ db, env = {}, demo = false }) {
         // A session's account is active by construction; the one handleDemo hands over may have been deactivated.
         if (!ctx.user?.active) throw notSignedIn();
         if (demo && route.opts.accounts) throw new AppError(403, 'MODE_DEMO', 'Les comptes se gèrent hors du mode démo.');
+        if (demo && route.opts.photos) throw new AppError(403, 'MODE_DEMO', 'Les photos se gèrent hors du mode démo.');
         if (route.opts.roles && !route.opts.roles.includes(ctx.user.role)) throw forbidden();
       }
 
@@ -421,6 +458,15 @@ export function createApi({ db, env = {}, demo = false }) {
           'Content-Type': 'text/csv; charset=utf-8',
           'Content-Disposition': `attachment; filename="${exportName(filename).replace(/[^\w.-]/g, '_')}"`,
         },
+      });
+    }
+    if (payload?.__image) {
+      // A photo never changes at its address (the version in it changes with the photo): kept a year, by the
+      // signed-in browser alone. This answer's Cache-Control replaces the no-store of the other answers.
+      const { mime, data } = payload.__image;
+      return new Response(data, {
+        status: 200,
+        headers: { ...SECURITY_HEADERS, 'Content-Type': mime, 'Cache-Control': 'private, max-age=31536000, immutable' },
       });
     }
     return json(200, payload, { cookies, replayed });

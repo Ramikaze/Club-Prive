@@ -8,6 +8,7 @@ import { text, int, toId, flag, frDate } from './validate.js';
 import { ledgerMethods, DEFAULT_CATEGORIES } from './ledger.js';
 import { loungeMethods } from './lounge.js';
 import { seedDemo } from './seed.js';
+import { decodePhoto } from './photos.js';
 import {
   localParts, localToUtcMs, addDays, addMonths, daysBetween, monthsElapsed, isValidDate, isValidTimeZone, parseHHMM,
 } from '../shared/time.js';
@@ -35,8 +36,16 @@ const SESSION_DAYS = 14;
 const WIPE_ORDER = [
   'humidor_readings', 'humidors',
   'idempotency_keys', 'payment_allocations', 'refunds', 'stock_movements', 'credit_movements', 'charges', 'payments',
-  'reservation_attendees', 'reservations', 'cards', 'subscriptions', 'members', 'products', 'ledger_entries', 'closed_periods', 'audit_log',
+  'reservation_attendees', 'reservations', 'cards', 'subscriptions', 'members', 'product_photos', 'products',
+  'ledger_entries', 'closed_periods', 'audit_log',
 ];
+
+// The highest price the catalogue import takes, in whole francs: a typing slip, such as a price counted in
+// the wrong unit, is refused instead of stored.
+const MAX_IMPORT_PRICE = 1000000000;
+
+// What a demo space gives each real product it copies: fictitious, the same for all of them.
+const DEMO_CATALOGUE_STOCK = 10;
 
 // The fictitious author of the demo space's records: an administrator account of the demo database
 // only. Real accounts start at id 1, so it never stands for one of them.
@@ -106,6 +115,13 @@ const CHARGE_SELECT = `
   LEFT JOIN payment_allocations pa ON pa.charge_id = c.id
   LEFT JOIN payments p ON p.id = pa.payment_id
   LEFT JOIN refunds rf ON rf.charge_id = c.id`;
+
+// A product with the version of its photo (the date of the photo, null without one). One join serves a whole
+// list, and only the date is read: the picture itself is never loaded with the products.
+const PRODUCT_SELECT = `
+  SELECT p.*, ph.updated_at AS photo_version
+  FROM products p
+  LEFT JOIN product_photos ph ON ph.product_id = p.id`;
 
 // A duration inside a sentence: « 30 minutes » (fmtDuration abbreviates them to « 30 min »), « 1 h 30 » from an hour on.
 const durationInWords = (min) => (min < 60 ? `${min} minute${min > 1 ? 's' : ''}` : fmtDuration(min));
@@ -2151,18 +2167,25 @@ export class Club {
 
   // ---------------------------------------------------------------- products & stock
 
+  // `photo_version` is the date of the photo, null without one: the interface asks for the picture at an
+  // address that carries it, so a new photo is a new address and the browser can keep each for a long time.
   productDTO(p) {
     return {
       id: p.id, category: p.category, name: p.name, reference: p.reference, description: p.description, price: p.price,
       stock_qty: p.stock_qty, low_stock_threshold: p.low_stock_threshold, active: !!p.active, is_demo: !!p.is_demo,
-      low: p.stock_qty <= p.low_stock_threshold, out: p.stock_qty === 0,
+      low: p.stock_qty <= p.low_stock_threshold, out: p.stock_qty === 0, photo_version: p.photo_version ?? null,
     };
+  }
+
+  // One product, read the way the lists read them.
+  productById(id) {
+    return this.productDTO(this.get(`${PRODUCT_SELECT} WHERE p.id = ?`, id));
   }
 
   listProducts({ includeInactive = false } = {}) {
     const rows = includeInactive
-      ? this.all('SELECT * FROM products ORDER BY category, name')
-      : this.all('SELECT * FROM products WHERE active = 1 ORDER BY category, name');
+      ? this.all(`${PRODUCT_SELECT} ORDER BY p.category, p.name`)
+      : this.all(`${PRODUCT_SELECT} WHERE p.active = 1 ORDER BY p.category, p.name`);
     return rows.map((p) => this.productDTO(p));
   }
 
@@ -2190,7 +2213,7 @@ export class Club {
     );
     if (initial > 0) this.moveStock(actor, id, initial, 'stock_initial', { reason: 'Création du produit' });
     this.audit(actor, 'produit.creer', 'product', id, { ...f, stock_initial: initial });
-    return this.productDTO(this.get('SELECT * FROM products WHERE id = ?', id));
+    return this.productById(id);
   }
 
   updateProduct(actor, productId, input) {
@@ -2210,7 +2233,7 @@ export class Club {
       avant: { name: p.name, reference: p.reference, price: p.price, low_stock_threshold: p.low_stock_threshold, active: !!p.active },
       apres: { name: f.name, reference: f.reference, price: f.price, low_stock_threshold: f.threshold, active: f.active },
     });
-    return this.productDTO(this.get('SELECT * FROM products WHERE id = ?', p.id));
+    return this.productById(p.id);
   }
 
   stockOperation(actor, productId, input) {
@@ -2235,7 +2258,7 @@ export class Club {
     } else {
       throw invalid('Type de mouvement invalide (entree ou ajustement).');
     }
-    return this.productDTO(this.get('SELECT * FROM products WHERE id = ?', p.id));
+    return this.productById(p.id);
   }
 
   stockMovements(query = {}) {
@@ -2246,6 +2269,124 @@ export class Club {
       ? this.all(`${base} WHERE sm.product_id = ? ORDER BY sm.id DESC LIMIT ?`, toId(query.product_id), limit)
       : this.all(`${base} ORDER BY sm.id DESC LIMIT ?`, limit);
     return rows.map((m) => ({ ...m, kind_label: STOCK_KIND[m.kind] }));
+  }
+
+  // ---------------------------------------------------------------- product photos
+
+  // The picture of a product, for the route that serves it. A row without a byte is the stand-in the demo
+  // space keeps for a photo that lives in the real club (copyCatalogue): there is no picture to give here.
+  productPhoto(productId) {
+    const photo = this.get('SELECT mime, data FROM product_photos WHERE product_id = ? AND bytes > 0', toId(productId, 'Produit'));
+    if (!photo) throw notFound('Photo');
+    return photo;
+  }
+
+  // Stores a photo as decodePhoto gives it, in place of the product's previous one. The date it is stored
+  // under is the version in the picture's address, which the browser keeps for a year: it must change with
+  // every photo, even one stored in the same millisecond or by a clock that went back. Tells whether a
+  // photo was replaced.
+  storePhoto(productId, { mime, bytes }, userId) {
+    const previous = this.get('SELECT updated_at FROM product_photos WHERE product_id = ?', productId);
+    let at = this.nowIso();
+    if (previous && at <= previous.updated_at) at = new Date(Date.parse(previous.updated_at) + 1).toISOString();
+    this.run(
+      `INSERT INTO product_photos (product_id, mime, bytes, updated_at, updated_by, data) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(product_id) DO UPDATE SET mime = excluded.mime, bytes = excluded.bytes, updated_at = excluded.updated_at,
+         updated_by = excluded.updated_by, data = excluded.data`,
+      productId, mime, bytes.length, at, userId, bytes,
+    );
+    return !!previous;
+  }
+
+  setProductPhoto(actor, productId, input) {
+    const id = toId(productId, 'Produit');
+    if (!this.get('SELECT 1 AS x FROM products WHERE id = ?', id)) throw notFound('Produit');
+    const photo = decodePhoto(input);
+    const replaced = this.storePhoto(id, photo, actor.id);
+    this.audit(actor, 'produit.photo', 'product', id, { mime: photo.mime, bytes: photo.bytes.length, replaced });
+    return this.productById(id);
+  }
+
+  // Removing a photo that is not there changes nothing, and is not written to the journal.
+  removeProductPhoto(actor, productId) {
+    const id = toId(productId, 'Produit');
+    if (!this.get('SELECT 1 AS x FROM products WHERE id = ?', id)) throw notFound('Produit');
+    if (this.run('DELETE FROM product_photos WHERE product_id = ?', id).changes) this.audit(actor, 'produit.photo_retirer', 'product', id);
+    return this.productById(id);
+  }
+
+  // ---------------------------------------------------------------- catalogue import
+
+  // Next free reference of a series: CIG-001, CIG-002... for cigars, BOU-001... for bottles, after the
+  // highest number in use (a reference of another shape, such as CIG-DEMO-01, is not counted).
+  nextReference(category) {
+    const prefix = category === 'cigare' ? 'CIG' : 'BOU';
+    const numbered = new RegExp(`^${prefix}-(\\d+)$`, 'i');
+    let highest = 0;
+    for (const { reference } of this.all('SELECT reference FROM products WHERE reference LIKE ?', `${prefix}-%`)) {
+      highest = Math.max(highest, Number(numbered.exec(reference)?.[1] ?? 0));
+    }
+    return `${prefix}-${String(highest + 1).padStart(3, '0')}`;
+  }
+
+  // The import's one product: created, or updated when a real product already has this name (capitals and
+  // spaces around it do not count). An update brings the price, the description if one comes, the photo if one
+  // comes, and puts the product back on sale; its stock, reference, category and name stay what they are.
+  // A new product has a stock of 0 and the club's usual alert threshold. No account stands behind the
+  // import door, so the product and the journal have no author.
+  importCatalogItem(item) {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) throw invalid('Fiche produit invalide.');
+    const name = text(item.name, 'Nom du produit', { required: true, max: 80 });
+    if (!['cigare', 'bouteille'].includes(item.category)) throw invalid('Catégorie invalide (cigare ou bouteille).');
+    const price = int(item.price, 'Prix de vente (en francs)', { min: 0, max: MAX_IMPORT_PRICE }) * 100;
+    const description = item.description === undefined ? undefined : text(item.description, 'Description', { max: 300 });
+    const photo = item.photo === undefined || item.photo === null ? null : decodePhoto(item.photo);
+
+    const sameName = (n) => n.trim().normalize('NFC').toLowerCase();
+    const found = this.all('SELECT id, name FROM products WHERE is_demo = 0 ORDER BY id').find((p) => sameName(p.name) === sameName(name));
+    const now = this.nowIso();
+    let id;
+    let reference;
+    if (found) {
+      id = found.id;
+      const current = this.get('SELECT reference, description FROM products WHERE id = ?', id);
+      reference = current.reference;
+      this.run(
+        'UPDATE products SET price = ?, description = ?, active = 1, updated_at = ?, updated_by = NULL WHERE id = ?',
+        price, description === undefined ? current.description : description, now, id,
+      );
+    } else {
+      reference = this.nextReference(item.category);
+      id = this.insert(
+        `INSERT INTO products (category, name, reference, description, price, stock_qty, low_stock_threshold, active, is_demo, created_at, created_by)
+         VALUES (?, ?, ?, ?, ?, 0, ?, 1, 0, ?, NULL)`,
+        item.category, name, reference, description ?? null, price, this.settings().low_stock_default, now,
+      );
+    }
+    if (photo) this.storePhoto(id, photo, null);
+    const status = found ? 'updated' : 'created';
+    this.audit(null, 'produit.importer', 'product', id, { name, reference, status, price, photo: !!photo });
+    return { id, reference, status, photo: !!this.get('SELECT 1 AS x FROM product_photos WHERE product_id = ?', id) };
+  }
+
+  // The fictitious products that an earlier demonstration left in the real club are put off sale, never
+  // deleted: their sales and stock movements stay in the books. Tells how many were still on sale.
+  deactivateDemoProducts() {
+    const { changes } = this.run('UPDATE products SET active = 0, updated_at = ?, updated_by = NULL WHERE is_demo = 1 AND active = 1', this.nowIso());
+    this.audit(null, 'produits.desactiver_fictifs', null, null, { count: changes });
+    return changes;
+  }
+
+  // What the import door does with a call: a product to create or update, the retirement of the fictitious
+  // products, or both (the product first).
+  importCatalog(input) {
+    const retire = input.deactivate_demo_products === true;
+    if (input.item === undefined && !retire) {
+      throw invalid('Rien à importer : une fiche (item) ou deactivate_demo_products sont attendus.');
+    }
+    const done = input.item === undefined ? {} : this.importCatalogItem(input.item);
+    if (retire) done.deactivated = this.deactivateDemoProducts();
+    return done;
   }
 
   // ---------------------------------------------------------------- dashboard & finance
@@ -2292,7 +2433,7 @@ export class Club {
          AND NOT EXISTS (SELECT 1 FROM subscriptions n WHERE n.member_id = s.member_id AND n.status = 'active' AND n.start_date > s.end_date)
        ORDER BY s.end_date DESC`, today, addDays(today, -30),
     ).map((x) => ({ ...x, member_name: `${x.first_name} ${x.last_name}`, days_since: daysBetween(x.end_date, today) }));
-    const stockAlerts = this.all('SELECT * FROM products WHERE active = 1 AND stock_qty <= low_stock_threshold ORDER BY stock_qty, name')
+    const stockAlerts = this.all(`${PRODUCT_SELECT} WHERE p.active = 1 AND p.stock_qty <= p.low_stock_threshold ORDER BY p.stock_qty, p.name`)
       .map((p) => this.productDTO(p));
     const { due } = this.get("SELECT COALESCE(SUM(amount), 0) AS due FROM charges WHERE status = 'due'");
     const result = {
@@ -2512,7 +2653,9 @@ export class Club {
   // as identities only (id, name, role, active): neither a login nor a password hash leaves the real
   // club, and the demo space has no use for them (it gives each account the login u<id>). The treasury
   // starting point stays out: the demo sets its own, with fictitious amounts. `demo_mode` is not a
-  // stored setting any more.
+  // stored setting any more. The catalogue goes as the products on sale, real ones only (the fictitious
+  // ones an earlier demonstration left here stay out), each with the version of its photo and never the
+  // picture: this is handed over with every demo request.
   demoConfig() {
     return {
       users: this.all('SELECT id, name, role, active FROM users ORDER BY id'),
@@ -2522,6 +2665,11 @@ export class Club {
       plans: this.all('SELECT * FROM plans ORDER BY id'),
       rooms: this.all('SELECT * FROM rooms ORDER BY id'),
       categories: this.all('SELECT * FROM categories ORDER BY id'),
+      products: this.all(
+        `SELECT p.id, p.category, p.name, p.reference, p.description, p.price, p.low_stock_threshold, ph.updated_at AS photo_version
+         FROM products p LEFT JOIN product_photos ph ON ph.product_id = p.id
+         WHERE p.active = 1 AND p.is_demo = 0 ORDER BY p.id`,
+      ),
     };
   }
 
@@ -2557,10 +2705,34 @@ export class Club {
     }
   }
 
+  // Puts the real club's products (demoConfig) in this empty demo space, under the ids they have in the real
+  // club: the interface asks the real club for a photo by the product's id, and a browser's <img> cannot
+  // name the demo space. They read as real catalogue items (not flagged fictitious), with a stock that is
+  // fictitious, the same for all, and the opening movement that explains it. The pictures stay in the real
+  // club: a photo is only its version here, a row with no byte, so that the product carries the address of
+  // its picture. The seed's fictitious products are created after these and take the ids that follow.
+  copyCatalogue(products, author) {
+    this.assertDemo();
+    for (const p of products) {
+      this.run(
+        `INSERT INTO products (id, category, name, reference, description, price, stock_qty, low_stock_threshold, active, is_demo, created_at, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, 0, ?, 1, 0, ?, ?)`,
+        p.id, p.category, p.name, p.reference, p.description, p.price, p.low_stock_threshold, this.nowIso(), author.id,
+      );
+      this.moveStock(author, p.id, DEMO_CATALOGUE_STOCK, 'stock_initial', { reason: 'Stock fictif de la démo' });
+      if (p.photo_version) {
+        this.run(
+          `INSERT INTO product_photos (product_id, mime, bytes, updated_at, updated_by, data) VALUES (?, 'image/jpeg', 0, ?, NULL, x'')`,
+          p.id, p.photo_version,
+        );
+      }
+    }
+  }
+
   // Gets the demo space ready for a request. The first time (no `demo_seeded` mark) it copies the
-  // real club's configuration and fills the space with fictitious data, all in one transaction. After
-  // that only the accounts are mirrored again, so a new, renamed or deactivated account is followed at
-  // once, while the settings stay as copied until the next reset.
+  // real club's configuration and catalogue and fills the space with fictitious data, all in one
+  // transaction. After that only the accounts are mirrored again, so a new, renamed or deactivated
+  // account is followed at once, while the settings and the catalogue stay as copied until the next reset.
   prepareDemo(config) {
     this.assertDemo();
     this.tx(() => {
@@ -2582,7 +2754,7 @@ export class Club {
       // is put back once the data is in.
       const withdrawn = config.plans.filter((p) => !p.active);
       this.run('UPDATE plans SET active = 1');
-      seedDemo(this, { actor: this.get('SELECT * FROM users WHERE id = ?', DEMO_AUTHOR_ID) });
+      seedDemo(this, { actor: this.get('SELECT * FROM users WHERE id = ?', DEMO_AUTHOR_ID), catalogue: config.products ?? [] });
       for (const p of withdrawn) this.run('UPDATE plans SET active = 0 WHERE id = ?', p.id);
       this.run("INSERT INTO meta (key, value) VALUES ('demo_seeded', ?)", this.nowIso());
     });

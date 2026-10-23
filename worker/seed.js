@@ -18,15 +18,16 @@ const HOUR = 3600000;
 const DAY = 24 * HOUR;
 
 // `actor`: the full `users` row of the author, an administrator, who owns every demonstration record.
-export function seedDemo(club, { actor }) {
+// `catalogue`: the real club's products (Club.demoConfig), which the demo space shows beside the fictitious ones.
+export function seedDemo(club, { actor, catalogue = [] }) {
   try {
-    club.tx(() => fill(club, { actor }));
+    club.tx(() => fill(club, { actor, catalogue }));
   } finally {
     club.at = null;
   }
 }
 
-function fill(club, { actor }) {
+function fill(club, { actor, catalogue }) {
   if (!club.isEmpty()) {
     throw conflict('DONNEES_EXISTANTES', 'Des membres, produits ou opérations existent déjà : effacez les données avant de charger la démonstration.');
   }
@@ -51,8 +52,10 @@ function fill(club, { actor }) {
     });
   }
 
-  // Catalogue (fictitious; real list and quantities to be supplied)
+  // Catalogue: the real club's products first, under the ids they have there, then the fictitious ones below,
+  // which take the ids that follow. The history sells the fictitious ones only.
   club.at = realNow - 70 * DAY;
+  club.copyCatalogue(catalogue, owner);
   const product = (category, name, reference, price, stock, threshold) => club.createProduct(owner, {
     category, name, reference, price: price * 100, initial_stock: stock, low_stock_threshold: threshold,
     description: 'Produit fictif — démonstration',
