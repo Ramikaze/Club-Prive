@@ -551,12 +551,12 @@ function DataSection({ onReset }) {
 }
 
 // Demo space only, in place of DataSection. The server empties the demo, fills it again with fictitious
-// data from the real club's current settings and answers with the new bundle.
+// data from the real club's current settings and catalogue and answers with the new bundle.
 function DemoResetSection({ applyBundle }) {
   const reset = () => actionDialog({
     title: 'Remettre la démo à neuf',
     danger: true, // it wipes everybody's trials: a red confirm button, like « Effacer toutes les données »
-    message: 'Toutes les données de la démo seront remplacées par des données fictives neuves, avec les réglages actuels du vrai club.',
+    message: 'Toutes les données de la démo seront remplacées par des données fictives neuves, avec les réglages et le catalogue actuels du vrai club.',
     confirmLabel: 'Remettre à neuf',
     run: async () => {
       applyBundle(await api.post('/api/demo/reset', {}));

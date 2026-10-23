@@ -80,8 +80,16 @@ export function Modal({ title, size = '', onClose, children }) {
     return () => {
       document.removeEventListener('keydown', onKey);
       open.splice(open.indexOf(el), 1);
-      // A window removed after its exit animation must not pull focus out of one opened since.
-      if (!open.length && previous && document.contains(previous)) previous.focus?.();
+      // Focus returns to where it was. A window removed after its exit animation must not pull focus out of one
+      // opened since: that one already holds it. A window still open underneath (a confirmation over a product
+      // sheet) takes the focus back when it lost it: where it was, or else its body.
+      const top = open[open.length - 1];
+      if (!top) {
+        if (previous && document.contains(previous)) previous.focus?.();
+      } else if (!top.contains(document.activeElement)) {
+        if (previous && top.contains(previous)) previous.focus?.();
+        else top.querySelector('.modal-body')?.focus({ preventScroll: true });
+      }
     };
   }, []);
 

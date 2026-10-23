@@ -353,9 +353,12 @@
 
 /* A product picture sits on a light panel in both themes (--photo-bg): `contain` leaves margins round a picture
    that is not square, and product shots are taken on white, so the margins and the clear parts of a PNG blend
-   into the panel. A product without a picture gets the theme's own surface and a cigar or a bottle. */
+   into the panel. A product without a picture gets the theme's own surface and a cigar or a bottle.
+   The grid has one cell the size of the panel: left to an automatic row, the cell would take the height of a tall
+   picture, which would then be cut off at the bottom instead of contained. */
 .product-photo {
   display: grid; place-items: center; flex: none; overflow: hidden;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
   background: var(--photo-bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text-3);
 }
 .product-photo.is-empty { background: var(--surface-2); }

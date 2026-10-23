@@ -30,7 +30,8 @@ export function ProductPhoto({ product, large = false }) {
   return (
     <span className={`product-photo ${large ? 'product-photo-large' : 'product-photo-thumb'}${shown ? '' : ' is-empty'}`}>
       {shown ? (
-        <img src={url} alt={product.name} loading={large ? undefined : 'lazy'} decoding="async" onError={() => setFailed(url)} />
+        // In a list the product's name stands next to its thumbnail: the picture is not read out a second time.
+        <img src={url} alt={large ? product.name : ''} loading={large ? undefined : 'lazy'} decoding="async" onError={() => setFailed(url)} />
       ) : (
         <span className="product-photo-none">
           <Icon name={product.category === 'bouteille' ? 'bottle' : 'cigar'} />
