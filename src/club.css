@@ -32,6 +32,9 @@
   --info: #29537a;
   --info-soft: #dfe9f2;
   --neutral-soft: #ebe0cc;
+  /* The panel a product picture sits on, white in both themes: product shots are taken on white, so the margins
+     round a picture that is not square and the clear parts of a PNG blend into it (no override in the dark theme). */
+  --photo-bg: #fff;
   /* The end-of-session alert (.notice-ending): an orange that asks the manager for an answer, where the amber
      of --warn only informs. Text 9.5:1 on the tint; the bar 3.2:1 against the cream cards; the button text on
      --ending-deep 5.2:1 (8.4:1 in the dark theme). */

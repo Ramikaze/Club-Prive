@@ -28,3 +28,9 @@ dist-ssr
 *.sln
 *.sw?
 .superpowers/
+
+# Product photos gathered for the catalogue import (third-party images, never committed)
+photos-cigares/
+
+# Isolated working copies that Claude Code agents create (never committed)
+.claude/worktrees/

@@ -18,15 +18,16 @@ const HOUR = 3600000;
 const DAY = 24 * HOUR;
 
 // `actor`: the full `users` row of the author, an administrator, who owns every demonstration record.
-export function seedDemo(club, { actor }) {
+// `catalogue`: the real club's products (Club.demoConfig), which the demo space shows beside the fictitious ones.
+export function seedDemo(club, { actor, catalogue = [] }) {
   try {
-    club.tx(() => fill(club, { actor }));
+    club.tx(() => fill(club, { actor, catalogue }));
   } finally {
     club.at = null;
   }
 }
 
-function fill(club, { actor }) {
+function fill(club, { actor, catalogue }) {
   if (!club.isEmpty()) {
     throw conflict('DONNEES_EXISTANTES', 'Des membres, produits ou opérations existent déjà : effacez les données avant de charger la démonstration.');
   }
@@ -51,10 +52,26 @@ function fill(club, { actor }) {
     });
   }
 
-  // Catalogue (fictitious; real list and quantities to be supplied)
+  // Catalogue: the real club's products first, under the ids and the references they have there (the manager
+  // trains with the references he sees for real), then the fictitious ones below, which take the ids that follow.
+  // The history sells the fictitious ones only.
   club.at = realNow - 70 * DAY;
+  club.copyCatalogue(catalogue, owner);
+  // A fictitious product wants a reference of its series (CIG-DEMO-01...). A real product may hold it already, in
+  // whatever case, and so may a fictitious one made before: it then takes the next free number of its series.
+  // Every reference below must end with its number.
+  const freeReference = (wanted) => {
+    const [, series, digits] = /^(.*?)(\d+)$/.exec(wanted);
+    let number = Number(digits);
+    let reference = wanted;
+    while (club.get('SELECT 1 AS x FROM products WHERE reference = ?', reference)) {
+      number += 1;
+      reference = `${series}${String(number).padStart(digits.length, '0')}`;
+    }
+    return reference;
+  };
   const product = (category, name, reference, price, stock, threshold) => club.createProduct(owner, {
-    category, name, reference, price: price * 100, initial_stock: stock, low_stock_threshold: threshold,
+    category, name, reference: freeReference(reference), price: price * 100, initial_stock: stock, low_stock_threshold: threshold,
     description: 'Produit fictif — démonstration',
   }, { demo: true }).id;
   const robusto = product('cigare', 'Robusto (démo)', 'CIG-DEMO-01', 10000, 30, 6);

@@ -25,5 +25,9 @@
   "observability": { "enabled": true }
   // Secret (not in this file): SETUP_TOKEN, the installation code for the first administrator.
   //   npx wrangler secret put SETUP_TOKEN
+  // Temporary secret: IMPORT_TOKEN opens the catalogue import door (POST /api/admin/catalog-import, header
+  // x-import-token). Created for the import, deleted right after: without it the door answers 503.
+  //   npx wrangler secret put IMPORT_TOKEN
+  //   npx wrangler secret delete IMPORT_TOKEN
   // Local development reads .dev.vars (DEMO_ACCOUNTS=1 creates the demonstration accounts).
 }

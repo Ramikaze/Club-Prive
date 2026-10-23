@@ -51,7 +51,10 @@ export function Modal({ title, size = '', onClose, children }) {
     const el = backdrop.current;
     open.push(el);
     const first = body.current?.querySelector('[autofocus], input:not([type="hidden"]):not([disabled]), select, textarea, button[type="submit"]');
-    (first ?? body.current)?.focus?.();
+    // With no field to start in, the body of the window takes the focus (Escape and Tab work from there). It must not
+    // scroll a tall window, a phone's sheet for one, down under its own header.
+    if (first) first.focus?.();
+    else body.current?.focus?.({ preventScroll: true });
     const onKey = (e) => {
       if (open[open.length - 1] !== el) return;
       if (e.key === 'Escape') {
@@ -77,8 +80,16 @@ export function Modal({ title, size = '', onClose, children }) {
     return () => {
       document.removeEventListener('keydown', onKey);
       open.splice(open.indexOf(el), 1);
-      // A window removed after its exit animation must not pull focus out of one opened since.
-      if (!open.length && previous && document.contains(previous)) previous.focus?.();
+      // Focus returns to where it was. A window removed after its exit animation must not pull focus out of one
+      // opened since: that one already holds it. A window still open underneath (a confirmation over a product
+      // sheet) takes the focus back when it lost it: where it was, or else its body.
+      const top = open[open.length - 1];
+      if (!top) {
+        if (previous && document.contains(previous)) previous.focus?.();
+      } else if (!top.contains(document.activeElement)) {
+        if (previous && top.contains(previous)) previous.focus?.();
+        else top.querySelector('.modal-body')?.focus({ preventScroll: true });
+      }
     };
   }, []);
 

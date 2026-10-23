@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
-import { DemoChip, Empty, FormError, Loaded, PageHead, Segmented, StocksTabs } from '../components/ui/ui.jsx';
-import { Modal, openDialog } from '../components/ui/Modal.jsx';
+import { DemoChip, Empty, FormError, Loaded, PageHead, ProductPhoto, Segmented, StocksTabs } from '../components/ui/ui.jsx';
+import { Modal, actionDialog, openDialog } from '../components/ui/Modal.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import { api, newKey } from '../lib/api.js';
 import { dateTime, money, parseMoney, toMajor } from '../lib/format.js';
 import { useLoad, useSubmit } from '../lib/hooks.js';
-import { useIsAdmin, useSettings } from '../store/useStore.js';
+import { preparePhoto } from '../lib/photo.js';
+import { useIsAdmin, useSettings, useStore } from '../store/useStore.js';
 
 const CATEGORY = { cigare: 'Cigare', bouteille: 'Bouteille' };
 
@@ -150,7 +151,87 @@ function HistoryDialog({ close, product }) {
   return <Modal title={`Mouvements — ${product.name}`} size="wide" onClose={close}>{content}</Modal>;
 }
 
+// The sheet of a product, open to everyone: its photo large, its description, its price and stock. An administrator
+// outside the demo also keeps the photo up here. A picture is saved the moment it is chosen (not with the Save
+// button of a form), and the list behind is refreshed so that its thumbnail follows.
+function ProductSheet({ close, product, onDone }) {
+  const admin = useIsAdmin();
+  const demo = useStore((s) => s.demo);
+  const [p, setP] = useState(product);
+  const { busy, error, submit } = useSubmit();
+  const picker = useRef(null);
+  // The server refuses photos in the demo space anyway: the buttons are not even offered there.
+  const canEditPhoto = admin && !demo;
+
+  const onPick = (e) => {
+    const input = e.currentTarget;
+    const file = input.files?.[0];
+    if (!file) return;
+    submit(async () => {
+      try {
+        const photo = await preparePhoto(file);
+        setP(await api.put(`/api/products/${p.id}/photo`, photo));
+        toast(p.photo_version ? 'Photo remplacée.' : 'Photo ajoutée.');
+        onDone?.();
+      } finally {
+        // Emptied once the file is read (a phone may drop the file when the field is emptied first), so that choosing
+        // the same file again still fires a change.
+        input.value = '';
+      }
+    });
+  };
+
+  const onRemove = () => actionDialog({
+    title: 'Retirer la photo',
+    danger: true,
+    confirmLabel: 'Retirer la photo',
+    message: `Retirer la photo de « ${p.name} » ? Le produit reste au catalogue, sans photo.`,
+    run: async () => {
+      setP(await api.del(`/api/products/${p.id}/photo`));
+      toast('Photo retirée.');
+      onDone?.();
+    },
+  });
+
+  return (
+    <>
+      {/* Outside the window on purpose: the window puts its first field in focus when it opens, and this one is hidden. */}
+      {canEditPhoto && <input ref={picker} type="file" accept="image/*" hidden onChange={onPick} />}
+      <Modal title="Fiche produit" size="wide" onClose={close}>
+        <div className="product-sheet">
+          <ProductPhoto product={p} large />
+          <div className="product-sheet-info">
+            <div>
+              <h3 className="product-sheet-name">{p.name}</h3>
+              <p className="subtle"><span className="mono">{p.reference}</span> · {CATEGORY[p.category]} <DemoChip on={p.is_demo} /> {!p.active && <span className="chip">inactif</span>}</p>
+            </div>
+            {p.description && <p>{p.description}</p>}
+            <dl className="kv">
+              <dt>Prix de vente</dt><dd>{money(p.price)}</dd>
+              <dt>Stock</dt><dd><StockChip p={p} /></dd>
+            </dl>
+            {canEditPhoto && (
+              <div className="row">
+                <button type="button" className="btn" disabled={busy} aria-busy={busy} onClick={() => picker.current?.click()}>
+                  <Icon name="photo" /> {busy ? 'Envoi de la photo…' : p.photo_version ? 'Changer la photo' : 'Ajouter une photo'}
+                </button>
+                {p.photo_version && (
+                  <button type="button" className="btn btn-danger" disabled={busy} onClick={onRemove}><Icon name="trash" /> Retirer la photo</button>
+                )}
+              </div>
+            )}
+            {admin && demo && <p className="subtle">Les photos se gèrent hors du mode démo.</p>}
+            <FormError error={error} />
+          </div>
+        </div>
+        <div className="modal-actions"><button type="button" className="btn" onClick={close}>Fermer</button></div>
+      </Modal>
+    </>
+  );
+}
+
 const productDialog = (product, onDone) => openDialog(ProductDialog, { product, onDone });
+const sheetDialog = (product, onDone) => openDialog(ProductSheet, { product, onDone });
 const stockDialog = (product, kind, onDone) => openDialog(StockDialog, { product, kind, onDone });
 const historyDialog = (product) => openDialog(HistoryDialog, { product });
 
@@ -198,8 +279,16 @@ export default function Products() {
                 <thead><tr><th>Produit</th><th>Catégorie</th><th className="num">Prix</th><th>Stock</th><th><span className="sr-only">Actions</span></th></tr></thead>
                 <tbody>{list.map((p) => (
                   <tr key={p.id} className={p.active ? undefined : 'is-muted'}>
-                    <td data-label="Produit"><strong>{p.name}</strong> <span className="subtle mono">{p.reference}</span> <DemoChip on={p.is_demo} /> {!p.active && <span className="chip">inactif</span>}
-                      {p.description && <div className="subtle">{p.description}</div>}</td>
+                    <td data-label="Produit" className="cell-product">
+                      <div className="product-cell">
+                        <ProductPhoto product={p} />
+                        <div className="product-cell-text">
+                          <button type="button" className="product-open" title="Voir la fiche du produit" onClick={() => sheetDialog(p, reload)}><strong>{p.name}</strong></button>{' '}
+                          <span className="subtle mono">{p.reference}</span> <DemoChip on={p.is_demo} /> {!p.active && <span className="chip">inactif</span>}
+                          {p.description && <div className="subtle product-desc">{p.description}</div>}
+                        </div>
+                      </div>
+                    </td>
                     <td data-label="Catégorie">{CATEGORY[p.category]}</td>
                     <td data-label="Prix" className="num">{money(p.price)}</td>
                     <td data-label="Stock"><StockChip p={p} /> <span className="subtle">seuil {p.low_stock_threshold}</span></td>

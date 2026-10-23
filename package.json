@@ -10,6 +10,7 @@
     "start": "vite build && wrangler dev --port 8787",
     "build": "vite build",
     "test": "node --test test/*.test.js",
+    "import:catalogue": "node scripts/import-catalogue.mjs",
     "deploy": "vite build && wrangler deploy"
   },
   "dependencies": {

@@ -349,6 +349,52 @@
   color: var(--text-2);
 }
 
+/* ------------------------------------------------------------------ product photos & sheet */
+
+/* A product picture sits on a light panel in both themes (--photo-bg): `contain` leaves margins round a picture
+   that is not square, and product shots are taken on white, so the margins and the clear parts of a PNG blend
+   into the panel. A product without a picture gets the theme's own surface and a cigar or a bottle.
+   The grid has one cell the size of the panel: left to an automatic row, the cell would take the height of a tall
+   picture, which would then be cut off at the bottom instead of contained. */
+.product-photo {
+  display: grid; place-items: center; flex: none; overflow: hidden;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  background: var(--photo-bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text-3);
+}
+.product-photo.is-empty { background: var(--surface-2); }
+.product-photo img { display: block; width: 100%; height: 100%; }
+.product-photo-none { display: grid; justify-items: center; gap: 8px; font-size: 0.85rem; }
+.product-photo-thumb { width: 44px; height: 44px; }
+.product-photo-thumb img { object-fit: cover; }
+.product-photo-thumb svg { width: 20px; height: 20px; }
+.product-photo-large { width: min(320px, 100%); aspect-ratio: 1; border-radius: var(--radius-sm); }
+.product-photo-large img { object-fit: contain; }
+.product-photo-large svg { width: 56px; height: 56px; stroke-width: 1.2; }
+
+/* A row of the catalogue: the thumbnail, then the name (a button that opens the sheet; its ::after stretches over the
+   whole block, so the thumbnail and the text open it too), the reference and a description cut at two lines. */
+.product-cell { position: relative; display: flex; align-items: center; gap: 12px; min-width: 0; }
+.product-cell-text { min-width: 0; }
+.product-open { border: 0; background: none; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.product-open::after { content: ""; position: absolute; inset: 0; }
+.product-open:hover strong { text-decoration: underline; text-underline-offset: 2px; }
+.product-cell .chip { position: relative; } /* above the stretched button, so the tooltip of a chip still shows */
+.product-desc { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; max-width: 60ch; }
+.table tr.is-muted .product-photo { opacity: 0.55; }
+@media (max-width: 699px) {
+  .table.stack-sm td.cell-product { justify-content: flex-start; text-align: left; }
+  .table.stack-sm td.cell-product::before { content: none; }
+}
+
+.product-sheet { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 22px; align-items: start; }
+.product-sheet-info { display: grid; gap: 14px; align-content: start; min-width: 0; }
+.product-sheet-info p { overflow-wrap: anywhere; }
+.product-sheet-name { font-family: var(--font-display); font-size: 1.3rem; font-weight: 600; overflow-wrap: anywhere; }
+@media (max-width: 699px) {
+  .product-sheet { grid-template-columns: minmax(0, 1fr); }
+  .product-sheet .product-photo-large { justify-self: center; }
+}
+
 /* ------------------------------------------------------------------ rooms status grid & party stepper */
 
 .rooms-section {
