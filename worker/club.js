@@ -2347,8 +2347,11 @@ export class Club {
     const photo = item.photo === undefined || item.photo === null ? null : decodePhoto(item.photo);
 
     const sameName = (n) => n.trim().normalize('NFC').toLowerCase();
-    const named = this.all('SELECT id, name, category FROM products WHERE is_demo = 0 ORDER BY id').filter((p) => sameName(p.name) === sameName(name));
-    const found = named.find((p) => p.category === item.category);
+    const wanted = sameName(name);
+    const named = this.all('SELECT id, name, category, active FROM products WHERE is_demo = 0 ORDER BY id').filter((p) => sameName(p.name) === wanted);
+    // Two products of that name in the item's category (one taken off sale, say): the one on sale is meant.
+    const inCategory = named.filter((p) => p.category === item.category);
+    const found = inCategory.find((p) => p.active) ?? inCategory[0];
     if (!found && named.length) {
       const [other] = named;
       throw conflict(

@@ -56,13 +56,13 @@ Les prix d'achat viendront plus tard : un champ « prix d'achat » sera ajouté 
   - une balise `<img>` ne peut pas porter l'en-tête de la démo, donc la photo vient toujours du vrai club. C'est pour cela que les produits recopiés en démo gardent les mêmes identifiants.
 - *En démo, ajouter ou retirer une photo est refusé (403 `MODE_DEMO`, « Les photos se gèrent hors du mode démo. »).
 - *À l'import, un produit qui existe déjà sous le même nom (sans tenir compte des majuscules ni des espaces autour) voit son prix, sa description et sa photo mis à jour. Sinon il est créé.
-  - *Le reste ne change pas : référence, stock, catégorie, et un produit retiré de la vente le reste.
-  - *Le produit mis à jour est celui de ce nom dans la catégorie de la fiche. Si ce nom n'existe que dans l'autre catégorie, l'import refuse (409 `CATEGORIE_DIFFERENTE`) sans rien écrire.
+  - *Le reste ne change pas : nom enregistré, référence, catégorie, stock, seuil d'alerte, et un produit retiré de la vente le reste.
+  - *Le produit mis à jour est celui de ce nom dans la catégorie de la fiche (s'il y en a deux, celui qui est en vente). Si ce nom n'existe que dans l'autre catégorie, l'import refuse (409 `CATEGORIE_DIFFERENTE`) sans rien écrire.
 - *La description est un texte court (environ 250 caractères au plus) en français.
 
 ## Comment ça marche (orientation technique)
 
-- **Schéma** : nouvelle table `product_photos (product_id INTEGER PRIMARY KEY REFERENCES products(id), mime TEXT NOT NULL CHECK (mime IN ('image/jpeg','image/png','image/webp')), data BLOB NOT NULL, bytes INTEGER NOT NULL, updated_at TEXT NOT NULL, updated_by INTEGER REFERENCES users(id))`, ajoutée à la suite des migrations de `worker/schema.js`.
+- **Schéma** : nouvelle table `product_photos (product_id INTEGER PRIMARY KEY REFERENCES products(id), mime TEXT NOT NULL CHECK (mime IN ('image/jpeg','image/png','image/webp')), bytes INTEGER NOT NULL, updated_at TEXT NOT NULL, updated_by INTEGER REFERENCES users(id), data BLOB NOT NULL)`, ajoutée à la suite des migrations de `worker/schema.js` (les données de l'image en dernière colonne, après les petites valeurs).
 - **API** :
   - `GET /api/products/:id/photo` : tout utilisateur connecté ; renvoie l'image avec son type, sinon 404.
   - `PUT /api/products/:id/photo` (ADMIN) : JSON `{ mime, data }` en base64, au plus 200 Ko décodés.

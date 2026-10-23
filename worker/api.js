@@ -154,7 +154,7 @@ export function createApi({ db, env = {}, demo = false }) {
 
   // A secret of the Worker (SETUP_TOKEN, IMPORT_TOKEN) against the code a caller gives, compared by SHA-256
   // digest. Without the secret configured the answer is 503, and five wrong codes in a row lock the caller's
-  // address for a minute (each secret has its own count).
+  // address for a minute (each secret has its own count, and the right code starts it again).
   const checkSecret = async (ctx, { scope, secret, given, absent, wrong }) => {
     const key = `${ctx.ip}|${scope}`;
     checkThrottle(key);
@@ -163,6 +163,7 @@ export function createApi({ db, env = {}, demo = false }) {
       recordFailure(key);
       throw new AppError(403, 'CODE_INCORRECT', wrong);
     }
+    throttle.delete(key);
   };
 
   // First start online: the first administrator is created with the SETUP_TOKEN secret. The same

@@ -396,6 +396,16 @@ test('import : cinq échecs de suite bloquent la porte une minute, même avec le
   assert.notEqual((await door.post('/api/setup/reset', { setup_token: 'x', login: 'a', password: 'b' })).status, 429);
 });
 
+test('import : le bon code remet le compte des échecs à zéro', async () => {
+  const { server } = await setup({ env: { IMPORT_TOKEN } });
+  const door = new Client(server);
+  for (let i = 0; i < 4; i += 1) assert.equal((await importWith(door, { item: ITEM }, 'mauvais-code')).status, 403);
+  ok(await importWith(door, { item: ITEM }));
+  // Four more wrong codes after a right one: the door stays open, the count started again.
+  for (let i = 0; i < 4; i += 1) assert.equal((await importWith(door, { item: ITEM }, 'mauvais-code')).status, 403);
+  ok(await importWith(door, { item: ITEM }));
+});
+
 // A call to the door with its body as written (the Client of the tests always sends JSON that parses). `declare`:
 // says the body's length in the request, as a call over the network does.
 const importRaw = (server, body, { token = IMPORT_TOKEN, declare = false } = {}) => server.fetch('/api/admin/catalog-import', {
@@ -518,7 +528,7 @@ test('import : le bon code crée la fiche — CIG-001, prix ×100, stock 0, phot
   assert.ok(!JSON.stringify(entry.details).includes(IMPORT_TOKEN));
 
   // The next references: the cigars go on from CIG-001, the bottles have their own series.
-  const next = ok(await importWith(door, { item: { name: 'Montecristo No 4', price: 9000, category: 'cigare' } }));
+  const next = ok(await importWith(door, { item: { name: 'Corona Atlas No 4', price: 9000, category: 'cigare' } }));
   assert.deepEqual(next, { id: next.id, reference: 'CIG-002', status: 'created', photo: false });
   assert.equal(server.club.get('SELECT COUNT(*) AS n FROM product_photos WHERE product_id = ?', next.id).n, 0);
   assert.equal(server.club.get('SELECT description FROM products WHERE id = ?', next.id).description, null);
@@ -646,6 +656,17 @@ test('import : quand une bouteille et un cigare portent le même nom, la fiche m
   assert.equal(server.club.get('SELECT price FROM products WHERE id = ?', bottle.id).price, 30000 * UM);
   // The journal names the product as it is stored, not as the file spells it.
   assert.equal(server.club.auditLog().find((a) => a.action === 'produit.importer').details.name, 'Havane Club');
+});
+
+test('import : entre deux produits de même nom et de même catégorie, la fiche met à jour celui qui est en vente', async () => {
+  const { server, admin } = await setup({ env: { IMPORT_TOKEN } });
+  const door = new Client(server);
+  const retired = await newProduct(admin, { name: 'Double Nom', reference: 'CIG-001', price: 9000 * UM });
+  ok(await admin.put(`/api/products/${retired.id}`, { active: false }));
+  const onSale = await newProduct(admin, { name: 'Double Nom', reference: 'CIG-002', price: 9500 * UM });
+
+  assert.equal(ok(await importWith(door, { item: { name: 'double nom', category: 'cigare', price: 9900 } })).id, onSale.id);
+  assert.equal(server.club.get('SELECT price FROM products WHERE id = ?', retired.id).price, 9000 * UM);
 });
 
 test('import : le journal d’une mise à jour garde le prix et la description remplacés, dans les unités de « produit.modifier »', async () => {
@@ -819,7 +840,7 @@ const actorOf = (club, login) => club.userRow(club.userByLogin(login).id);
 test('démo : la configuration envoyée porte les produits actifs du vrai club, sans aucune photo', async () => {
   const { real, admin } = await withDemo();
   const a = await newProduct(admin, { name: 'Cohiba Siglo I', reference: 'CIG-001', description: 'Un cigare.', initial_stock: 40 });
-  const b = await newProduct(admin, { name: 'Montecristo No 4', reference: 'CIG-002' });
+  const b = await newProduct(admin, { name: 'Corona Atlas No 4', reference: 'CIG-002' });
   const hidden = await newProduct(admin, { name: 'Retiré', reference: 'CIG-003' });
   ok(await admin.put(`/api/products/${hidden.id}`, { active: false }));
   real.club.tx(() => real.club.createProduct(actorOf(real.club, 'proprietaire'), {
