@@ -9,7 +9,8 @@ import { text, int, toId, flag, frDate } from './validate.js';
 import { ledgerMethods, DEFAULT_CATEGORIES } from './ledger.js';
 import { loungeMethods } from './lounge.js';
 import { seedDemo } from './seed.js';
-import { newTicketCode } from '../shared/ticket.js';
+import { newTicketCode, formatTicketNumber, normalizeTicketCode, memberInitials } from '../shared/ticket.js';
+import { timingSafeEqual } from './auth.js';
 import { decodePhoto } from './photos.js';
 import {
   localParts, localToUtcMs, addDays, addMonths, daysBetween, monthsElapsed, isValidDate, isValidTimeZone, parseHHMM,
@@ -2185,6 +2186,130 @@ export class Club {
       refund_id: refundId, charge_id: c.id, libelle: c.label, montant: c.amount, sous_compte: c.account, motif: reason, remis_en_stock: restock,
     });
     return c.reservation_id ? this.reservationDetail(c.reservation_id) : this.memberDetail(c.member_id);
+  }
+
+  // ---------------------------------------------------------------- cash receipt (ticket de caisse)
+
+  ticketPaymentRow(id) {
+    const n = Number(id);
+    if (!Number.isSafeInteger(n) || n < 1) return null;
+    return this.get(
+      `SELECT p.*, m.first_name, m.last_name, m.member_no, m.phone AS member_phone, u.name AS created_by_name FROM payments p
+       JOIN members m ON m.id = p.member_id LEFT JOIN users u ON u.id = p.created_by WHERE p.id = ?`, n,
+    ) ?? null;
+  }
+
+  // « valide » without refund, « rembourse » when every line of the payment is refunded, else partial.
+  ticketStatus(paymentId) {
+    const lines = this.get('SELECT COUNT(*) AS n FROM payment_allocations WHERE payment_id = ?', paymentId).n;
+    const refunds = this.get('SELECT COUNT(*) AS n FROM refunds WHERE payment_id = ?', paymentId).n;
+    if (!refunds) return 'valide';
+    return refunds >= lines ? 'rembourse' : 'partiellement_rembourse';
+  }
+
+  // The receipt for the staff: the payment, its refunds, the next copy number and the club's texts. Only an
+  // administrator also gets the list of copies already given out.
+  ticketFor(actor, id) {
+    const p = this.ticketPaymentRow(id);
+    if (!p) throw notFound('Paiement');
+    const refunds = this.all('SELECT amount, created_at FROM refunds WHERE payment_id = ? ORDER BY id', p.id);
+    const last = this.get('SELECT COALESCE(MAX(copy_no), 0) AS n FROM ticket_events WHERE payment_id = ?', p.id).n;
+    const s = this.settings();
+    const ticket = {
+      ...this.paymentDTO(p),
+      number: formatTicketNumber(p.id),
+      member_phone: p.member_phone ?? '',
+      refunded_amount: refunds.reduce((sum, r) => sum + r.amount, 0),
+      refunds,
+      status: this.ticketStatus(p.id),
+      next_copy_no: last + 1,
+      header: s.ticket_header,
+      footer: s.ticket_footer,
+      club_name: s.club_name,
+      demo: this.demo,
+    };
+    if (actor.role !== 'admin') return { ticket };
+    const events = this.all(
+      `SELECT e.at, e.kind, e.copy_no, e.phone, u.name AS user_name FROM ticket_events e
+       LEFT JOIN users u ON u.id = e.user_id WHERE e.payment_id = ? ORDER BY e.copy_no`, p.id,
+    );
+    return { ticket, events };
+  }
+
+  // Each print or WhatsApp send is one numbered copy (the first is the original). A WhatsApp send keeps the
+  // number it went to, as the member's file has it at that moment.
+  recordTicketEvent(actor, id, input) {
+    const kind = input?.kind;
+    if (kind !== 'impression' && kind !== 'whatsapp') throw invalid('Sortie de ticket inconnue.');
+    const p = this.ticketPaymentRow(id);
+    if (!p) throw notFound('Paiement');
+    const copyNo = this.get('SELECT COALESCE(MAX(copy_no), 0) AS n FROM ticket_events WHERE payment_id = ?', p.id).n + 1;
+    const at = this.nowIso();
+    const phone = kind === 'whatsapp' ? (p.member_phone || null) : null;
+    this.run(
+      'INSERT INTO ticket_events (payment_id, kind, copy_no, phone, at, user_id) VALUES (?, ?, ?, ?, ?, ?)',
+      p.id, kind, copyNo, phone, at, actor.id,
+    );
+    this.audit(actor, kind === 'whatsapp' ? 'ticket.whatsapp' : 'ticket.imprimer', 'payment', p.id, { copy_no: copyNo });
+    return { copy_no: copyNo, printed_by_name: actor.name, at };
+  }
+
+  // What anyone holding the ticket may see, after the check code: no name, phone, member number or reference.
+  // Null when the number is unknown or the code is wrong (the caller answers both the same way). The code is
+  // compared in constant time, and an unknown number is compared against a dummy code so it costs the same.
+  publicTicket(id, code) {
+    const p = this.ticketPaymentRow(id);
+    const encoder = new TextEncoder();
+    const given = encoder.encode(normalizeTicketCode(code));
+    const stored = encoder.encode(p?.ticket_code ?? '0'.repeat(given.length));
+    if (!timingSafeEqual(given, stored) || !p) return null;
+    const lines = this.all(
+      `SELECT c.label, c.quantity, pa.amount FROM payment_allocations pa JOIN charges c ON c.id = pa.charge_id
+       WHERE pa.payment_id = ? ORDER BY pa.id`, p.id,
+    );
+    const refunded = this.get('SELECT COALESCE(SUM(amount), 0) AS n FROM refunds WHERE payment_id = ?', p.id).n;
+    return {
+      club_name: this.settings().club_name,
+      number: formatTicketNumber(p.id),
+      paid_at: p.paid_at,
+      lines,
+      total: p.amount,
+      method: p.method,
+      initials: memberInitials(p.first_name, p.last_name),
+      status: this.ticketStatus(p.id),
+      refunded_amount: refunded,
+    };
+  }
+
+  // The administrator's history of copies given out, most recent first; `copies_total` counts every copy of the
+  // same payment, whatever the filters, so a ticket given out three times or more stands out.
+  ticketEvents(query = {}) {
+    const where = [];
+    const args = [];
+    if (query.from) {
+      const [a, b] = this.periodBounds(query.from, query.to ?? query.from);
+      where.push('e.at >= ? AND e.at < ?');
+      args.push(a, b);
+    }
+    if (query.user_id !== undefined && query.user_id !== '') {
+      where.push('e.user_id = ?');
+      args.push(toId(query.user_id, 'Utilisateur'));
+    }
+    const rows = this.all(
+      `SELECT e.at, e.kind, e.copy_no, e.payment_id, p.amount, e.user_id, u.name AS user_name,
+              m.first_name, m.last_name,
+              (SELECT COUNT(*) FROM ticket_events x WHERE x.payment_id = e.payment_id) AS copies_total
+       FROM ticket_events e JOIN payments p ON p.id = e.payment_id JOIN members m ON m.id = p.member_id
+       LEFT JOIN users u ON u.id = e.user_id
+       ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY e.at DESC, e.id DESC LIMIT 1000`, ...args,
+    );
+    return {
+      events: rows.map((r) => ({
+        at: r.at, kind: r.kind, copy_no: r.copy_no, payment_id: r.payment_id, number: formatTicketNumber(r.payment_id),
+        member_name: `${r.first_name} ${r.last_name}`, amount: r.amount, user_id: r.user_id, user_name: r.user_name ?? null,
+        copies_total: r.copies_total,
+      })),
+    };
   }
 
   openCharges() {

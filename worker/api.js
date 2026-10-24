@@ -293,6 +293,21 @@ export function createApi({ db, env = {}, demo = false }) {
   add('POST', '/api/charges/:id/cancel', {}, (ctx) => club.cancelCharge(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/charges/:id/refund', {}, (ctx) => club.refundCharge(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/payments', {}, (ctx) => club.recordPayment(ctx.user, ctx.body));
+  add('GET', '/api/payments/:id/ticket', {}, (ctx) => club.ticketFor(ctx.user, ctx.params.id));
+  add('POST', '/api/payments/:id/ticket-events', {}, (ctx) => club.recordTicketEvent(ctx.user, ctx.params.id, ctx.body));
+  add('GET', '/api/ticket-events', ADMIN, (ctx) => club.ticketEvents(ctx.query));
+  // Public check of a receipt (the QR code leads here): read-only, five wrong codes in a row lock the caller's
+  // address for a minute. A success does not clear the count, so a right code cannot be used to keep guessing.
+  add('GET', '/api/tickets/:id/:code', { public: true }, (ctx) => {
+    const key = `${ctx.ip}|ticket`;
+    checkThrottle(key);
+    const ticket = club.publicTicket(ctx.params.id, ctx.params.code);
+    if (!ticket) {
+      recordFailure(key);
+      throw new AppError(404, 'TICKET_INTROUVABLE', 'Ticket introuvable.');
+    }
+    return { ticket };
+  });
   add('GET', '/api/finance/summary', ADMIN, (ctx) => club.financeSummary(ctx.query.from, ctx.query.to ?? ctx.query.from));
   add('GET', '/api/finance/journal', {}, (ctx) => {
     if (ctx.user.role !== 'admin') {
