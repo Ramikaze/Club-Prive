@@ -103,7 +103,7 @@ function QuotePanel({ q, s, now }) {
   return (
     <>
       <dl className="calc">
-        {q.room ? <div><dt>Salle</dt><dd>{`${q.room.name} · ${q.party_size} membre(s) présent(s) (capacité ${q.room.capacity} pers.)`}</dd></div> : null}
+        {q.room ? <div><dt>Salle</dt><dd>{`${q.room.name} (capacité ${q.room.capacity} pers.)`}</dd></div> : null}
         <div><dt>Horaire</dt><dd>{`${dayLabel(q.biz_day, 'medium')} · ${q.start_time} → ${q.end_time}${q.end_next_day ? ' (lendemain)' : ''}`}</dd></div>
         <div><dt>Durée</dt><dd>{fmtDuration(q.duration_min)}</dd></div>
         <div><dt>Formule (titulaire)</dt><dd>{`${q.subscription.plan_name} · jusqu’au ${dayLabel(q.subscription.end_date, 'short')}`}</dd></div>
@@ -155,7 +155,6 @@ function BookingDialog({ close, preset, onDone }) {
     };
   });
   const [member, setMember] = useState(preset.member ?? null);
-  const [extraMembers, setExtraMembers] = useState([]);
   const [roomId, setRoomId] = useState(init.roomId);
   const [startNow, setStartNow] = useState(init.startNow);
   const [date, setDate] = useState(init.date);
@@ -170,24 +169,22 @@ function BookingDialog({ close, preset, onDone }) {
   const [loading, setLoading] = useState(() => Boolean(preset.member));
   const [search, setSearch] = useState('');
   const [found, setFound] = useState({ list: null, error: null });
-  const [attSearch, setAttSearch] = useState('');
-  const [allMembers, setAllMembers] = useState([]);
 
   const seq = useRef(0);
   const searchSeq = useRef(0);
   const quoteTimer = useRef(null);
   const searchTimer = useRef(null);
   const latest = useRef(null);
-  latest.current = { member, extraMembers, roomId, startNow, date, start, duration, notes, depositMethod };
+  latest.current = { member, roomId, startNow, date, start, duration, notes, depositMethod };
 
   const payload = () => {
     const v = latest.current;
-    const attendeeIds = v.extraMembers.map((m) => m.id);
+    // Only the booking member is recorded: the room is theirs for the session.
     return {
       member_id: v.member?.id,
       room_id: Number(v.roomId),
-      party_size: 1 + attendeeIds.length,
-      attendee_ids: attendeeIds,
+      party_size: 1,
+      attendee_ids: [],
       require_credit: true,
       start_now: Boolean(v.startNow && v.date === bizToday()),
       date: v.date,
@@ -232,7 +229,6 @@ function BookingDialog({ close, preset, onDone }) {
       const list = await api.get(q ? `/api/members?q=${encodeURIComponent(q)}` : '/api/members');
       if (n !== searchSeq.current) return;
       setFound({ list, error: null });
-      if (!q) setAllMembers(list);
     } catch (e) {
       if (n !== searchSeq.current) return;
       setFound({ list: null, error: e.message });
@@ -261,7 +257,6 @@ function BookingDialog({ close, preset, onDone }) {
     }
     stopSearch();
     setMember(x);
-    setExtraMembers((prev) => prev.filter((m) => m.id !== x.id));
     latest.current.member = x;
     requestQuote();
   };
@@ -277,26 +272,6 @@ function BookingDialog({ close, preset, onDone }) {
     runSearch('');
   };
 
-  const addCompanion = (x) => {
-    const elig = memberRoomEligibility(x);
-    if (!elig.ok) {
-      toast(`Accès refusé pour ${x.name} : ${elig.reason}.`, 'error');
-      return;
-    }
-    const next = [...extraMembers, x];
-    setExtraMembers(next);
-    latest.current.extraMembers = next;
-    setAttSearch('');
-    requestQuote();
-  };
-
-  const removeCompanion = (id) => {
-    const next = extraMembers.filter((m) => m.id !== id);
-    setExtraMembers(next);
-    latest.current.extraMembers = next;
-    requestQuote();
-  };
-
   useEffect(() => () => {
     clearTimeout(quoteTimer.current);
     clearTimeout(searchTimer.current);
@@ -305,7 +280,6 @@ function BookingDialog({ close, preset, onDone }) {
   }, []);
 
   useEffect(() => {
-    api.get('/api/members').then(setAllMembers).catch(() => {});
     if (latest.current.member) requestQuote();
     else runSearch('');
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -356,19 +330,6 @@ function BookingDialog({ close, preset, onDone }) {
   const canSubmit = ready && !(quote.conflicts.length > 0 || quote.gap_conflicts.length > 0 || quote.tariff_blocked);
 
   const roomsList = quote?.rooms_availability ?? activeRooms.map((rm) => ({ ...rm, available: true, conflict: null, gap_conflict: null }));
-  const currentRoom = roomsList.find((rm) => rm.id === Number(roomId)) ?? activeRooms[0];
-  const selectedIds = new Set([member?.id, ...extraMembers.map((m) => m.id)].filter(Boolean));
-  const qNorm = attSearch.trim().toLowerCase();
-  const companionCandidates = allMembers.filter((m) => {
-    if (selectedIds.has(m.id)) return false;
-    if (!qNorm) return memberRoomEligibility(m).ok;
-    return (
-      m.name.toLowerCase().includes(qNorm)
-      || m.member_no.toLowerCase().includes(qNorm)
-      || (m.card_code && m.card_code.toLowerCase().includes(qNorm))
-      || (m.phone && m.phone.toLowerCase().includes(qNorm))
-    );
-  }).slice(0, 6);
 
   return (
     <Modal title={startNow ? 'Installer des membres dans une salle' : 'Nouvelle réservation'} size="wide" onClose={close}>
@@ -416,7 +377,7 @@ function BookingDialog({ close, preset, onDone }) {
           )}
         </div></fieldset>
 
-        <fieldset><legend>Salle & Membres présents</legend>
+        <fieldset><legend>Salle</legend>
           <div className="room-picker-grid">
             {roomsList.map((rm) => {
               const selected = Number(roomId) === rm.id;
@@ -445,76 +406,10 @@ function BookingDialog({ close, preset, onDone }) {
             })}
           </div>
 
-          {member ? (
-            <div className="stack" style={{ marginTop: 12 }}>
-              <div className="row" style={{ justifyContent: 'space-between' }}>
-                <span className="subtle">
-                  <strong>{1 + extraMembers.length}</strong> / {currentRoom?.capacity ?? 8} membre(s) présent(s) — chaque membre consomme son propre crédit d’heures
-                </span>
-              </div>
-              <div className="attendee-chips">
-                <span className="chip chip-bronze">
-                  {member.name} ({member.member_no}) · titulaire
-                </span>
-                {extraMembers.map((m) => (
-                  <span key={m.id} className="chip chip-ok" style={{ gap: 6 }}>
-                    {m.name} ({fmtDuration(m.subscription?.credit?.available ?? 0)} dispo)
-                    <button
-                      type="button"
-                      className="chip-remove-btn"
-                      onClick={() => removeCompanion(m.id)}
-                      aria-label={`Retirer ${m.name} de la salle`}
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
-              </div>
-              {1 + extraMembers.length < (currentRoom?.capacity ?? 8) ? (
-                <div>
-                  <div className="search" style={{ marginTop: 4 }}>
-                    <Icon name="search" />
-                    <input
-                      type="search"
-                      value={attSearch}
-                      onChange={(e) => setAttSearch(e.target.value)}
-                      placeholder="Ajouter un autre membre présent (nom, n° membre ou carte avec crédit > 0)…"
-                      aria-label="Ajouter un membre accompagnant"
-                    />
-                  </div>
-                  {companionCandidates.length ? (
-                    <div className="list" style={{ marginTop: 6, maxHeight: 165, overflowY: 'auto' }}>
-                      {companionCandidates.map((c) => {
-                        const elig = memberRoomEligibility(c);
-                        return (
-                          <button
-                            key={c.id}
-                            type="button"
-                            className="list-item"
-                            style={{ minHeight: 42, padding: '6px 4px', opacity: elig.ok ? 1 : 0.55 }}
-                            aria-disabled={!elig.ok}
-                            onClick={() => addCompanion(c)}
-                          >
-                            <div className="grow">
-                              <strong>{c.name}</strong> <span className="subtle">{c.member_no}{c.card_code ? ` · ${c.card_code}` : ''}</span>
-                            </div>
-                            {elig.ok
-                              ? <span className="chip chip-ok">+ Ajouter ({fmtDuration(elig.available)} dispo)</span>
-                              : <span className="chip chip-danger">{elig.reason}</span>}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
           {date === bizToday() ? (
             <label className="check" style={{ marginTop: 10 }}>
               <input type="checkbox" checked={startNow} onChange={(e) => setStartNow(e.target.checked)} />
-              <span><strong>Membre(s) déjà présent(s)</strong> (installer immédiatement en salle occupée)</span>
+              <span><strong>Membre déjà présent</strong> (installer immédiatement en salle occupée)</span>
             </label>
           ) : null}
         </fieldset>
