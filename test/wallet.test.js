@@ -429,7 +429,7 @@ test('salle, solde insuffisant : la carte paie ce qu’elle a, le reste est à e
   assert.equal(cash(await treasury()).in, cash(before).in + 20000 * UM);
 });
 
-test('salle 3 h ou plus : acompte et solde payés par la carte ; annulée la veille tout revient, absence le jour seul le solde', async () => {
+test('salle 3 h ou plus : acompte et solde payés par la carte ; annulée la veille ou absence, l’acompte reste au club, le solde revient', async () => {
   const early = await newMember('Paul');
   ok(await recharge(early.id, { amount: 100000 * UM, method: 'Espèces' }));
   const booked = ok(await book({ member_id: early.id, date: addDays(today, 6), duration_min: 180, pay_with_card: true }));
@@ -439,11 +439,13 @@ test('salle 3 h ou plus : acompte et solde payés par la carte ; annulée la vei
   const before = await treasury();
   const cancelled = ok(await manager.post(`/api/reservations/${booked.reservation.id}/cancel`, { reason: 'Changement de programme' }));
   assert.equal(cancelled.reservation.status, 'annulee');
-  assert.equal(balance(early.id), 100000 * UM);
-  assert.ok(timeLines(cancelled).every((c) => c.status === 'remboursee'));
+  // The deposit stays with the club, as when it is paid at the till; only the balance goes back to the card.
+  assert.equal(cancelled.deposit_kept, 37500 * UM);
+  assert.equal(balance(early.id), 62500 * UM);
+  assert.deepEqual(timeLines(cancelled).map((c) => [!!c.deposit, c.status]), [[true, 'payee'], [false, 'remboursee']]);
   assert.equal(cash(await treasury()).out, cash(before).out); // nothing leaves the till
   const moves = ok(await manager.get(`/api/members/${early.id}`)).wallet.movements.filter((m) => m.kind === 'remboursement');
-  assert.equal(moves.reduce((sum, m) => sum + m.amount, 0), 75000 * UM);
+  assert.equal(moves.reduce((sum, m) => sum + m.amount, 0), 37500 * UM);
   assert.ok(ok(await admin.get('/api/audit')).some((a) => a.action === 'carte.rembourser' && a.entity_id === early.id));
 
   // A card that cannot take the deposit needs a method for the rest, or the booking is not recorded.

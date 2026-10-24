@@ -2053,9 +2053,9 @@ export class Club {
         : `Impossible d'annuler une réservation au statut « ${RES_STATUS[r.status]} ».`);
     }
     // A booking of 3 hours or more can be cancelled until midnight before its business day. On the
-    // day, only the member's absence can be recorded; either way a deposit paid at the till stays with
-    // the club, the balance is cancelled and the credit hours are released. Time paid with the card goes
-    // back to the card, its deposit included unless the member did not come.
+    // day, only the member's absence can be recorded; either way the deposit stays with the club, however
+    // it was paid, the balance is cancelled and the credit hours are released. A balance paid with the
+    // card goes back to the card.
     const late = this.isLateForCancellation(r);
     const absence = flag(input.no_show);
     if (late && !absence) {
@@ -2076,11 +2076,11 @@ export class Club {
     const due = this.all("SELECT * FROM charges WHERE reservation_id = ? AND status = 'due'", r.id);
     for (const c of due) this.voidCharge(actor, c, `${what} de la réservation : ${reason}`);
     const paid = this.all("SELECT * FROM charges WHERE reservation_id = ? AND status = 'payee'", r.id);
-    // Lines the card paid go back to the card, the deposit excepted when the member did not come. A line paid
-    // partly in cash stays paid, for a refund at the till as before.
+    // Lines the card paid go back to the card, except the deposit, which stays with the club whichever way it
+    // was paid. A line paid partly in cash stays paid, for a refund at the till as before.
     const toCard = [];
     for (const c of paid) {
-      if (absence && c.deposit) continue;
+      if (c.deposit) continue;
       const { payment, cardPart } = this.cardPartOf(c);
       if (cardPart !== c.amount) continue;
       this.writeRefund(actor, c, payment, cardPart, { method: CARD_METHOD, reason: `${what} de la réservation : ${reason}` });
