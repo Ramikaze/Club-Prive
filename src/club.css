@@ -304,8 +304,8 @@ main:focus { outline: none; }
 
 /* ------------------------------------------------------------------ KPI tiles */
 
-.kpis { display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 16px; }
-@media (max-width: 1099px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.kpis { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 16px; }
+@media (max-width: 699px) { .kpis { grid-template-columns: minmax(0, 1fr); } }
 .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); min-width: 0; }
 .kpi .label { color: var(--text-2); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
 .kpi .value { font-size: 1.45rem; font-weight: 650; margin-top: 4px; font-variant-numeric: tabular-nums; }
@@ -435,6 +435,22 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .search { position: relative; }
 .search input { padding-left: 40px; }
 .search svg { position: absolute; left: 12px; top: 50%; width: 18px; height: 18px; transform: translateY(-50%); color: var(--text-3); }
+.smart-search { flex: 1; min-width: 220px; }
+/* The page-in animation gives the toolbar and the card under it a layer each: lift the toolbar so the list covers the card. */
+.toolbar:has(.smart-search) { position: relative; z-index: 5; }
+.smart-search-list {
+  position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 30;
+  margin: 0; padding: 6px; list-style: none; max-height: min(420px, 60vh); overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow-lg);
+}
+.smart-search-list li {
+  display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 7px; cursor: pointer;
+}
+.smart-search-list li.is-active { background: var(--surface-2); }
+.smart-search-list .grow { min-width: 0; flex: 1; }
+.smart-search-list .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.smart-search-list .meta { font-size: 0.85rem; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.smart-search-list .product-photo-thumb { flex: none; }
 .password-input { position: relative; }
 .password-input input { padding-right: 48px; }
 .password-input input::-ms-reveal { display: none; } /* Edge draws its own eye otherwise */
@@ -559,6 +575,7 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
 .toolbar input[type="date"] { width: auto; }
 .date-nav { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.date-range-field { display: inline-flex; align-items: center; gap: 6px; font-size: 0.9rem; color: var(--text-2); }
 
 /* ------------------------------------------------------------------ calculation panel */
 

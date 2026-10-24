@@ -8,6 +8,8 @@ import { text, int, toId, flag } from './validate.js';
 import { addDays, addMonths, isValidDate, localParts } from '../shared/time.js';
 import { ACCOUNTS, ACCOUNT_LABELS } from '../shared/rules.js';
 
+// The largest expense a manager may record alone, in hundredths (5 000 FCFA); above it, an administrator records it.
+export const MANAGER_EXPENSE_MAX = 5000 * 100;
 export const ENTRY_KIND = { depense: 'Dépense', recette: 'Entrée diverse', transfert: 'Transfert' };
 export const ENTRY_STATUS = { active: 'Enregistrée', annulee: 'Annulée' };
 const CATEGORY_KIND = { depense: 'Dépense', recette: 'Entrée diverse' };
@@ -168,6 +170,9 @@ export const ledgerMethods = {
     }
     this.assertOpen(date, 'Cette opération');
     const amount = int(input.amount, 'Montant', { min: 1, max: 1e13 });
+    if (!isAdmin && amount > MANAGER_EXPENSE_MAX) {
+      throw forbidden("Le gérant enregistre des dépenses de 5 000 FCFA au plus. Au-delà, adressez-vous à un administrateur.");
+    }
     const method = this.treasuryAccount(input.method, kind === 'transfert' ? 'Compte de départ' : kind === 'depense' ? 'Payé depuis' : 'Reçu sur');
     let toMethod = null;
     let category = null;

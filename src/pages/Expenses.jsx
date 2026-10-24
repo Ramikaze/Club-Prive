@@ -17,6 +17,10 @@ const TITLES = { depense: 'Nouvelle dépense', recette: 'Entrée diverse', trans
 const DONE = { depense: 'Dépense enregistrée.', recette: 'Entrée enregistrée.', transfert: 'Transfert enregistré.' };
 const KIND_FILTERS = [['', 'Tout'], ['depense', 'Dépenses'], ['recette', 'Entrées'], ['transfert', 'Transferts']];
 
+// The largest expense a manager records alone, in hundredths; the server refuses more (MANAGER_EXPENSE_MAX, worker/ledger.js).
+const MANAGER_EXPENSE_MAX = 5000 * 100;
+const MANAGER_CAP_TEXT = 'Le gérant enregistre des dépenses de 5 000 FCFA au plus. Au-delà, adressez-vous à un administrateur.';
+
 function EntryDialog({ close, kind, categories, onDone }) {
   const methods = useStore((s) => s.settings.payment_methods);
   const currency = useStore((s) => s.settings.currency.label);
@@ -31,12 +35,14 @@ function EntryDialog({ close, kind, categories, onDone }) {
   const { busy, error, submit } = useSubmit();
   const set = (k) => (e) => setV({ ...v, [k]: e.target.value });
   const category = options.find((c) => String(c.id) === String(v.category_id));
+  const managerCapped = !isAdmin && kind === 'depense';
 
   const onSubmit = (e) => {
     e.preventDefault();
     submit(async () => {
       const amount = parseMoney(v.amount);
       if (!amount) throw new Error('Montant invalide : saisissez un nombre positif (exemple : 25 000).');
+      if (managerCapped && amount > MANAGER_EXPENSE_MAX) throw new Error(MANAGER_CAP_TEXT);
       const body = { kind, amount, method: v.method, label: v.label, reference: v.reference };
       if (isAdmin) body.biz_date = v.biz_date;
       if (kind === 'transfert') {
@@ -73,7 +79,8 @@ function EntryDialog({ close, kind, categories, onDone }) {
           <Notice kind="warn">Aucune catégorie active. Un administrateur peut en créer dans Paramètres, rubrique Catégories.</Notice>
         ))}
         <label className="field"><span>Montant ({currency})</span>
-          <input inputMode="decimal" autoComplete="off" placeholder="25 000" required value={v.amount} onChange={set('amount')} /></label>
+          <input inputMode="decimal" autoComplete="off" placeholder={managerCapped ? '5 000' : '25 000'} required value={v.amount} onChange={set('amount')} />
+          {managerCapped && <span className="help">5 000 {currency} au plus par dépense. Au-delà, un administrateur l’enregistre.</span>}</label>
         <div className="form-row">
           <label className="field"><span>{kind === 'depense' ? 'Payé depuis' : kind === 'recette' ? 'Reçu sur' : 'Depuis'}</span>
             <select value={v.method} onChange={set('method')}>

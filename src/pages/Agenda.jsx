@@ -18,6 +18,7 @@ import { addDays, daysBetween, isValidDate, startOfWeek, localToUtcMs, fmtHHMM }
 
 const DAY_SLOT_H = 34;
 const WEEK_SLOT_H = 18;
+const MAX_RANGE_DAYS = 92; // listReservations (worker/club.js) answers 93 days at most
 const VIEWS = [['jour', 'Jour'], ['semaine', 'Semaine'], ['liste', 'Liste']];
 
 const relOf = (day, ms) => {
@@ -232,11 +233,13 @@ export default function Agenda() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [now, setNow] = useState(() => Date.now());
   const dateInput = useRef(null);
+  const toInput = useRef(null);
 
   const qView = searchParams.get('vue');
   const qDate = searchParams.get('date');
   const qStatus = searchParams.get('statut');
   const qRoom = searchParams.get('salle');
+  const qTo = searchParams.get('au');
   const view = ['jour', 'semaine', 'liste'].includes(qView) ? qView : 'jour';
   const date = isValidDate(qDate) ? qDate : bizToday();
   const status = qStatus && STATUS.res[qStatus] ? qStatus : '';
@@ -247,17 +250,19 @@ export default function Agenda() {
     from = startOfWeek(date);
     to = addDays(from, 6);
   } else if (view === 'liste') {
-    to = addDays(date, 13);
+    // A range picked with « Du » and « au » (93 days at most, as the server allows), else two weeks.
+    to = isValidDate(qTo) && qTo >= date && daysBetween(date, qTo) <= MAX_RANGE_DAYS ? qTo : addDays(date, 13);
   }
   const url = `/api/reservations${qs({ from, to, status: view === 'liste' ? status : '', room_id: roomId })}`;
   const loaded = useLoad(async () => ({ url, list: await api.get(url) }), [url]);
   // Data from a previous period is never drawn on the new one.
   const state = loaded.data && loaded.data.url !== url ? { ...loaded, data: undefined, error: null } : loaded;
-  const step = view === 'semaine' ? 7 : view === 'liste' ? 14 : 1;
+  const step = view === 'semaine' ? 7 : view === 'liste' ? daysBetween(from, to) + 1 : 1;
   const periodLabel = view === 'jour'
     ? dayLabel(date, 'title')
     : `Du ${dayLabel(from, 'medium')} au ${dayLabel(to, 'medium')}`;
 
+  const listTo = (shift) => (view === 'liste' ? addDays(to, shift) : '');
   const setQuery = (q) => setSearchParams(Object.fromEntries(Object.entries(q).filter(([, v]) => v !== undefined && v !== null && v !== '')));
 
   // Refresh the now-line and the past slots every minute.
@@ -266,13 +271,29 @@ export default function Agenda() {
     return () => clearInterval(timer);
   }, []);
 
-  // Native change event, as in vanilla: the date is applied once picked, not on every keystroke.
+  // Native change events, as in vanilla: a date is applied once picked, not on every keystroke. « Du » keeps the view
+  // (the list keeps its length); an « au » after « Du » shows the list of that range, an « au » on « Du » that day.
   useEffect(() => {
-    const el = dateInput.current;
-    if (!el) return undefined;
-    const onChange = () => { if (isValidDate(el.value)) setQuery({ vue: view, date: el.value, statut: status, salle: roomId }); };
-    el.addEventListener('change', onChange);
-    return () => el.removeEventListener('change', onChange);
+    const fromEl = dateInput.current;
+    const toEl = toInput.current;
+    if (!fromEl || !toEl) return undefined;
+    const onFrom = () => {
+      if (!isValidDate(fromEl.value)) return;
+      const au = view === 'liste' ? addDays(fromEl.value, daysBetween(from, to)) : '';
+      setQuery({ vue: view, date: fromEl.value, au, statut: status, salle: roomId });
+    };
+    const onTo = () => {
+      if (!isValidDate(toEl.value)) return;
+      const end = toEl.value < from ? from : toEl.value > addDays(from, MAX_RANGE_DAYS) ? addDays(from, MAX_RANGE_DAYS) : toEl.value;
+      if (end === from) setQuery({ vue: 'jour', date: from, salle: roomId });
+      else setQuery({ vue: 'liste', date: from, au: end, statut: status, salle: roomId });
+    };
+    fromEl.addEventListener('change', onFrom);
+    toEl.addEventListener('change', onTo);
+    return () => {
+      fromEl.removeEventListener('change', onFrom);
+      toEl.removeEventListener('change', onTo);
+    };
   });
 
   const shown = state.data;
@@ -302,7 +323,7 @@ export default function Agenda() {
           ))}
         </div>
         <div className="segmented" role="group" aria-label="Salle">
-          <button type="button" aria-pressed={roomId === ''} onClick={() => setQuery({ vue: view, date, statut: status, salle: '' })}>
+          <button type="button" aria-pressed={roomId === ''} onClick={() => setQuery({ vue: view, date, au: listTo(0), statut: status, salle: '' })}>
             Toutes les salles ({activeRooms.length})
           </button>
           {activeRooms.map((rm) => (
@@ -310,20 +331,23 @@ export default function Agenda() {
               key={rm.id}
               type="button"
               aria-pressed={roomId === String(rm.id)}
-              onClick={() => setQuery({ vue: view, date, statut: status, salle: String(rm.id) })}
+              onClick={() => setQuery({ vue: view, date, au: listTo(0), statut: status, salle: String(rm.id) })}
             >
               {rm.name}
             </button>
           ))}
         </div>
         <div className="date-nav">
-          <button type="button" className="btn btn-sm" onClick={() => setQuery({ vue: view, date: addDays(date, -step), statut: status, salle: roomId })} aria-label="Période précédente"><Icon name="left" /></button>
-          <button type="button" className="btn btn-sm" onClick={() => setQuery({ vue: view, date: bizToday(), statut: status, salle: roomId })}>Aujourd’hui</button>
-          <button type="button" className="btn btn-sm" onClick={() => setQuery({ vue: view, date: addDays(date, step), statut: status, salle: roomId })} aria-label="Période suivante"><Icon name="right" /></button>
-          <input key={date} ref={dateInput} type="date" defaultValue={date} aria-label="Choisir une date" className="btn-sm" style={{ minHeight: '36px' }} />
+          <button type="button" className="btn btn-sm" onClick={() => setQuery({ vue: view, date: addDays(date, -step), au: listTo(-step), statut: status, salle: roomId })} aria-label="Période précédente"><Icon name="left" /></button>
+          <button type="button" className="btn btn-sm" onClick={() => setQuery({ vue: view, date: bizToday(), au: view === 'liste' ? addDays(bizToday(), step - 1) : '', statut: status, salle: roomId })}>Aujourd’hui</button>
+          <button type="button" className="btn btn-sm" onClick={() => setQuery({ vue: view, date: addDays(date, step), au: listTo(step), statut: status, salle: roomId })} aria-label="Période suivante"><Icon name="right" /></button>
+          <label className="date-range-field"><span>Du</span>
+            <input key={`du-${from}`} ref={dateInput} type="date" defaultValue={from} aria-label="Premier jour" className="btn-sm" style={{ minHeight: '36px' }} /></label>
+          <label className="date-range-field"><span>au</span>
+            <input key={`au-${from}-${to}`} ref={toInput} type="date" defaultValue={to} min={from} max={addDays(from, MAX_RANGE_DAYS)} aria-label="Dernier jour" className="btn-sm" style={{ minHeight: '36px' }} /></label>
         </div>
         {view === 'liste' && (
-          <select value={status} onChange={(e) => setQuery({ vue: view, date, statut: e.target.value, salle: roomId })} aria-label="Filtrer par statut" style={{ width: 'auto', minHeight: '36px' }}>
+          <select value={status} onChange={(e) => setQuery({ vue: view, date, au: listTo(0), statut: e.target.value, salle: roomId })} aria-label="Filtrer par statut" style={{ width: 'auto', minHeight: '36px' }}>
             <option value="">Tous les statuts</option>
             {Object.entries(STATUS.res).map(([k, [label]]) => <option key={k} value={k}>{label}</option>)}
           </select>

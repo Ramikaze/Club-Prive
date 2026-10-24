@@ -291,7 +291,13 @@ test('12. restrictions du rôle gérant (contrôlées côté serveur)', async ()
   const supp = ok(await manager.get(`/api/reservations/${supplementLine.id}`)).charges[0];
   assert.equal((await manager.post(`/api/charges/${supp.id}/cancel`, { reason: 'Geste commercial' })).status, 403);
   // The manager keeps the day-to-day operations.
-  ok(await manager.post(`/api/products/${whisky}/stock`, { kind: 'entree', quantity: 5 }));
+  const added = ok(await manager.post(`/api/products/${whisky}/stock`, { kind: 'entree', quantity: 5 }));
+  // An inventory adjustment by the manager may only add bottles; taking some away is an administrator's call.
+  const fewer = await manager.post(`/api/products/${whisky}/stock`, { kind: 'ajustement', target_qty: added.stock_qty - 1, expected_qty: added.stock_qty, reason: 'Casse' });
+  assert.equal(fewer.status, 403);
+  const more = ok(await manager.post(`/api/products/${whisky}/stock`, { kind: 'ajustement', target_qty: added.stock_qty + 1, expected_qty: added.stock_qty, reason: 'Recompté' }));
+  assert.equal(more.stock_qty, added.stock_qty + 1);
+  assert.equal(ok(await admin.post(`/api/products/${whisky}/stock`, { kind: 'ajustement', target_qty: added.stock_qty, expected_qty: added.stock_qty + 1, reason: 'Casse' })).stock_qty, added.stock_qty);
   const journal = ok(await manager.get('/api/finance/journal?from=2020-01-01&to=2030-01-01'));
   assert.equal(journal.restricted, true);
   assert.equal(journal.from, today);

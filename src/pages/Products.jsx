@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
+import SmartSearch from '../components/ui/SmartSearch.jsx';
 import { DemoChip, Empty, FormError, Loaded, PageHead, ProductPhoto, Segmented, StocksTabs } from '../components/ui/ui.jsx';
 import { Modal, actionDialog, openDialog } from '../components/ui/Modal.jsx';
 import { toast } from '../components/ui/toast.jsx';
@@ -9,6 +10,7 @@ import { dateTime, money, parseMoney, toMajor } from '../lib/format.js';
 import { useLoad, useSubmit } from '../lib/hooks.js';
 import { preparePhoto } from '../lib/photo.js';
 import { useIsAdmin, useSettings, useStore } from '../store/useStore.js';
+import { searchable, smartFilter } from '../../shared/search.js';
 
 const CATEGORY = { cigare: 'Cigare', bouteille: 'Bouteille' };
 
@@ -102,12 +104,16 @@ function ProductDialog({ close, product, onDone }) {
 function StockDialog({ close, product, kind, onDone }) {
   const [key] = useState(newKey);
   const entry = kind === 'entree';
+  const isAdmin = useIsAdmin();
   const { busy, error, submit } = useSubmit();
 
   const onSubmit = (e) => {
     e.preventDefault();
     const v = formValues(e.currentTarget);
     submit(async () => {
+      if (!entry && !isAdmin && Number(v.target_qty) < product.stock_qty) {
+        throw new Error('Le gérant peut seulement ajouter des quantités. Pour en retirer, adressez-vous à un administrateur.');
+      }
       const body = entry
         ? { kind: 'entree', quantity: Number(v.quantity), reason: v.reason }
         : { kind: 'ajustement', target_qty: Number(v.target_qty), expected_qty: product.stock_qty, reason: v.reason };
@@ -129,7 +135,8 @@ function StockDialog({ close, product, kind, onDone }) {
           </>
         ) : (
           <>
-            <label className="field"><span>Quantité constatée (inventaire)</span><input type="number" name="target_qty" min="0" step="1" required inputMode="numeric" defaultValue={product.stock_qty} autoFocus /></label>
+            <label className="field"><span>Quantité constatée (inventaire)</span><input type="number" name="target_qty" min={isAdmin ? 0 : product.stock_qty} step="1" required inputMode="numeric" defaultValue={product.stock_qty} autoFocus />
+              {!isAdmin && <span className="help">Vous pouvez seulement augmenter le stock. Pour le diminuer, un administrateur fait l’ajustement.</span>}</label>
             <label className="field"><span>Motif (obligatoire)</span><input name="reason" required minLength={3} maxLength={200} placeholder="Casse, inventaire, erreur de saisie…" /></label>
             <p className="subtle">L’écart est enregistré comme un mouvement tracé, avec votre nom et le motif.</p>
           </>
@@ -241,6 +248,7 @@ export default function Products() {
   const catParam = searchParams.get('cat');
   const cat = ['cigare', 'bouteille'].includes(catParam) ? catParam : '';
   const showInactive = searchParams.get('inactifs') === '1';
+  const [search, setSearch] = useState('');
   const setQuery = (q) => setSearchParams(Object.fromEntries(Object.entries(q).filter(([, v]) => v !== undefined && v !== null && v !== '')));
 
   const state = useLoad(() => Promise.all([
@@ -251,7 +259,11 @@ export default function Products() {
 
   return (
     <Loaded state={state}>{([products, movements]) => {
-      const list = products.filter((p) => !cat || p.category === cat);
+      const inCategory = products.filter((p) => !cat || p.category === cat);
+      const searching = searchable(search);
+      const list = searching
+        ? smartFilter(inCategory, search, (p) => [p.name, p.reference, CATEGORY[p.category], p.description])
+        : inCategory;
       return (
         <>
           <StocksTabs />
@@ -262,6 +274,23 @@ export default function Products() {
             tour="products"
           />
           <div className="toolbar">
+            <SmartSearch
+              value={search}
+              onChange={setSearch}
+              suggestions={list}
+              onPick={(p) => sheetDialog(p, reload)}
+              placeholder="Nom, référence, origine…"
+              label="Rechercher un produit"
+              renderSuggestion={(p) => (
+                <>
+                  <ProductPhoto product={p} />
+                  <div className="grow">
+                    <div className="title">{p.name}</div>
+                    <div className="meta">{p.reference} · {money(p.price)} · stock {p.stock_qty}</div>
+                  </div>
+                </>
+              )}
+            />
             <Segmented
               label="Catégorie"
               value={cat}
@@ -301,7 +330,7 @@ export default function Products() {
                   </tr>
                 ))}</tbody>
               </table></div>
-            ) : <Empty icon="box">Aucun produit dans cette catégorie.</Empty>}
+            ) : <Empty icon="box">{searching ? `Aucun produit ne correspond à « ${search.trim()} ».` : 'Aucun produit dans cette catégorie.'}</Empty>}
           </section>
           <section className="card section-gap">
             <div className="card-head"><h2>Derniers mouvements de stock</h2></div>
