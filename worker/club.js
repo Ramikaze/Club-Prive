@@ -1173,6 +1173,7 @@ export class Club {
     if (credit === undefined || !Number.isInteger(amount) || amount === 0 || (amount > 0) !== credit) {
       throw invalid('Mouvement de carte invalide.');
     }
+    this.assertOpen(this.bizToday(), 'Ce mouvement de carte');
     const balance = this.walletBalance(memberId);
     if (balance + amount < 0) {
       throw conflict(
@@ -2248,32 +2249,47 @@ export class Club {
       }
     }
     if (new Set(charges.map((c) => c.member_id)).size > 1) throw invalid("Un encaissement ne peut concerner qu'un seul membre.");
-    const method = text(input.method, 'Moyen de paiement', { required: true, max: 40 });
-    if (!s.payment_methods.includes(method)) throw invalid('Moyen de paiement non configuré.');
+    const memberId = charges[0].member_id;
+    const total = charges.reduce((sum, c) => sum + c.amount, 0);
+    // With the card, its credit pays as much of the note as it can; the rest goes through the chosen method,
+    // which is only required when something is left. A note the card covers in full is paid by CARD_METHOD.
+    const cardAmount = flag(input.card) ? Math.min(this.walletBalance(memberId), total) : 0;
+    let method = CARD_METHOD;
+    if (cardAmount < total) {
+      method = text(input.method, 'Moyen de paiement', { required: true, max: 40 });
+      if (!s.payment_methods.includes(method)) throw invalid('Moyen de paiement non configuré.');
+    }
     const reference = text(input.reference, 'Référence', { max: 80 });
     if (!s.demo_mode && charges.some((c) => !c.tariff_validated)) {
       throw conflict('TARIF_NON_VALIDE', 'Une des lignes repose sur un tarif non validé par un administrateur.');
     }
     this.assertOpen(this.bizToday(), 'Cet encaissement');
-    const total = charges.reduce((sum, c) => sum + c.amount, 0);
     const reservationIds = new Set(charges.map((c) => c.reservation_id));
     const reservationId = reservationIds.size === 1 ? [...reservationIds][0] : null;
     const paymentId = this.insert(
-      'INSERT INTO payments (member_id, reservation_id, amount, method, reference, paid_at, created_by, ticket_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      charges[0].member_id, reservationId, total, method, reference, this.nowIso(), actor.id, this.freshTicketCode(),
+      `INSERT INTO payments (member_id, reservation_id, amount, method, reference, paid_at, created_by, ticket_code, card_amount)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      memberId, reservationId, total, method, reference, this.nowIso(), actor.id, this.freshTicketCode(), cardAmount,
     );
     for (const c of charges) {
       this.run('INSERT INTO payment_allocations (payment_id, charge_id, account, amount) VALUES (?, ?, ?, ?)', paymentId, c.id, c.account, c.amount);
       const res = this.run("UPDATE charges SET status = 'payee' WHERE id = ? AND status = 'due'", c.id);
       if (res.changes !== 1) throw conflict('DEJA_TRAITEE', `La ligne « ${c.label} » a été traitée entre-temps.`);
     }
+    if (cardAmount > 0) {
+      // walletMove reads the balance again and refuses to take the card below zero.
+      this.walletMove(actor, memberId, 'paiement', -cardAmount, { paymentId });
+      this.audit(actor, 'carte.payer', 'member', memberId, {
+        payment_id: paymentId, montant: cardAmount, total, reste: total - cardAmount, solde: this.walletBalance(memberId),
+      });
+    }
     const payment = this.paymentDTO(this.get(
       `SELECT p.*, m.first_name, m.last_name, m.member_no, u.name AS created_by_name FROM payments p
        JOIN members m ON m.id = p.member_id LEFT JOIN users u ON u.id = p.created_by WHERE p.id = ?`, paymentId,
     ));
-    const details = { payment_id: paymentId, montant: total, moyen: method, reference, ventilation: payment.by_account };
+    const details = { payment_id: paymentId, montant: total, moyen: method, reference, ventilation: payment.by_account, carte: cardAmount };
     if (reservationId) this.audit(actor, 'paiement.enregistrer', 'reservation', reservationId, details);
-    else this.audit(actor, 'paiement.enregistrer', 'member', charges[0].member_id, details);
+    else this.audit(actor, 'paiement.enregistrer', 'member', memberId, details);
     return { payment };
   }
 
@@ -2285,20 +2301,30 @@ export class Club {
     if (c.status !== 'payee') throw conflict('STATUT_LIGNE', 'Seule une ligne encaissée peut être remboursée.');
     const alloc = this.get('SELECT * FROM payment_allocations WHERE charge_id = ?', c.id);
     const reason = text(input.reason, 'Motif du remboursement', { required: true, min: 3, max: 300 });
-    const method = text(input.method, 'Moyen de remboursement', { required: true, max: 40 });
-    if (!s.payment_methods.includes(method)) throw invalid('Moyen de paiement non configuré.');
+    // The part of the payment taken from the card goes back to the card first (its money is never handed out in
+    // cash); only the rest leaves the till, through the chosen method.
+    const p = this.paymentRow(alloc.payment_id);
+    const cardRefunded = this.get('SELECT COALESCE(SUM(card_amount), 0) AS n FROM refunds WHERE payment_id = ?', p.id).n;
+    const cardPart = Math.max(0, Math.min(c.amount, p.card_amount - cardRefunded));
+    let method = CARD_METHOD;
+    if (cardPart < c.amount) {
+      method = text(input.method, 'Moyen de remboursement', { required: true, max: 40 });
+      if (!s.payment_methods.includes(method)) throw invalid('Moyen de paiement non configuré.');
+    }
     const reference = text(input.reference, 'Référence', { max: 80 });
     this.assertOpen(this.bizToday(), 'Ce remboursement');
     const restock = !!c.product_id && flag(input.restock);
     const refundId = this.insert(
-      `INSERT INTO refunds (charge_id, payment_id, account, amount, method, reference, reason, restocked, created_at, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      c.id, alloc.payment_id, c.account, c.amount, method, reference, reason, restock ? 1 : 0, this.nowIso(), actor.id,
+      `INSERT INTO refunds (charge_id, payment_id, account, amount, method, reference, reason, restocked, created_at, created_by, card_amount)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      c.id, p.id, c.account, c.amount, method, reference, reason, restock ? 1 : 0, this.nowIso(), actor.id, cardPart,
     );
+    if (cardPart > 0) this.walletMove(actor, p.member_id, 'remboursement', cardPart, { paymentId: p.id, refundId, reason });
     this.run("UPDATE charges SET status = 'remboursee' WHERE id = ?", c.id);
     if (restock) this.moveStock(actor, c.product_id, c.quantity, 'retour', { chargeId: c.id, reason });
     this.audit(actor, 'ligne.rembourser', c.reservation_id ? 'reservation' : 'member', c.reservation_id ?? c.member_id, {
       refund_id: refundId, charge_id: c.id, libelle: c.label, montant: c.amount, sous_compte: c.account, motif: reason, remis_en_stock: restock,
+      carte: cardPart,
     });
     return c.reservation_id ? this.reservationDetail(c.reservation_id) : this.memberDetail(c.member_id);
   }
@@ -2789,9 +2815,15 @@ export class Club {
     });
     const total = empty('total', 'Total');
     for (const x of accounts) for (const f of ['billed', 'collected', 'refunded', 'net', 'outstanding', 'cancelled', 'lines']) total[f] += x[f];
+    // The part of a payment taken from the card shows under CARD_METHOD, the rest under its own method.
     const methods = this.all(
-      `SELECT method, SUM(amount) AS total, COUNT(*) AS n FROM payments WHERE paid_at >= ? AND paid_at < ? AND kind <> 'recharge'
-       GROUP BY method ORDER BY total DESC`, a, b,
+      `SELECT method, SUM(total) AS total, SUM(n) AS n FROM (
+         SELECT method, amount - card_amount AS total, 1 AS n FROM payments
+         WHERE paid_at >= ? AND paid_at < ? AND kind <> 'recharge' AND method <> ?
+         UNION ALL
+         SELECT ? AS method, card_amount AS total, 1 AS n FROM payments
+         WHERE paid_at >= ? AND paid_at < ? AND kind <> 'recharge' AND card_amount > 0
+       ) GROUP BY method ORDER BY total DESC`, a, b, CARD_METHOD, CARD_METHOD, a, b,
     );
     return { from, to, accounts, total, methods };
   }

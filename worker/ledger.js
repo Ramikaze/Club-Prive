@@ -257,8 +257,12 @@ export const ledgerMethods = {
     )) {
       add(r.method, 'out', r.total);
     }
-    for (const r of this.all('SELECT method, SUM(amount) AS total FROM refunds WHERE created_at >= ? AND created_at < ? GROUP BY method', a, b)) {
-      add(r.method, 'out', r.total);
+    // The part of a refund put back on the member's card is no outflow either.
+    for (const r of this.all(
+      'SELECT method, SUM(amount - card_amount) AS total FROM refunds WHERE created_at >= ? AND created_at < ? AND method <> ? GROUP BY method',
+      a, b, CARD_METHOD,
+    )) {
+      if (r.total) add(r.method, 'out', r.total);
     }
     for (const r of this.all(
       `SELECT kind, method, to_method, SUM(amount) AS total FROM ledger_entries
@@ -363,15 +367,23 @@ export const ledgerMethods = {
         });
       }
     }
+    // Only cash enters the book: the part of a payment taken from the card is spread over its lines in order and
+    // left out (that money came in with the recharge); a line the card paid in full has no row.
+    const cardLeft = new Map();
     for (const r of this.all(
-      `SELECT pa.id, pa.account, pa.amount, p.id AS payment_id, p.paid_at, p.method, p.reference, c.label, m.first_name, m.last_name
+      `SELECT pa.id, pa.account, pa.amount, p.id AS payment_id, p.paid_at, p.method, p.reference, p.card_amount, c.label,
+         m.first_name, m.last_name
        FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id JOIN charges c ON c.id = pa.charge_id
        JOIN members m ON m.id = p.member_id
        WHERE p.paid_at >= ? AND p.paid_at < ? ORDER BY p.paid_at, pa.id`, a, b,
     )) {
+      const left = cardLeft.get(r.payment_id) ?? r.card_amount;
+      const card = Math.min(left, r.amount);
+      cardLeft.set(r.payment_id, left - card);
+      if (card === r.amount) continue;
       rows.push({
         key: `E-${r.id}`, ...when(r.paid_at), type: 'encaissement', ref: `ENC-${r.payment_id}`, label: r.label,
-        detail: `${r.first_name} ${r.last_name}`, reference: r.reference, account: r.account, method: r.method, in: r.amount, out: 0,
+        detail: `${r.first_name} ${r.last_name}`, reference: r.reference, account: r.account, method: r.method, in: r.amount - card, out: 0,
       });
     }
     for (const r of this.all(
@@ -399,10 +411,12 @@ export const ledgerMethods = {
        JOIN charges c ON c.id = rf.charge_id JOIN members m ON m.id = c.member_id
        WHERE rf.created_at >= ? AND rf.created_at < ? ORDER BY rf.created_at, rf.id`, a, b,
     )) {
+      // The part put back on the card leaves no cash.
+      if (r.card_amount === r.amount) continue;
       rows.push({
         key: `R-${r.id}`, ...when(r.created_at), type: 'remboursement', ref: `RMB-${r.id}`, label: `Remboursement : ${r.label}`,
         detail: `${r.first_name} ${r.last_name} — ${r.reason}`, reference: r.reference, account: r.account, method: r.method,
-        in: 0, out: r.amount,
+        in: 0, out: r.amount - r.card_amount,
       });
     }
     for (const e of this.all(

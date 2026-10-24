@@ -187,6 +187,146 @@ test('crédits des membres : le total dû en consommations, en trésorerie et fi
   assert.equal((await treasury()).wallet_liability, liabilityBefore + 115000 * UM);
 });
 
+// ---------------------------------------------------------------------------- paying a note with the card
+
+// A due line on the member's note, typed straight into the business layer (a bottle or a cigar).
+const line = (memberId, account, amount, label = 'Consommation') => server.club.tx(() => server.club.insertCharge(gerant, {
+  account, kind: 'produit', member_id: memberId, label, quantity: 1, unit_price: amount,
+}));
+const pay = (body) => manager.post('/api/payments', body);
+const sales = async () => ok(await admin.get(`/api/finance/summary?from=${today}`));
+const collected = (s, account) => s.accounts.find((x) => x.account === account).collected;
+const byMethod = (s, method) => s.methods.find((x) => x.method === method)?.total ?? 0;
+const bookClosing = async () => ok(await admin.get(`/api/ledger/book?from=${today}&to=${today}`)).closing;
+
+test('tout par la carte : la note est réglée par « Carte membre », sans entrée d’argent, recettes sur leurs sous-comptes', async () => {
+  const member = await newMember('Fanny');
+  ok(await recharge(member.id, { amount: 50000 * UM, method: 'Espèces' }));
+  const bottle = line(member.id, 'alcool', 20000 * UM, 'Bouteille');
+  const cigar = line(member.id, 'cigares', 10000 * UM, 'Cigare');
+  const before = await treasury();
+  const salesBefore = await sales();
+  const { payment } = ok(await pay({ charge_ids: [bottle, cigar], card: true, method: 'Espèces' }));
+  assert.equal(payment.method, CARD_METHOD);
+  assert.equal(payment.amount, 30000 * UM);
+  assert.equal(payment.card_amount, 30000 * UM);
+  assert.equal(balance(member.id), 20000 * UM);
+  const move = ok(await manager.get(`/api/members/${member.id}`)).wallet.movements[0];
+  assert.equal(move.kind, 'paiement');
+  assert.equal(move.amount, -30000 * UM);
+  assert.equal(move.payment_id, payment.id);
+  const afterwards = await treasury();
+  assert.equal(afterwards.total.in, before.total.in);
+  assert.equal(afterwards.total.closing, before.total.closing);
+  const salesAfter = await sales();
+  assert.equal(collected(salesAfter, 'alcool'), collected(salesBefore, 'alcool') + 20000 * UM);
+  assert.equal(collected(salesAfter, 'cigares'), collected(salesBefore, 'cigares') + 10000 * UM);
+  assert.equal(byMethod(salesAfter, CARD_METHOD), byMethod(salesBefore, CARD_METHOD) + 30000 * UM);
+  assert.equal(byMethod(salesAfter, 'Espèces'), byMethod(salesBefore, 'Espèces'));
+  assert.equal(await bookClosing(), afterwards.total.closing);
+  const entry = ok(await admin.get('/api/audit')).find((a) => a.action === 'carte.payer');
+  assert.equal(entry.entity_id, member.id);
+  assert.equal(entry.details.payment_id, payment.id);
+  assert.equal(entry.details.montant, 30000 * UM);
+});
+
+test('carte puis espèces : la carte prend tout son solde, le reste entre en caisse ; sans moyen, rien n’est enregistré', async () => {
+  const member = await newMember('Gaston');
+  ok(await recharge(member.id, { amount: 5000 * UM, method: 'Espèces' }));
+  const bottle = line(member.id, 'alcool', 20000 * UM, 'Bouteille');
+  const payments = server.club.get('SELECT COUNT(*) AS n FROM payments').n;
+  refused(await pay({ charge_ids: [bottle], card: true }), 400);
+  assert.equal(server.club.get('SELECT COUNT(*) AS n FROM payments').n, payments);
+  assert.equal(server.club.get('SELECT status FROM charges WHERE id = ?', bottle).status, 'due');
+  assert.equal(balance(member.id), 5000 * UM);
+  const before = await treasury();
+  const salesBefore = await sales();
+  const { payment } = ok(await pay({ charge_ids: [bottle], card: true, method: 'Espèces' }));
+  assert.equal(payment.method, 'Espèces');
+  assert.equal(payment.amount, 20000 * UM);
+  assert.equal(payment.card_amount, 5000 * UM);
+  assert.equal(balance(member.id), 0);
+  const afterwards = await treasury();
+  assert.equal(cash(afterwards).in, cash(before).in + 15000 * UM);
+  assert.equal(afterwards.total.closing, before.total.closing + 15000 * UM);
+  const salesAfter = await sales();
+  assert.equal(byMethod(salesAfter, 'Espèces'), byMethod(salesBefore, 'Espèces') + 15000 * UM);
+  assert.equal(byMethod(salesAfter, CARD_METHOD), byMethod(salesBefore, CARD_METHOD) + 5000 * UM);
+  assert.equal(await bookClosing(), afterwards.total.closing);
+});
+
+test('solde nul : « carte » cochée sans crédit, tout passe par le moyen choisi', async () => {
+  const member = await newMember('Hélène');
+  const bottle = line(member.id, 'alcool', 8000 * UM);
+  const moves = server.club.get('SELECT COUNT(*) AS n FROM wallet_movements').n;
+  const { payment } = ok(await pay({ charge_ids: [bottle], card: true, method: 'Espèces' }));
+  assert.equal(payment.method, 'Espèces');
+  assert.equal(payment.card_amount, 0);
+  assert.equal(server.club.get('SELECT COUNT(*) AS n FROM wallet_movements').n, moves);
+  assert.equal(balance(member.id), 0);
+});
+
+test('remboursement : la part payée par la carte retourne sur la carte, le reste sort de la caisse', async () => {
+  // A line paid entirely with the card: the balance goes back up, no cash goes out.
+  const member = await newMember('Igor');
+  ok(await recharge(member.id, { amount: 10000 * UM, method: 'Espèces' }));
+  const glass = line(member.id, 'alcool', 6000 * UM, 'Verre');
+  ok(await pay({ charge_ids: [glass], card: true }));
+  assert.equal(balance(member.id), 4000 * UM);
+  let before = await treasury();
+  ok(await admin.post(`/api/charges/${glass}/refund`, { reason: 'Verre renversé' }));
+  assert.equal(balance(member.id), 10000 * UM);
+  let afterwards = await treasury();
+  assert.equal(afterwards.total.out, before.total.out);
+  assert.equal(afterwards.total.closing, before.total.closing);
+  const refund = server.club.get('SELECT * FROM refunds WHERE charge_id = ?', glass);
+  assert.equal(refund.card_amount, 6000 * UM);
+  assert.equal(refund.method, CARD_METHOD);
+  const move = ok(await manager.get(`/api/members/${member.id}`)).wallet.movements[0];
+  assert.equal(move.kind, 'remboursement');
+  assert.equal(move.amount, 6000 * UM);
+  assert.equal(await bookClosing(), afterwards.total.closing);
+
+  // A mixed payment, 5 000 by card and 15 000 in cash over two lines of 10 000.
+  const mixed = await newMember('Jeanne');
+  ok(await recharge(mixed.id, { amount: 5000 * UM, method: 'Espèces' }));
+  const first = line(mixed.id, 'alcool', 10000 * UM, 'Bouteille 1');
+  const second = line(mixed.id, 'alcool', 10000 * UM, 'Bouteille 2');
+  ok(await pay({ charge_ids: [first, second], card: true, method: 'Espèces' }));
+  assert.equal(balance(mixed.id), 0);
+  refused(await admin.post(`/api/charges/${first}/refund`, { reason: 'Bouchonnée' }), 400); // the cash part needs a method
+  assert.equal(balance(mixed.id), 0);
+  before = await treasury();
+  ok(await admin.post(`/api/charges/${first}/refund`, { reason: 'Bouchonnée', method: 'Espèces' }));
+  assert.equal(balance(mixed.id), 5000 * UM);
+  afterwards = await treasury();
+  assert.equal(cash(afterwards).out, cash(before).out + 5000 * UM);
+  assert.equal(server.club.get('SELECT card_amount FROM refunds WHERE charge_id = ?', first).card_amount, 5000 * UM);
+  before = afterwards;
+  ok(await admin.post(`/api/charges/${second}/refund`, { reason: 'Bouchonnée', method: 'Espèces' }));
+  assert.equal(balance(mixed.id), 5000 * UM);
+  afterwards = await treasury();
+  assert.equal(cash(afterwards).out, cash(before).out + 10000 * UM);
+  assert.equal(server.club.get('SELECT card_amount FROM refunds WHERE charge_id = ?', second).card_amount, 0);
+  // The general ledger books only the cash part of the mixed payment and of its refunds.
+  assert.equal(await bookClosing(), afterwards.total.closing);
+});
+
+test('mois clôturé : un mouvement de carte hors recharge est refusé aussi', async () => {
+  const member = await newMember('Karim');
+  ok(await recharge(member.id, { amount: 3000 * UM, method: 'Espèces' }));
+  server.club.run("INSERT INTO closed_periods (month, closed_at, summary) VALUES (?, ?, '{}')", today.slice(0, 7), new Date().toISOString());
+  try {
+    assert.throws(
+      () => server.club.tx(() => server.club.walletMove(gerant, member.id, 'paiement', -1000 * UM)),
+      (err) => err.code === 'PERIODE_CLOTUREE',
+    );
+  } finally {
+    server.club.run('DELETE FROM closed_periods WHERE month = ?', today.slice(0, 7));
+  }
+  assert.equal(balance(member.id), 3000 * UM);
+});
+
 // A database at version 14 holding the harness's own records: built with the first 14 migrations, then filled
 // with every row of a database made through the API (the V14 columns of each table).
 function v14Copy(sourceFile, file) {
