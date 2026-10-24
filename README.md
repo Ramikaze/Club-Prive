@@ -46,11 +46,11 @@ Ouvrir ensuite `http://localhost:5173`. Les appels `/api` sont transmis au serve
 
 ## Fonctionnalités
 
-- **Membres et cartes** : fiches, cartes physiques ou virtuelles avec QR code, formules, renouvellements, crédit individuel et historique des séances comme titulaire ou accompagnant.
+- **Membres et cartes** : fiches, cartes physiques ou virtuelles avec QR code et logo The Limen, formules, renouvellements, crédit individuel et historique des séances comme titulaire ou accompagnant.
 - **Salles et salons** : capacités, disponibilités, participants, installation, consommations, fermeture temporaire et réouverture.
 - **Agenda** : vues jour, semaine et liste, devis, arrivées, prolongations, annulations et protection contre les chevauchements de salles et de membres.
 - **Cave** : plusieurs caves, seuils d’humidité et de température propres à chaque cave, fréquence des contrôles, relevés manuels horodatés, graphiques et journal exportable.
-- **Produits et caisse** : cigares et bouteilles, avec leur photo (les administrateurs l’ajoutent, la changent ou la retirent depuis la fiche du produit), entrées de stock, ventes liées aux réservations, encaissements, remboursements et ventilation par activité.
+- **Produits et caisse** : cigares et bouteilles, avec leur photo (les administrateurs l’ajoutent, la changent ou la retirent depuis la fiche du produit), entrées de stock, ventes liées aux réservations, encaissements, remboursements et ventilation par activité. Chaque encaissement donne un ticket de caisse (voir « Ticket de caisse »).
 - **Administration** : dépenses, trésorerie, grand livre, clôtures mensuelles, rôles, journal d’audit, paramètres et exports Excel.
 - **Mode démo** : un espace d’entraînement aux données fictives, séparé du vrai club.
 
@@ -81,6 +81,18 @@ Après une réservation, le gérant envoie lui-même la confirmation au client s
 La configuration des salles est réservée aux administrateurs. Fermer une salle ou réduire sa capacité exige de traiter au préalable les réservations actives concernées. Une salle fermée reste visible dans « Salles fermées » pour être rouverte. La suppression retire la salle de l’exploitation et conserve ses réservations historiques dans leur salle d’origine. Au moins une salle reste ouverte.
 
 Le QR code d’une carte ouvre la fiche du membre après authentification du personnel. L’URL complète ou le code de carte peut aussi être saisi dans la recherche des membres. Le QR code ne constitue pas une connexion ni une autorisation d’accès autonome.
+
+### Ticket de caisse
+
+Après chaque encaissement, l’application ouvre la page du ticket (`#/caisse/ticket/…`), à imprimer sur un rouleau 80 mm (la longueur du papier suit celle du ticket) ou à envoyer par WhatsApp. Le ticket est la vue d’un paiement enregistré par le serveur : il ne se saisit, ne se modifie et ne se supprime pas. Il porte un numéro (`T-000123`), la mention **Original** ou **Duplicata n°X**, un QR code et un code de contrôle en clair, ainsi qu’un en-tête et un pied de page réglables.
+
+- **Impression** : seul le bouton « Imprimer » de la page imprime un exemplaire numéroté et l’enregistre. La commande d’impression du navigateur (Ctrl+P ou menu) n’imprime qu’un avis, « Impression non enregistrée : utilisez le bouton Imprimer de la page. ». Une impression annulée compte quand même comme un exemplaire : le suivant est un duplicata.
+- **WhatsApp** : le bouton ouvre WhatsApp avec le texte du ticket pour le numéro du membre ; il ne reste qu’à envoyer. Chaque envoi est tracé comme une impression.
+- **Réimpression** : bouton « Ticket » dans le journal des encaissements et sur chaque paiement de la fiche du membre. Tous les rôles peuvent rouvrir un ticket ; chaque sortie est tracée (qui, quand, quel exemplaire).
+- **Vérification publique** : le QR code (ou la saisie du numéro et du code sur `#/ticket`) ouvre une page sans connexion qui dit si le ticket est authentique et en montre le contenu : club, numéro, date, lignes, total, moyen de paiement, statut (valide, partiellement remboursé, remboursé), devise et fuseau du club, et seulement les initiales du client. Elle n’affiche jamais le téléphone, le nom complet, le numéro de membre, l’encaisseur ni la référence MoMo, et répond de la même façon qu’un numéro existe ou non. Après 5 essais ratés, il faut attendre une minute. Elle ne lit jamais l’espace démo.
+- **Historique des tickets** (administrateurs) : bouton « Historique des tickets » sur la Caisse (`#/caisse/historique-tickets`), avec filtres par période et par employé ; un ticket sorti trois fois ou plus est signalé.
+- **Réglages** : Paramètres › Club & Horaires, carte « Ticket de caisse » : texte d’en-tête (4 lignes, 200 caractères) et pied de ticket (2 lignes, 120 caractères, « Merci de votre visite » par défaut).
+- **Mode démo** : le ticket porte le filigrane « DÉMO — SANS VALEUR », sans QR code ni code de contrôle, et WhatsApp montre le message sans rien ouvrir.
 
 ### Mode démo (entraînement)
 
