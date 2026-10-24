@@ -4,6 +4,10 @@ import { localParts, addDays, daysBetween, parseHHMM } from './time.js';
 export const ACCOUNTS = ['reservations', 'alcool', 'cigares'];
 export const ACCOUNT_LABELS = { reservations: 'Réservations', alcool: 'Alcool', cigares: 'Cigares' };
 
+// The member card's CFA credit as a means of payment. It is never one of the configured payment methods: the
+// money came into the till when the card was recharged, so a payment by card is no cash inflow.
+export const CARD_METHOD = 'Carte membre';
+
 // The club has no opening hours: it opens whenever the room is booked, day or night. A business
 // day still starts at `hours.open` (06:00 by default) for the agenda and the books, so a session
 // started before that time counts in the previous day, like a late evening. The window is that

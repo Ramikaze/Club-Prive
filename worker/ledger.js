@@ -6,7 +6,7 @@
 import { invalid, forbidden, notFound, conflict } from './errors.js';
 import { text, int, toId, flag } from './validate.js';
 import { addDays, addMonths, isValidDate, localParts } from '../shared/time.js';
-import { ACCOUNTS, ACCOUNT_LABELS } from '../shared/rules.js';
+import { ACCOUNTS, ACCOUNT_LABELS, CARD_METHOD } from '../shared/rules.js';
 
 // The largest expense a manager may record alone, in hundredths (5 000 FCFA); above it, an administrator records it.
 export const MANAGER_EXPENSE_MAX = 5000 * 100;
@@ -16,6 +16,7 @@ const CATEGORY_KIND = { depense: 'Dépense', recette: 'Entrée diverse' };
 const MOVEMENT_KIND = {
   ouverture: "Solde d'ouverture", encaissement: 'Encaissement', remboursement: 'Remboursement',
   depense: 'Dépense', recette: 'Entrée diverse', transfert: 'Transfert',
+  recharge: 'Recharge de carte', annulation_recharge: 'Annulation de recharge',
 };
 
 export const DEFAULT_CATEGORIES = {
@@ -227,6 +228,8 @@ export const ledgerMethods = {
       `SELECT method FROM payments UNION SELECT method FROM refunds UNION SELECT method FROM ledger_entries
        UNION SELECT to_method FROM ledger_entries WHERE to_method IS NOT NULL`,
     )) methods.add(r.method);
+    // The card's credit is no treasury account: its money came in through the till when it was recharged.
+    methods.delete(CARD_METHOD);
     return [...methods];
   },
 
@@ -240,8 +243,19 @@ export const ledgerMethods = {
     if (to < from) return flows;
     const a = this.dayStartIso(from);
     const b = this.dayStartIso(addDays(to, 1));
-    for (const r of this.all('SELECT method, SUM(amount) AS total FROM payments WHERE paid_at >= ? AND paid_at < ? GROUP BY method', a, b)) {
-      add(r.method, 'in', r.total);
+    // The part of a payment taken from the member's card is no inflow: that money came in with the recharge.
+    // A recharge counts in on its day, and out again on the day an administrator cancels it.
+    for (const r of this.all(
+      'SELECT method, SUM(amount - card_amount) AS total FROM payments WHERE paid_at >= ? AND paid_at < ? AND method <> ? GROUP BY method',
+      a, b, CARD_METHOD,
+    )) {
+      if (r.total) add(r.method, 'in', r.total);
+    }
+    for (const r of this.all(
+      `SELECT method, SUM(amount) AS total FROM payments
+       WHERE kind = 'recharge' AND cancelled_at >= ? AND cancelled_at < ? GROUP BY method`, a, b,
+    )) {
+      add(r.method, 'out', r.total);
     }
     for (const r of this.all('SELECT method, SUM(amount) AS total FROM refunds WHERE created_at >= ? AND created_at < ? GROUP BY method', a, b)) {
       add(r.method, 'out', r.total);
@@ -316,8 +330,13 @@ export const ledgerMethods = {
     };
   },
 
+  // What the members' cards hold at the end of the business day `to` (the money the club owes them in consumption).
+  walletLiabilityAt(to) {
+    return this.walletLiability(new Date(Date.parse(this.dayStartIso(addDays(to, 1))) - 1).toISOString());
+  },
+
   treasury(from, to) {
-    return { ...this.treasuryBalances(from, to), result: this.periodResult(from, to) };
+    return { ...this.treasuryBalances(from, to), result: this.periodResult(from, to), wallet_liability: this.walletLiabilityAt(to) };
   },
 
   // ---------------------------------------------------------------- general ledger
@@ -354,6 +373,26 @@ export const ledgerMethods = {
         key: `E-${r.id}`, ...when(r.paid_at), type: 'encaissement', ref: `ENC-${r.payment_id}`, label: r.label,
         detail: `${r.first_name} ${r.last_name}`, reference: r.reference, account: r.account, method: r.method, in: r.amount, out: 0,
       });
+    }
+    for (const r of this.all(
+      `SELECT p.*, m.first_name, m.last_name FROM payments p JOIN members m ON m.id = p.member_id
+       WHERE p.kind = 'recharge' AND ((p.paid_at >= ? AND p.paid_at < ?) OR (p.cancelled_at >= ? AND p.cancelled_at < ?))
+       ORDER BY p.paid_at, p.id`, a, b, a, b,
+    )) {
+      const base = { ref: `ENC-${r.id}`, reference: r.reference, account: null, method: r.method };
+      const member = `${r.first_name} ${r.last_name}`;
+      if (r.paid_at >= a && r.paid_at < b) {
+        rows.push({
+          ...base, key: `K-${r.id}`, ...when(r.paid_at), type: 'recharge', label: r.label ?? 'Recharge de la carte membre',
+          detail: member, in: r.amount, out: 0,
+        });
+      }
+      if (r.cancelled_at && r.cancelled_at >= a && r.cancelled_at < b) {
+        rows.push({
+          ...base, key: `KA-${r.id}`, ...when(r.cancelled_at), type: 'annulation_recharge', label: 'Annulation de recharge',
+          detail: `${member} — ${r.cancel_reason}`, in: 0, out: r.amount,
+        });
+      }
     }
     for (const r of this.all(
       `SELECT rf.*, c.label, m.first_name, m.last_name FROM refunds rf
@@ -458,7 +497,9 @@ export const ledgerMethods = {
     if (n > 0) {
       throw conflict('RESERVATIONS_OUVERTES', `${n} réservation(s) de ${monthLabel(month)} ne sont ni terminées ni annulées : traitez-les avant la clôture.`);
     }
-    const summary = { treasury: this.treasuryBalances(first, last), result: this.periodResult(first, last) };
+    const summary = {
+      treasury: this.treasuryBalances(first, last), result: this.periodResult(first, last), wallet_liability: this.walletLiabilityAt(last),
+    };
     this.run(
       'INSERT INTO closed_periods (month, closed_at, closed_by, summary) VALUES (?, ?, ?, ?)',
       month, this.nowIso(), actor.id, JSON.stringify(summary),

@@ -520,7 +520,112 @@ const V14 = [
   'CREATE INDEX ticket_events_at ON ticket_events(at)',
 ];
 
-export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14];
+// Member card, CFA credit. The balance belongs to the member (a replaced card keeps it) and is the sum of its
+// movements, signed (+ credit, - debit), never a typed figure. A payment is now of a kind: a collection of lines
+// (`encaissement`), a recharge of the card (cash in, no line, cancellable by an administrator) or an outside meal;
+// `card_amount` is the part of it paid with the card (no cash inflow). A refund records the part going back to
+// the card.
+// A booking may be paid with the card without any plan: `reservations.subscription_id` loses its NOT NULL.
+// SQLite cannot alter a column, so the table is rebuilt. Its rows wait in a plain copy (no constraint, no
+// reference to it) while the table is dropped and created again: the rows of credit_movements, charges, payments
+// and reservation_attendees that point at a booking are orphans for that moment, which the deferred foreign keys
+// allow until the end of the migration's transaction, and the bookings copied back make them whole again (a
+// missing one would fail the commit). Renaming a new table onto the old name instead would leave the deferred
+// count of the drop behind and fail every time. The indexes and the overlap triggers of V1 and V4 come back
+// unchanged.
+const V15 = [
+  `CREATE TABLE wallet_movements (
+    id INTEGER PRIMARY KEY,
+    member_id INTEGER NOT NULL REFERENCES members(id),
+    kind TEXT NOT NULL CHECK (kind IN ('recharge', 'annulation_recharge', 'paiement', 'remboursement')),
+    amount INTEGER NOT NULL CHECK (amount <> 0),
+    payment_id INTEGER REFERENCES payments(id),
+    refund_id INTEGER REFERENCES refunds(id),
+    reason TEXT,
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id)
+  )`,
+  'CREATE INDEX wallet_movements_member ON wallet_movements(member_id, id)',
+  "ALTER TABLE payments ADD COLUMN kind TEXT NOT NULL DEFAULT 'encaissement' CHECK (kind IN ('encaissement', 'recharge', 'repas'))",
+  'ALTER TABLE payments ADD COLUMN card_amount INTEGER NOT NULL DEFAULT 0 CHECK (card_amount >= 0)',
+  'ALTER TABLE payments ADD COLUMN label TEXT',
+  'ALTER TABLE payments ADD COLUMN cancelled_at TEXT',
+  'ALTER TABLE payments ADD COLUMN cancelled_by INTEGER REFERENCES users(id)',
+  'ALTER TABLE payments ADD COLUMN cancel_reason TEXT',
+  'ALTER TABLE refunds ADD COLUMN card_amount INTEGER NOT NULL DEFAULT 0 CHECK (card_amount >= 0)',
+  'PRAGMA defer_foreign_keys = ON',
+  'CREATE TABLE reservations_v14 AS SELECT * FROM reservations',
+  'DROP TABLE reservations',
+  `CREATE TABLE reservations (
+    id INTEGER PRIMARY KEY,
+    member_id INTEGER NOT NULL REFERENCES members(id),
+    subscription_id INTEGER REFERENCES subscriptions(id),
+    biz_day TEXT NOT NULL,
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    duration_min INTEGER NOT NULL CHECK (duration_min > 0),
+    status TEXT NOT NULL CHECK (status IN ('reservee', 'en_cours', 'terminee', 'annulee')),
+    included_minutes INTEGER NOT NULL DEFAULT 0 CHECK (included_minutes >= 0),
+    paid_minutes INTEGER NOT NULL DEFAULT 0 CHECK (paid_minutes >= 0),
+    supplement_amount INTEGER NOT NULL DEFAULT 0 CHECK (supplement_amount >= 0),
+    tariff_hour INTEGER NOT NULL,
+    tariff_half INTEGER NOT NULL,
+    tariff_validated INTEGER NOT NULL,
+    off_hours INTEGER NOT NULL DEFAULT 0,
+    off_hours_authorized_by INTEGER REFERENCES users(id),
+    notes TEXT,
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    updated_at TEXT,
+    updated_by INTEGER REFERENCES users(id),
+    started_at TEXT,
+    started_by INTEGER REFERENCES users(id),
+    finished_at TEXT,
+    finished_by INTEGER REFERENCES users(id),
+    cancelled_at TEXT,
+    cancelled_by INTEGER REFERENCES users(id),
+    cancel_reason TEXT,
+    room_id INTEGER REFERENCES rooms(id),
+    party_size INTEGER NOT NULL DEFAULT 1 CHECK (party_size BETWEEN 1 AND 200),
+    deposit_amount INTEGER NOT NULL DEFAULT 0 CHECK (deposit_amount >= 0),
+    CHECK (end_ms > start_ms),
+    CHECK (included_minutes + paid_minutes = duration_min)
+  )`,
+  `INSERT INTO reservations (id, member_id, subscription_id, biz_day, start_ms, end_ms, duration_min, status,
+     included_minutes, paid_minutes, supplement_amount, tariff_hour, tariff_half, tariff_validated, off_hours,
+     off_hours_authorized_by, notes, created_at, created_by, updated_at, updated_by, started_at, started_by,
+     finished_at, finished_by, cancelled_at, cancelled_by, cancel_reason, room_id, party_size, deposit_amount)
+   SELECT id, member_id, subscription_id, biz_day, start_ms, end_ms, duration_min, status,
+     included_minutes, paid_minutes, supplement_amount, tariff_hour, tariff_half, tariff_validated, off_hours,
+     off_hours_authorized_by, notes, created_at, created_by, updated_at, updated_by, started_at, started_by,
+     finished_at, finished_by, cancelled_at, cancelled_by, cancel_reason, room_id, party_size, deposit_amount
+   FROM reservations_v14`,
+  'DROP TABLE reservations_v14',
+  'CREATE INDEX reservations_time ON reservations(start_ms, end_ms)',
+  'CREATE INDEX reservations_day ON reservations(biz_day)',
+  'CREATE INDEX reservations_member ON reservations(member_id)',
+  'CREATE INDEX reservations_room ON reservations(room_id, start_ms, end_ms)',
+  `CREATE TRIGGER reservations_no_overlap_insert BEFORE INSERT ON reservations
+  WHEN NEW.status <> 'annulee'
+  BEGIN
+    SELECT RAISE(ABORT, 'CHEVAUCHEMENT') WHERE EXISTS (
+      SELECT 1 FROM reservations r
+      WHERE r.status <> 'annulee'
+        AND COALESCE(r.room_id, 1) = COALESCE(NEW.room_id, 1)
+        AND r.start_ms < NEW.end_ms AND NEW.start_ms < r.end_ms);
+  END`,
+  `CREATE TRIGGER reservations_no_overlap_update BEFORE UPDATE OF start_ms, end_ms, status, room_id ON reservations
+  WHEN NEW.status <> 'annulee'
+  BEGIN
+    SELECT RAISE(ABORT, 'CHEVAUCHEMENT') WHERE EXISTS (
+      SELECT 1 FROM reservations r
+      WHERE r.id <> NEW.id AND r.status <> 'annulee'
+        AND COALESCE(r.room_id, 1) = COALESCE(NEW.room_id, 1)
+        AND r.start_ms < NEW.end_ms AND NEW.start_ms < r.end_ms);
+  END`,
+];
+
+export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15];
 
 export function migrate(db) {
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');

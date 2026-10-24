@@ -17,7 +17,7 @@ import {
 } from '../shared/time.js';
 import {
   ACCOUNTS, ACCOUNT_LABELS, bookingWindow, validateHours, placeInWindow, supplementAmount, supplementDetail, fmtDuration,
-  isWeekend, minDurationFor, DEPOSIT_FROM, depositFor, formatMoney,
+  isWeekend, minDurationFor, DEPOSIT_FROM, depositFor, formatMoney, CARD_METHOD,
 } from '../shared/rules.js';
 
 export const RES_STATUS = { reservee: 'Réservée', en_cours: 'En cours', terminee: 'Terminée', annulee: 'Annulée' };
@@ -38,7 +38,7 @@ const SESSION_DAYS = 14;
 // categories are kept.
 const WIPE_ORDER = [
   'humidor_readings', 'humidors',
-  'idempotency_keys', 'payment_allocations', 'refunds', 'stock_movements', 'credit_movements', 'charges',
+  'idempotency_keys', 'wallet_movements', 'payment_allocations', 'refunds', 'stock_movements', 'credit_movements', 'charges',
   'ticket_events', 'payments',
   'reservation_attendees', 'reservations', 'cards', 'subscriptions', 'members', 'product_photos', 'products',
   'ledger_entries', 'closed_periods', 'audit_log',
@@ -376,6 +376,9 @@ export class Club {
         if (!Array.isArray(v)) throw invalid('Liste des moyens de paiement invalide.');
         const list = [...new Set(v.map((x) => text(x, 'Moyen de paiement', { max: 40 })).filter(Boolean))];
         if (!list.length || list.length > 12) throw invalid('Indiquez entre 1 et 12 moyens de paiement.');
+        if (list.some((x) => x.toLowerCase() === CARD_METHOD.toLowerCase())) {
+          throw invalid(`« ${CARD_METHOD} » est le paiement par le crédit de la carte : il ne se configure pas comme un moyen de paiement.`);
+        }
         return list;
       }
       case 'opening_balances':
@@ -877,6 +880,7 @@ export class Club {
         && ['active', 'expire_bientot'].includes(subscription.state)
         && (subscription.credit?.available ?? 0) > 0,
       subscriptions, cards, reservations, charges, payments, balance_due: due,
+      wallet: this.walletDTO(m.id),
     };
   }
 
@@ -1153,6 +1157,115 @@ export class Club {
     );
     this.audit(actor, 'carte.desactiver', 'member', c.member_id, { card_id: c.id, code: c.code, motif: reason });
     return this.memberDetail(c.member_id);
+  }
+
+  // ---------------------------------------------------------------- member card: CFA credit
+
+  walletBalance(memberId) {
+    return this.get('SELECT COALESCE(SUM(amount), 0) AS b FROM wallet_movements WHERE member_id = ?', memberId).b;
+  }
+
+  // The only way the balance changes: one dated, signed row with its author, never edited or removed. Credits
+  // (recharge, refund) are positive, debits (payment, cancelled recharge) negative, and the balance never goes
+  // below zero. `actor` may be null for a movement the club makes on its own (an automatic renewal).
+  walletMove(actor, memberId, kind, amount, { paymentId = null, refundId = null, reason = null } = {}) {
+    const credit = { recharge: true, remboursement: true, paiement: false, annulation_recharge: false }[kind];
+    if (credit === undefined || !Number.isInteger(amount) || amount === 0 || (amount > 0) !== credit) {
+      throw invalid('Mouvement de carte invalide.');
+    }
+    const balance = this.walletBalance(memberId);
+    if (balance + amount < 0) {
+      throw conflict(
+        'SOLDE_INSUFFISANT',
+        `Crédit de la carte insuffisant : ${this.money(balance)} disponibles, ${this.money(-amount)} nécessaires.`,
+        { balance, needed: -amount },
+      );
+    }
+    return this.insert(
+      `INSERT INTO wallet_movements (member_id, kind, amount, payment_id, refund_id, reason, created_at, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      memberId, kind, amount, paymentId, refundId, reason, this.nowIso(), actor?.id ?? null,
+    );
+  }
+
+  // The balance, the last recharge still standing (the scale of the card's bar) and the 50 latest movements,
+  // each with the balance it left.
+  walletDTO(memberId) {
+    const last = this.get(
+      `SELECT w.amount, w.created_at FROM wallet_movements w JOIN payments p ON p.id = w.payment_id
+       WHERE w.member_id = ? AND w.kind = 'recharge' AND p.cancelled_at IS NULL ORDER BY w.id DESC LIMIT 1`, memberId,
+    );
+    const movements = this.all(
+      `SELECT x.*, u.name AS by_name FROM (
+         SELECT w.*, SUM(w.amount) OVER (ORDER BY w.id) AS balance_after FROM wallet_movements w WHERE w.member_id = ?
+       ) x LEFT JOIN users u ON u.id = x.created_by ORDER BY x.id DESC LIMIT 50`, memberId,
+    ).map((w) => ({
+      id: w.id, kind: w.kind, amount: w.amount, balance_after: w.balance_after, at: w.created_at, by_name: w.by_name ?? null,
+      payment_id: w.payment_id, reason: w.reason,
+    }));
+    return {
+      balance: this.walletBalance(memberId),
+      last_recharge: last ? { amount: last.amount, at: last.created_at } : null,
+      movements,
+    };
+  }
+
+  // What the club owes its members in consumption at an instant: the sum of every card's balance.
+  walletLiability(atIso = this.nowIso()) {
+    return this.get('SELECT COALESCE(SUM(amount), 0) AS total FROM wallet_movements WHERE created_at <= ?', atIso).total;
+  }
+
+  paymentRow(id) {
+    return this.get(
+      `SELECT p.*, m.first_name, m.last_name, m.member_no, u.name AS created_by_name FROM payments p
+       JOIN members m ON m.id = p.member_id LEFT JOIN users u ON u.id = p.created_by WHERE p.id = ?`, id,
+    );
+  }
+
+  // Money paid at the till onto the card: a payment of its own (cash in, with its ticket), with no line, since
+  // nothing is sold yet. It becomes revenue when the card pays for something.
+  rechargeWallet(actor, memberId, input) {
+    const s = this.settings();
+    const m = this.memberRow(memberId);
+    this.assertMemberActive(m, 'de recharger sa carte');
+    const amount = int(input.amount, 'Montant de la recharge', { min: 1, max: 1e13 });
+    const method = text(input.method, 'Moyen de paiement', { required: true, max: 40 });
+    if (method === CARD_METHOD || !s.payment_methods.includes(method)) throw invalid('Moyen de paiement non configuré.');
+    const reference = text(input.reference, 'Référence', { max: 80 });
+    this.assertOpen(this.bizToday(), 'Cette recharge');
+    const paymentId = this.insert(
+      `INSERT INTO payments (member_id, amount, method, reference, paid_at, created_by, ticket_code, kind, label)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'recharge', ?)`,
+      m.id, amount, method, reference, this.nowIso(), actor.id, this.freshTicketCode(), 'Recharge de la carte membre',
+    );
+    this.walletMove(actor, m.id, 'recharge', amount, { paymentId });
+    const wallet = this.walletDTO(m.id);
+    this.audit(actor, 'carte.recharger', 'member', m.id, {
+      payment_id: paymentId, montant: amount, moyen: method, reference, solde: wallet.balance,
+    });
+    return { payment: this.paymentDTO(this.paymentRow(paymentId)), wallet };
+  }
+
+  // Only an administrator cancels a recharge, with a reason: the money leaves the till on the day of the
+  // cancellation, and the card is debited, which is refused once the money has been spent.
+  cancelRecharge(actor, paymentId, input) {
+    if (actor.role !== 'admin') throw forbidden("L'annulation d'une recharge est réservée à un administrateur.");
+    const p = this.get('SELECT * FROM payments WHERE id = ?', toId(paymentId, 'Encaissement'));
+    if (!p) throw notFound('Encaissement');
+    if (p.kind !== 'recharge') throw conflict('PAS_UNE_RECHARGE', "Cet encaissement n'est pas une recharge de carte.");
+    if (p.cancelled_at) throw conflict('DEJA_ANNULEE', 'Recharge déjà annulée.');
+    const reason = text(input.reason, "Motif d'annulation", { required: true, min: 3, max: 300 });
+    this.assertOpen(this.bizToday(), 'Cette annulation');
+    this.walletMove(actor, p.member_id, 'annulation_recharge', -p.amount, { paymentId: p.id, reason });
+    this.run(
+      'UPDATE payments SET cancelled_at = ?, cancelled_by = ?, cancel_reason = ? WHERE id = ?',
+      this.nowIso(), actor.id, reason, p.id,
+    );
+    const wallet = this.walletDTO(p.member_id);
+    this.audit(actor, 'carte.annuler_recharge', 'member', p.member_id, {
+      payment_id: p.id, montant: p.amount, moyen: p.method, motif: reason, solde: wallet.balance,
+    });
+    return { wallet };
   }
 
   cardView(cardId) {
@@ -2114,6 +2227,8 @@ export class Club {
       id: p.id, member_id: p.member_id, member_name: p.first_name ? `${p.first_name} ${p.last_name}` : undefined,
       member_no: p.member_no, reservation_id: p.reservation_id, amount: p.amount, method: p.method, reference: p.reference,
       paid_at: p.paid_at, ticket_code: p.ticket_code ?? null, created_by_name: p.created_by_name ?? null, allocations, by_account: byAccount,
+      kind: p.kind ?? 'encaissement', card_amount: p.card_amount ?? 0, label: p.label ?? null,
+      cancelled_at: p.cancelled_at ?? null, cancel_reason: p.cancel_reason ?? null,
     };
   }
 
@@ -2675,7 +2790,8 @@ export class Club {
     const total = empty('total', 'Total');
     for (const x of accounts) for (const f of ['billed', 'collected', 'refunded', 'net', 'outstanding', 'cancelled', 'lines']) total[f] += x[f];
     const methods = this.all(
-      'SELECT method, SUM(amount) AS total, COUNT(*) AS n FROM payments WHERE paid_at >= ? AND paid_at < ? GROUP BY method ORDER BY total DESC', a, b,
+      `SELECT method, SUM(amount) AS total, COUNT(*) AS n FROM payments WHERE paid_at >= ? AND paid_at < ? AND kind <> 'recharge'
+       GROUP BY method ORDER BY total DESC`, a, b,
     );
     return { from, to, accounts, total, methods };
   }
