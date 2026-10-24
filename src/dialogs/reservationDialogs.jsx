@@ -95,7 +95,7 @@ function QuotePanel({ q, s, now }) {
     warnings.push(<Notice key="gap" kind="danger">{`${q.gap_message} Choisissez un autre créneau ou une autre salle disponible ci-dessus.`}</Notice>);
   }
   if (q.room && q.party_size > q.room.capacity) {
-    warnings.push(<Notice key="cap" kind="warn">{`Le nombre de membres (${q.party_size}) dépasse la capacité de ${q.room.name} (${q.room.capacity} pers.).`}</Notice>);
+    warnings.push(<Notice key="cap" kind="warn">{`Le nombre de personnes (${q.party_size}) dépasse la capacité de ${q.room.name} (${q.room.capacity} pers.).`}</Notice>);
   }
   if (q.paid_minutes && q.tariff_blocked) {
     warnings.push(<Notice key="tariff" kind="danger">Le tarif du temps supplémentaire n’est pas validé par un administrateur.</Notice>);
@@ -103,7 +103,7 @@ function QuotePanel({ q, s, now }) {
   return (
     <>
       <dl className="calc">
-        {q.room ? <div><dt>Salle</dt><dd>{`${q.room.name} (capacité ${q.room.capacity} pers.)`}</dd></div> : null}
+        {q.room ? <div><dt>Salle</dt><dd>{`${q.room.name} · ${q.party_size} pers. (capacité ${q.room.capacity} pers.)`}</dd></div> : null}
         <div><dt>Horaire</dt><dd>{`${dayLabel(q.biz_day, 'medium')} · ${q.start_time} → ${q.end_time}${q.end_next_day ? ' (lendemain)' : ''}`}</dd></div>
         <div><dt>Durée</dt><dd>{fmtDuration(q.duration_min)}</dd></div>
         <div><dt>Formule (titulaire)</dt><dd>{`${q.subscription.plan_name} · jusqu’au ${dayLabel(q.subscription.end_date, 'short')}`}</dd></div>
@@ -156,6 +156,7 @@ function BookingDialog({ close, preset, onDone }) {
   });
   const [member, setMember] = useState(preset.member ?? null);
   const [roomId, setRoomId] = useState(init.roomId);
+  const [partySize, setPartySize] = useState(1);
   const [startNow, setStartNow] = useState(init.startNow);
   const [date, setDate] = useState(init.date);
   const [start, setStart] = useState(init.start);
@@ -175,15 +176,15 @@ function BookingDialog({ close, preset, onDone }) {
   const quoteTimer = useRef(null);
   const searchTimer = useRef(null);
   const latest = useRef(null);
-  latest.current = { member, roomId, startNow, date, start, duration, notes, depositMethod };
+  latest.current = { member, roomId, partySize, startNow, date, start, duration, notes, depositMethod };
 
   const payload = () => {
     const v = latest.current;
-    // Only the booking member is recorded: the room is theirs for the session.
+    // Only the booking member is recorded; the people they bring along are counted, not named.
     return {
       member_id: v.member?.id,
       room_id: Number(v.roomId),
-      party_size: 1,
+      party_size: Number(v.partySize),
       attendee_ids: [],
       require_credit: true,
       start_now: Boolean(v.startNow && v.date === bizToday()),
@@ -300,6 +301,12 @@ function BookingDialog({ close, preset, onDone }) {
   const selectRoom = (nextRoomId) => {
     setRoomId(Number(nextRoomId));
     latest.current.roomId = Number(nextRoomId);
+    // A smaller room lowers the head count to what it holds.
+    const cap = activeRooms.find((rm) => rm.id === Number(nextRoomId))?.capacity;
+    if (cap && partySize > cap) {
+      setPartySize(cap);
+      latest.current.partySize = cap;
+    }
     requestQuote();
   };
 
@@ -330,6 +337,14 @@ function BookingDialog({ close, preset, onDone }) {
   const canSubmit = ready && !(quote.conflicts.length > 0 || quote.gap_conflicts.length > 0 || quote.tariff_blocked);
 
   const roomsList = quote?.rooms_availability ?? activeRooms.map((rm) => ({ ...rm, available: true, conflict: null, gap_conflict: null }));
+  const roomCapacity = roomsList.find((rm) => rm.id === Number(roomId))?.capacity ?? 8;
+
+  const onPartySize = (e) => {
+    const next = Number(e.target.value);
+    setPartySize(next);
+    latest.current.partySize = next;
+    requestQuote();
+  };
 
   return (
     <Modal title={startNow ? 'Installer des membres dans une salle' : 'Nouvelle réservation'} size="wide" onClose={close}>
@@ -399,17 +414,25 @@ function BookingDialog({ close, preset, onDone }) {
                     </span>
                   </div>
                   <div className="subtle" style={{ fontSize: '0.78rem' }}>
-                    Jusqu’à {rm.capacity} membres{!free && near ? ` · ${near.member_name}` : ''}
+                    Jusqu’à {rm.capacity} personnes{!free && near ? ` · ${near.member_name}` : ''}
                   </div>
                 </button>
               );
             })}
           </div>
 
+          <label className="field" style={{ marginTop: 12 }}><span>Nombre de personnes (client inclus)</span>
+            <select name="party_size" value={partySize} onChange={onPartySize}>
+              {Array.from({ length: roomCapacity }, (_, i) => i + 1).map((n) => (
+                <option key={n} value={n}>{n === 1 ? '1 — le client seul' : `${n} — le client + ${n - 1} invité${n > 2 ? 's' : ''}`}</option>
+              ))}
+            </select>
+          </label>
+
           {date === bizToday() ? (
             <label className="check" style={{ marginTop: 10 }}>
               <input type="checkbox" checked={startNow} onChange={(e) => setStartNow(e.target.checked)} />
-              <span><strong>Membre déjà présent</strong> (installer immédiatement en salle occupée)</span>
+              <span><strong>Client déjà présent</strong> (installer immédiatement en salle occupée)</span>
             </label>
           ) : null}
         </fieldset>

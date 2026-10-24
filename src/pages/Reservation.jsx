@@ -193,7 +193,7 @@ function ReservationDetail({ d, products, reload }) {
             </span>
           ))}
         </div>
-        {r.party_size > attendees.length && <p className="subtle">{r.party_size - attendees.length} personne(s) non identifiée(s) (réservation antérieure à la règle « membres uniquement »).</p>}
+        {r.party_size > attendees.length && <p className="subtle">{r.party_size - attendees.length} invité(s) accompagnant le client.</p>}
       </section>
 
       <div className="grid-2">
