@@ -93,9 +93,6 @@ export default function Dashboard() {
         const active = d.today.filter((r) => r.status !== 'annulee');
         const totalMin = active.reduce((sum, r) => sum + r.duration_min, 0);
         const roomsStatus = d.rooms_status ?? [];
-        const occupiedCount = roomsStatus.filter((rm) => rm.occupied).length;
-        const freeCount = roomsStatus.length - occupiedCount;
-        const totalGuestsNow = roomsStatus.reduce((sum, rm) => sum + (rm.current?.party_size || 0), 0);
         const book = () => openBookingDialog({ date: d.biz_day }, () => reload());
         const newMember = () => openMemberDialog(null, (m) => navigate(`/membres/${m.id}`));
 
@@ -118,13 +115,6 @@ export default function Dashboard() {
             />
 
             <section className="kpis" aria-label="Synthèse du club">
-              <Link className={`kpi kpi-link ${occupiedCount > 0 ? 'accent' : ''}`} to="/salles">
-                <div className="label">Salles disponibles</div>
-                <div className="value">{freeCount} / {roomsStatus.length}</div>
-                <div className="hint">
-                  {occupiedCount > 0 ? `${occupiedCount} occupée(s) · ${totalGuestsNow} pers. présentes` : 'Toutes les salles sont libres'}
-                </div>
-              </Link>
               <Link className="kpi kpi-link" to="/agenda">
                 <div className="label">Séances du jour</div>
                 <div className="value">{active.length}</div>

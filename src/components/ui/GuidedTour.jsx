@@ -21,8 +21,8 @@ const STEPS = [
     features: ['Sur téléphone : rubriques principales en bas de l’écran, les autres dans le menu en haut à droite', 'Les onglets en tête de page passent d’une sous-rubrique à l’autre'],
   },
   {
-    route: '/', targets: ['.kpis', '[data-tour="dashboard"]'], icon: 'home', title: 'Les quatre repères de l’accueil',
-    body: 'Salles disponibles (et personnes présentes), séances du jour, encaissé aujourd’hui et reste à encaisser. Touchez un repère pour ouvrir la page correspondante.',
+    route: '/', targets: ['.kpis', '[data-tour="dashboard"]'], icon: 'home', title: 'Les trois repères de l’accueil',
+    body: 'Séances du jour, encaissé aujourd’hui et reste à encaisser. Touchez un repère pour ouvrir la page correspondante.',
   },
   {
     route: '/', targets: ['[data-tour="live-rooms"]', '[data-tour="dashboard"]'], icon: 'rooms', title: 'Les salles en direct',

@@ -77,11 +77,16 @@ test('16. dépenses, entrées et transferts : droits et contrôles', async () =>
   const sub = ok(await manager.post(`/api/members/${member.id}/subscriptions`, { plan_id: plan.id }));
   ok(await manager.post('/api/payments', { charge_ids: [sub.charge_id], method: 'Espèces' }));
 
-  const expense = ok(await manager.post('/api/ledger/entries', {
-    kind: 'depense', category_id: cat('Achats cigares'), amount: 20000 * UM, method: 'Espèces', account: 'cigares', label: 'Boîte de robustos',
-  }));
+  // The manager records expenses of 5 000 FCFA at most; above it, an administrator records them.
+  const robustos = { kind: 'depense', category_id: cat('Achats cigares'), amount: 20000 * UM, method: 'Espèces', account: 'cigares', label: 'Boîte de robustos' };
+  assert.equal((await manager.post('/api/ledger/entries', robustos)).status, 403);
+  assert.equal((await manager.post('/api/ledger/entries', { ...robustos, amount: 5000 * UM + 1 })).status, 403);
+  const small = ok(await manager.post('/api/ledger/entries', { ...robustos, amount: 5000 * UM, label: 'Coupe-cigares' }));
+  assert.equal(small.biz_date, today);
+  assert.equal(small.created_by_name, 'Gérant');
+  ok(await admin.post(`/api/ledger/entries/${small.id}/cancel`, { reason: 'Saisie de test' }));
+  const expense = ok(await admin.post('/api/ledger/entries', robustos));
   assert.equal(expense.biz_date, today);
-  assert.equal(expense.created_by_name, 'Gérant');
   const backdated = await manager.post('/api/ledger/entries', {
     kind: 'depense', category_id: cat('Divers'), amount: 1000 * UM, method: 'Espèces', biz_date: addMonths(today, -1),
   });
@@ -105,7 +110,7 @@ test('16. dépenses, entrées et transferts : droits et contrôles', async () =>
   const mine = ok(await manager.get('/api/ledger/entries?from=2020-01-01&to=2020-12-31'));
   assert.equal(mine.restricted, true);
   assert.equal(mine.from, today);
-  assert.equal(mine.entries.length, 3);
+  assert.equal(mine.entries.length, 4); // the cancelled one stays listed
   for (const url of [`/api/treasury?from=${today}`, `/api/ledger/book?from=${today}`, '/api/closings', `/api/export/grand-livre?from=${today}`]) {
     assert.equal((await manager.get(url)).status, 403, url);
   }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
+import SmartSearch from '../components/ui/SmartSearch.jsx';
 import { Chip, DemoChip, Empty, Loaded, PageHead, Segmented } from '../components/ui/ui.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import { api, qs } from '../lib/api.js';
@@ -88,8 +89,7 @@ function MemberSearch({ initialQ, setQuery }) {
     }
   };
 
-  const onInput = (e) => {
-    const value = e.target.value;
+  const onInput = (value) => {
     setText(value);
     clearTimeout(timer.current);
     timer.current = setTimeout(async () => {
@@ -131,8 +131,20 @@ function MemberSearch({ initialQ, setQuery }) {
             tour="members"
           />
           <form className="toolbar" role="search" onSubmit={(e) => e.preventDefault()}>
-            <div className="search" style={{ flex: 1, minWidth: 220 }}><Icon name="search" />
-              <input type="search" name="q" value={text} onChange={onInput} placeholder="Nom, téléphone, n° de membre ou de carte" aria-label="Rechercher un membre" autoComplete="off" /></div>
+            <SmartSearch
+              value={text}
+              onChange={onInput}
+              suggestions={found && found.q === text.trim() ? found.items : []}
+              onPick={(m) => navigate(`/membres/${m.id}`)}
+              placeholder="Nom, téléphone, n° de membre ou de carte"
+              label="Rechercher un membre"
+              renderSuggestion={(m) => (
+                <div className="grow">
+                  <div className="title">{m.name}</div>
+                  <div className="meta">{[m.member_no, m.phone].filter(Boolean).join(' · ')}</div>
+                </div>
+              )}
+            />
             <Segmented label="Statut des membres" value={statut} options={STATUTS} onChange={onStatut} />
           </form>
           <div id="member-results">

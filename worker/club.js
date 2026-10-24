@@ -4,6 +4,7 @@
 // same code runs on a Cloudflare Durable Object and on node:sqlite in tests. Everything here is
 // synchronous: password hashing and other async work happen in the API layer, before the transaction.
 import { AppError, invalid, forbidden, notFound, conflict } from './errors.js';
+import { searchable, smartFilter } from '../shared/search.js';
 import { text, int, toId, flag, frDate } from './validate.js';
 import { ledgerMethods, DEFAULT_CATEGORIES } from './ledger.js';
 import { loungeMethods } from './lounge.js';
@@ -780,16 +781,17 @@ export class Club {
     if (qrCardMatch) raw = qrCardMatch[1];
     const query = raw.slice(0, 60);
     let rows;
-    if (query) {
-      const like = `%${query.replace(/[%_\\]/g, '\\$&')}%`;
-      rows = this.all(
-        `SELECT DISTINCT m.* FROM members m LEFT JOIN cards c ON c.member_id = m.id
-         WHERE m.first_name || ' ' || m.last_name LIKE ? ESCAPE '\\'
-            OR m.last_name || ' ' || m.first_name LIKE ? ESCAPE '\\'
-            OR m.phone LIKE ? ESCAPE '\\' OR m.member_no LIKE ? ESCAPE '\\' OR c.code LIKE ? ESCAPE '\\'
-         ORDER BY m.last_name, m.first_name LIMIT 200`,
-        like, like, like, like, like,
+    if (searchable(query)) {
+      // Forgiving search (shared/search.js) on the name both ways round, the phone (also as bare digits), the member
+      // number and the card codes.
+      const all = this.all(
+        `SELECT m.*, (SELECT GROUP_CONCAT(c.code, ' ') FROM cards c WHERE c.member_id = m.id) AS card_codes
+         FROM members m ORDER BY m.last_name, m.first_name`,
       );
+      rows = smartFilter(all, query, (m) => [
+        `${m.first_name} ${m.last_name}`, `${m.last_name} ${m.first_name}`, m.member_no, m.phone,
+        String(m.phone ?? '').replace(/\D/g, ''), m.card_codes,
+      ]).slice(0, 200);
     } else {
       rows = this.all('SELECT * FROM members ORDER BY last_name, first_name LIMIT 500');
     }
@@ -2253,6 +2255,9 @@ export class Club {
       const reason = text(input.reason, "Motif de l'ajustement", { required: true, min: 3, max: 200 });
       const delta = target - p.stock_qty;
       if (delta === 0) throw invalid('La quantité constatée est identique au stock enregistré : aucun ajustement.');
+      if (delta < 0 && actor.role !== 'admin') {
+        throw forbidden('Le gérant peut seulement ajouter des quantités. Pour en retirer, adressez-vous à un administrateur.');
+      }
       this.moveStock(actor, p.id, delta, 'ajustement', { reason });
       this.audit(actor, 'stock.ajustement', 'product', p.id, { avant: p.stock_qty, apres: target, ecart: delta, motif: reason });
     } else {
