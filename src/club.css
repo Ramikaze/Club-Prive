@@ -848,6 +848,7 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 
 /* The paper: an 80 mm roll whose printable column is 72 mm, black on white in both themes. The screen preview
    and the printout are the same element, so what is seen is what comes out. */
+.ticket-unarmed { display: none; }
 .ticket-stage { display: flex; justify-content: center; padding: 8px 0 28px; }
 .ticket-page .notice { margin-bottom: 12px; }
 .ticket-page .card { margin-top: 16px; }
@@ -902,4 +903,10 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
   body.print-ticket .shell.is-demo::before, body.print-ticket .demo-watermark { display: none !important; }
   body.print-ticket .ticket-stage { display: block; padding: 0; }
   body.print-ticket .ticket-sheet { width: 72mm; margin: 0 auto; box-shadow: none; break-inside: avoid; }
+  /* Only a copy the server has numbered may print: the page arms the body (ticket-armed) for its own Imprimer
+     button. The browser's Ctrl+P / menu print gets this notice instead of an unrecorded Original or Duplicata. */
+  body.print-ticket:not(.ticket-armed) .ticket-stage { display: none; }
+  body.print-ticket:not(.ticket-armed) .ticket-unarmed {
+    display: block; padding: 10mm 6mm; color: #000; font: 700 11pt/1.4 Arial, Helvetica, sans-serif; text-align: center;
+  }
 }

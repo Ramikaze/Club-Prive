@@ -18,6 +18,24 @@ import { DemoMessageDialog } from '../dialogs/reservationDialogs.jsx';
 import { ticketVerifyUrl, ticketWhatsAppText } from '../../shared/ticket.js';
 import { waDigits, waLink } from '../../shared/whatsapp.js';
 
+// The injected <style> that sets the roll's paper size, and the body class that lets the paper print. The paper
+// prints only while `ticket-armed` is on the body: the button sets it right before window.print(), once the
+// server has numbered the copy. The browser's own print command (Ctrl+P, menu, Share) finds it off and prints a
+// notice instead, so no copy label that the server has not recorded can leave the club.
+const PAGE_STYLE_ID = 'ticket-page-size';
+const ARMED = 'ticket-armed';
+const MM_PER_PX = 25.4 / 96;
+
+// The roll is 80 mm wide and as long as the paper drawn: `size: 80mm auto` is not valid CSS (Chrome drops it),
+// so the length is measured on the rendered sheet (+ about 4 mm) just before printing.
+function setRollLength() {
+  const sheet = document.querySelector('.ticket-sheet');
+  const style = document.getElementById(PAGE_STYLE_ID);
+  if (!sheet || !style) return;
+  const height = Math.ceil(sheet.offsetHeight * MM_PER_PX) + 4;
+  style.textContent = `@page { size: 80mm ${height}mm; margin: 0; }`;
+}
+
 const KIND_LABEL = { impression: 'Impression demandée', whatsapp: 'Envoi WhatsApp' };
 
 // The text sent on WhatsApp for one copy: the same content as the sheet. The demo has no verification link.
@@ -77,17 +95,30 @@ function TicketPage({ data, reload }) {
   const [last, setLast] = useState(null);
   const working = useRef(false);
   const printedCopy = useRef(null);
+  // True from the button's window.print() until the browser reports it (beforeprint consumes it).
+  const buttonPrint = useRef(false);
 
   // The browser moves on from the printed copy once its print window closes: the next one will be a duplicate.
   useEffect(() => {
+    // A print the button did not start (Ctrl+P, menu) must find the paper unarmed, whatever stayed on the body.
+    const onBeforePrint = () => {
+      if (buttonPrint.current) buttonPrint.current = false;
+      else document.body.classList.remove(ARMED);
+    };
     const onAfterPrint = () => {
+      document.body.classList.remove(ARMED);
+      buttonPrint.current = false;
       if (printedCopy.current === null) return;
       setSheet(next(printedCopy.current + 1));
       printedCopy.current = null;
       if (events) reload();
     };
+    window.addEventListener('beforeprint', onBeforePrint);
     window.addEventListener('afterprint', onAfterPrint);
-    return () => window.removeEventListener('afterprint', onAfterPrint);
+    return () => {
+      window.removeEventListener('beforeprint', onBeforePrint);
+      window.removeEventListener('afterprint', onAfterPrint);
+    };
   });
 
   const digits = waDigits(ticket.member_phone);
@@ -110,10 +141,21 @@ function TicketPage({ data, reload }) {
   const print = () => run('impression', async () => {
     const out = await api.post(`/api/payments/${ticket.id}/ticket-events`, { kind: 'impression' });
     // Draw the recorded copy before the print window takes its picture of the page.
-    flushSync(() => setSheet({ copyNo: out.copy_no, printedBy: out.printed_by_name, printedAt: out.at }));
+    flushSync(() => {
+      setSheet({ copyNo: out.copy_no, printedBy: out.printed_by_name, printedAt: out.at });
+      document.body.classList.add(ARMED);
+    });
     setLast({ kind: 'impression', copyNo: out.copy_no });
     printedCopy.current = out.copy_no;
-    window.print();
+    buttonPrint.current = true;
+    try {
+      setRollLength();
+      window.print();
+    } catch (e) {
+      document.body.classList.remove(ARMED);
+      buttonPrint.current = false;
+      throw e;
+    }
   });
 
   const sendWhatsApp = () => {
@@ -174,6 +216,7 @@ function TicketPage({ data, reload }) {
         )}
       </div>
 
+      <p className="ticket-unarmed">Impression non enregistrée : utilisez le bouton Imprimer de la page.</p>
       <div className="ticket-stage">
         <TicketSheet ticket={ticket} copyNo={sheet.copyNo} printedBy={sheet.printedBy} printedAt={sheet.printedAt} />
       </div>
@@ -188,15 +231,16 @@ export default function Ticket() {
   const state = useLoad(() => api.get(`/api/payments/${id}/ticket`), [id]);
 
   // The roll size (@page) applies to the whole printout and cannot be limited to a class, so it exists only
-  // while this page is open: the member card keeps its own page size. The body class scopes the page's other
-  // print rules in club.css.
+  // while this page is open: the member card keeps its own page size (its length is set at print time, see
+  // setRollLength). The body class scopes the page's other print rules in club.css.
   useEffect(() => {
     document.body.classList.add('print-ticket');
     const style = document.createElement('style');
-    style.textContent = '@page { size: 80mm auto; margin: 0; }';
+    style.id = PAGE_STYLE_ID;
+    style.textContent = '@page { margin: 0; }';
     document.head.append(style);
     return () => {
-      document.body.classList.remove('print-ticket');
+      document.body.classList.remove('print-ticket', ARMED);
       style.remove();
     };
   }, []);
