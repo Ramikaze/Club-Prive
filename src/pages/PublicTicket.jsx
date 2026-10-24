@@ -6,21 +6,20 @@ import BrandLogo from '../components/ui/BrandLogo.jsx';
 import Icon from '../components/ui/Icon.jsx';
 import { FormError } from '../components/ui/ui.jsx';
 import { api } from '../lib/api.js';
+import { formatMoney } from '../../shared/rules.js';
 import { localParts } from '../../shared/time.js';
 import { TICKET_CODE_LENGTH, normalizeTicketCode } from '../../shared/ticket.js';
 
 // Matches #/ticket and #/ticket/..., not another route that merely starts with the same letters.
 export const isPublicTicketHash = (hash) => /^#\/ticket(\/|$)/.test(hash ?? '');
 
-// A visitor has no settings (they come with the session), so the page formats with the club's own currency and
-// time zone, as the ticket was printed.
-const TIME_ZONE = 'Africa/Brazzaville';
-const CURRENCY = 'FCFA';
-const moneyText = (hundredths) => `${new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 }).format(hundredths / 100)} ${CURRENCY}`;
-function dateText(iso) {
+// A visitor has no settings (they come with the session): the currency and time zone come with the ticket itself,
+// so the page shows amounts and hours as the club has them set.
+const moneyText = (hundredths, currency) => formatMoney(hundredths, currency);
+function dateText(iso, timezone) {
   const ms = Date.parse(iso);
   if (Number.isNaN(ms)) return '—';
-  const p = localParts(ms, TIME_ZONE);
+  const p = localParts(ms, timezone);
   const [y, m, d] = p.date.split('-');
   return `${d}/${m}/${y} à ${p.time}`;
 }
@@ -64,17 +63,17 @@ function TicketView({ ticket }) {
           <h2>{ticket.club_name}</h2>
           <p className="ticket-public-kicker">Ticket de caisse</p>
           <p className="ticket-public-number">{ticket.number}</p>
-          <p className="muted">{dateText(ticket.paid_at)}</p>
+          <p className="muted">{dateText(ticket.paid_at, ticket.timezone)}</p>
         </header>
         <ul className="ticket-public-lines">
           {ticket.lines.map((line, i) => (
             <li key={i}>
               <span className="ticket-public-label">{line.label}{line.quantity !== 1 && <span className="muted"> × {line.quantity}</span>}</span>
-              <span className="ticket-public-amount">{moneyText(line.amount)}</span>
+              <span className="ticket-public-amount">{moneyText(line.amount, ticket.currency)}</span>
             </li>
           ))}
         </ul>
-        <div className="ticket-public-total"><span>Total</span><strong>{moneyText(ticket.total)}</strong></div>
+        <div className="ticket-public-total"><span>Total</span><strong>{moneyText(ticket.total, ticket.currency)}</strong></div>
         <dl className="ticket-public-facts">
           <div><dt>Payé par</dt><dd>{ticket.method}</dd></div>
           {ticket.initials && <div><dt>Client</dt><dd>{ticket.initials}</dd></div>}
@@ -82,7 +81,7 @@ function TicketView({ ticket }) {
             <dt>État</dt>
             <dd><span className={`ticket-public-status ticket-public-status-${kind}`}>{STATUS_TEXT[ticket.status] ?? ticket.status}</span></dd>
           </div>
-          {ticket.refunded_amount > 0 && <div><dt>Remboursé</dt><dd>{moneyText(ticket.refunded_amount)}</dd></div>}
+          {ticket.refunded_amount > 0 && <div><dt>Remboursé</dt><dd>{moneyText(ticket.refunded_amount, ticket.currency)}</dd></div>}
         </dl>
       </article>
       <p className="ticket-public-compare">Comparez avec votre ticket : si un montant ou une ligne diffère, votre ticket a été modifié.</p>

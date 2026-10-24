@@ -2268,8 +2268,12 @@ export class Club {
        WHERE pa.payment_id = ? ORDER BY pa.id`, p.id,
     );
     const refunded = this.get('SELECT COALESCE(SUM(amount), 0) AS n FROM refunds WHERE payment_id = ?', p.id).n;
+    const s = this.settings();
     return {
-      club_name: this.settings().club_name,
+      club_name: s.club_name,
+      // Club settings, not personal data: the public page has no session to read them from.
+      currency: s.currency,
+      timezone: s.timezone,
       number: formatTicketNumber(p.id),
       paid_at: p.paid_at,
       lines,
