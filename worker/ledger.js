@@ -10,6 +10,8 @@ import { ACCOUNTS, ACCOUNT_LABELS, CARD_METHOD } from '../shared/rules.js';
 
 // The largest expense a manager may record alone, in hundredths (5 000 FCFA); above it, an administrator records it.
 export const MANAGER_EXPENSE_MAX = 5000 * 100;
+// The expense category of the meals the club advances to a courier; it is no cost of the club (the member repays it).
+export const OUTSIDE_MEAL_CATEGORY = 'Avance repas client';
 export const ENTRY_KIND = { depense: 'Dépense', recette: 'Entrée diverse', transfert: 'Transfert' };
 export const ENTRY_STATUS = { active: 'Enregistrée', annulee: 'Annulée' };
 const CATEGORY_KIND = { depense: 'Dépense', recette: 'Entrée diverse' };
@@ -309,8 +311,8 @@ export const ledgerMethods = {
     for (const r of this.all(
       `SELECT e.category_id, c.name, e.account, SUM(e.amount) AS total FROM ledger_entries e
        JOIN categories c ON c.id = e.category_id
-       WHERE e.status = 'active' AND e.kind = 'depense' AND e.biz_date >= ? AND e.biz_date <= ?
-       GROUP BY e.category_id, e.account`, from, to,
+       WHERE e.status = 'active' AND e.kind = 'depense' AND e.biz_date >= ? AND e.biz_date <= ? AND c.name <> ?
+       GROUP BY e.category_id, e.account`, from, to, OUTSIDE_MEAL_CATEGORY,
     )) {
       expenses += r.total;
       if (r.account) byAccount[r.account] += r.total;
@@ -405,6 +407,17 @@ export const ledgerMethods = {
           detail: `${member} — ${r.cancel_reason}`, in: 0, out: r.amount,
         });
       }
+    }
+    // A meal ordered outside: the cash share comes in (the courier's pay goes out as an expense entry below).
+    for (const r of this.all(
+      `SELECT p.*, m.first_name, m.last_name FROM payments p JOIN members m ON m.id = p.member_id
+       WHERE p.kind = 'repas' AND p.card_amount < p.amount AND p.paid_at >= ? AND p.paid_at < ? ORDER BY p.paid_at, p.id`, a, b,
+    )) {
+      rows.push({
+        key: `M-${r.id}`, ...when(r.paid_at), type: 'encaissement', ref: `ENC-${r.id}`, label: `Repas extérieur : ${r.label}`,
+        detail: `${r.first_name} ${r.last_name}`, reference: r.reference, account: null, method: r.method,
+        in: r.amount - r.card_amount, out: 0,
+      });
     }
     for (const r of this.all(
       `SELECT rf.*, c.label, m.first_name, m.last_name FROM refunds rf

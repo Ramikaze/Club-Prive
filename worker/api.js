@@ -260,6 +260,7 @@ export function createApi({ db, env = {}, demo = false }) {
   add('GET', '/api/cards/:id', {}, (ctx) => club.cardView(ctx.params.id));
   // The card's CFA credit: any staff member recharges it, only an administrator cancels a recharge.
   add('POST', '/api/members/:id/wallet/recharge', {}, (ctx) => club.rechargeWallet(ctx.user, ctx.params.id, ctx.body));
+  add('POST', '/api/members/:id/outside-meal', {}, (ctx) => club.recordOutsideMeal(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/payments/:id/cancel-recharge', ADMIN, (ctx) => club.cancelRecharge(ctx.user, ctx.params.id, ctx.body));
 
   // Rooms

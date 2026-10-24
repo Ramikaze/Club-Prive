@@ -6,7 +6,7 @@
 import { AppError, invalid, forbidden, notFound, conflict } from './errors.js';
 import { searchable, smartFilter } from '../shared/search.js';
 import { text, int, toId, flag, frDate } from './validate.js';
-import { ledgerMethods, DEFAULT_CATEGORIES } from './ledger.js';
+import { ledgerMethods, DEFAULT_CATEGORIES, OUTSIDE_MEAL_CATEGORY } from './ledger.js';
 import { loungeMethods } from './lounge.js';
 import { seedDemo } from './seed.js';
 import { newTicketCode, formatTicketNumber, normalizeTicketCode, memberInitials, TICKET_CODE_LENGTH } from '../shared/ticket.js';
@@ -229,6 +229,9 @@ export class Club {
         for (const [kind, names] of Object.entries(DEFAULT_CATEGORIES)) {
           for (const name of names) this.run('INSERT INTO categories (kind, name, created_at) VALUES (?, ?, ?)', kind, name, this.nowIso());
         }
+      }
+      if (!this.get("SELECT 1 AS x FROM categories WHERE kind = 'depense' AND name = ?", OUTSIDE_MEAL_CATEGORY)) {
+        this.run("INSERT INTO categories (kind, name, created_at) VALUES ('depense', ?, ?)", OUTSIDE_MEAL_CATEGORY, this.nowIso());
       }
       this.run('DELETE FROM idempotency_keys WHERE created_at < ?', new Date(Date.now() - 7 * 86400000).toISOString());
       this.run('DELETE FROM sessions WHERE expires_at < ?', new Date().toISOString());
@@ -1246,6 +1249,56 @@ export class Club {
     const wallet = this.walletDTO(m.id);
     this.audit(actor, 'carte.recharger', 'member', m.id, {
       payment_id: paymentId, montant: amount, moyen: method, reference, solde: wallet.balance,
+    });
+    return { payment: this.paymentDTO(this.paymentRow(paymentId)), wallet };
+  }
+
+  // A meal the member orders from an outside restaurant: the club pays the courier from the till (an expense
+  // under « Avance repas client », not a cost of the club) and takes the same exact amount from the member: the
+  // card pays what it can, another method the rest. A payment of its own with a ticket, no line, no revenue.
+  recordOutsideMeal(actor, memberId, input) {
+    const s = this.settings();
+    const m = this.memberRow(memberId);
+    this.assertMemberActive(m, 'de commander un repas');
+    const amount = int(input.amount, 'Montant du repas', { min: 1, max: 1e13 });
+    const label = text(input.label, 'Restaurant ou plat', { required: true, max: 100 });
+    const courier = text(input.courier_method, 'Livreur payé depuis', { required: true, max: 40 });
+    if (courier === CARD_METHOD || !s.payment_methods.includes(courier)) throw invalid('Moyen de paiement du livreur non configuré.');
+    const reservationId = input.reservation_id ? toId(input.reservation_id, 'Réservation') : null;
+    if (reservationId && !this.get('SELECT 1 AS x FROM reservations WHERE id = ? AND member_id = ?', reservationId, m.id)) {
+      throw invalid("Cette réservation n'est pas celle de ce membre.");
+    }
+    const reference = text(input.reference, 'Référence', { max: 80 });
+    const cardAmount = Math.min(this.walletBalance(m.id), amount);
+    let method = CARD_METHOD;
+    if (cardAmount < amount) {
+      method = text(input.rest_method, 'Moyen pour le reste', { required: true, max: 40 });
+      if (method === CARD_METHOD || !s.payment_methods.includes(method)) throw invalid('Moyen de paiement du reste non configuré.');
+    }
+    const today = this.bizToday();
+    this.assertOpen(today, 'Ce repas');
+    const category = this.get("SELECT id FROM categories WHERE kind = 'depense' AND name = ?", OUTSIDE_MEAL_CATEGORY);
+    const now = this.nowIso();
+    const memberName = `${m.first_name} ${m.last_name}`;
+    const paymentId = this.tx(() => {
+      this.insert(
+        `INSERT INTO ledger_entries (kind, biz_date, category_id, account, method, to_method, amount, label, reference,
+           status, is_demo, created_at, created_by)
+         VALUES ('depense', ?, ?, NULL, ?, NULL, ?, ?, ?, 'active', 0, ?, ?)`,
+        today, category.id, courier, amount, `Repas extérieur — ${label} — ${memberName}`, reference, now, actor.id,
+      );
+      const id = this.insert(
+        `INSERT INTO payments (member_id, reservation_id, amount, method, reference, paid_at, created_by, ticket_code, card_amount, kind, label)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'repas', ?)`,
+        m.id, reservationId, amount, method, reference, now, actor.id, this.freshTicketCode(), cardAmount, label,
+      );
+      if (cardAmount > 0) this.walletMove(actor, m.id, 'paiement', -cardAmount, { paymentId: id });
+      return id;
+    });
+    const wallet = this.walletDTO(m.id);
+    this.audit(actor, 'carte.repas', 'member', m.id, {
+      payment_id: paymentId, montant: amount, carte: cardAmount, reste: amount - cardAmount, moyen_reste: cardAmount < amount ? method : null,
+      livreur_paye_depuis: courier, libelle: label, reservation_id: reservationId, solde: wallet.balance,
     });
     return { payment: this.paymentDTO(this.paymentRow(paymentId)), wallet };
   }
@@ -2907,10 +2960,10 @@ export class Club {
     const methods = this.all(
       `SELECT method, SUM(total) AS total, SUM(n) AS n FROM (
          SELECT method, amount - card_amount AS total, 1 AS n FROM payments
-         WHERE paid_at >= ? AND paid_at < ? AND kind <> 'recharge' AND method <> ?
+         WHERE paid_at >= ? AND paid_at < ? AND kind NOT IN ('recharge', 'repas') AND method <> ?
          UNION ALL
          SELECT ? AS method, card_amount AS total, 1 AS n FROM payments
-         WHERE paid_at >= ? AND paid_at < ? AND kind <> 'recharge' AND card_amount > 0
+         WHERE paid_at >= ? AND paid_at < ? AND kind NOT IN ('recharge', 'repas') AND card_amount > 0
        ) GROUP BY method ORDER BY total DESC`, a, b, CARD_METHOD, CARD_METHOD, a, b,
     );
     return { from, to, accounts, total, methods };

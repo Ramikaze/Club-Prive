@@ -503,6 +503,90 @@ function v14Copy(sourceFile, file) {
   db.close();
 }
 
+const outside = (memberId, body) => manager.post(`/api/members/${memberId}/outside-meal`, body);
+const flow = (t, method) => t.accounts.find((a) => a.method === method) ?? { in: 0, out: 0 };
+
+test('repas extérieur couvert : le club paie le livreur, la carte rembourse le même montant, sans recette', async () => {
+  const member = await newMember('Ivan');
+  ok(await recharge(member.id, { amount: 50000 * UM, method: 'Espèces' }));
+  const before = await treasury();
+  const salesBefore = await sales();
+  const charges = server.club.get('SELECT COUNT(*) AS n FROM charges').n;
+  const r = ok(await outside(member.id, { amount: 18500 * UM, label: 'Pizzeria Roma', courier_method: 'Espèces' }));
+  assert.equal(r.payment.kind, 'repas');
+  assert.equal(r.payment.amount, 18500 * UM);
+  assert.equal(r.payment.card_amount, 18500 * UM);
+  assert.equal(r.payment.method, CARD_METHOD);
+  assert.equal(r.payment.label, 'Pizzeria Roma');
+  assert.match(r.payment.ticket_code, /^[A-Z0-9]+$/);
+  assert.deepEqual(r.payment.allocations, []);
+  assert.equal(r.wallet.balance, 31500 * UM);
+  assert.equal(balance(member.id), 31500 * UM);
+  assert.equal(r.wallet.movements[0].kind, 'paiement');
+  assert.equal(r.wallet.movements[0].amount, -18500 * UM);
+  assert.equal(server.club.get('SELECT COUNT(*) AS n FROM charges').n, charges);
+  const expense = server.club.get("SELECT e.*, c.name AS cat FROM ledger_entries e JOIN categories c ON c.id = e.category_id ORDER BY e.id DESC LIMIT 1");
+  assert.equal(expense.kind, 'depense');
+  assert.equal(expense.cat, 'Avance repas client');
+  assert.equal(expense.method, 'Espèces');
+  assert.equal(expense.amount, 18500 * UM);
+  assert.equal(expense.label, 'Repas extérieur — Pizzeria Roma — Ivan Carte');
+  const afterwards = await treasury();
+  assert.equal(flow(afterwards, 'Espèces').out, flow(before, 'Espèces').out + 18500 * UM);
+  assert.equal(flow(afterwards, 'Espèces').in, flow(before, 'Espèces').in);
+  assert.equal(afterwards.total.closing, before.total.closing - 18500 * UM);
+  const salesAfter = await sales();
+  assert.equal(salesAfter.total.collected, salesBefore.total.collected);
+  assert.equal(byMethod(salesAfter, CARD_METHOD), byMethod(salesBefore, CARD_METHOD));
+  // An advance is no club expense: the result does not move.
+  assert.equal(afterwards.result.expenses, before.result.expenses);
+  assert.equal(await bookClosing(), afterwards.total.closing);
+  const entry = ok(await admin.get('/api/audit')).find((a) => a.action === 'carte.repas');
+  assert.equal(entry.entity_id, member.id);
+  assert.equal(entry.details.montant, 18500 * UM);
+});
+
+test('repas extérieur en partie : la carte paie son solde, le reste par un autre moyen', async () => {
+  const member = await newMember('Jeanne');
+  ok(await recharge(member.id, { amount: 10000 * UM, method: 'Espèces' }));
+  const before = await treasury();
+  const payments = server.club.get('SELECT COUNT(*) AS n FROM payments').n;
+  const entries = server.club.get('SELECT COUNT(*) AS n FROM ledger_entries').n;
+  const body = { amount: 18500 * UM, label: 'Chez Fatou', courier_method: 'Espèces' };
+  refused(await outside(member.id, body), 400);
+  refused(await outside(member.id, { ...body, rest_method: CARD_METHOD }), 400);
+  refused(await outside(member.id, { ...body, rest_method: 'Coffre inconnu' }), 400);
+  assert.equal(server.club.get('SELECT COUNT(*) AS n FROM payments').n, payments);
+  assert.equal(server.club.get('SELECT COUNT(*) AS n FROM ledger_entries').n, entries);
+  assert.equal(balance(member.id), 10000 * UM);
+  const r = ok(await outside(member.id, { ...body, rest_method: 'MTN MoMo' }));
+  assert.equal(r.payment.method, 'MTN MoMo');
+  assert.equal(r.payment.card_amount, 10000 * UM);
+  assert.equal(r.payment.amount, 18500 * UM);
+  assert.equal(r.wallet.balance, 0);
+  const afterwards = await treasury();
+  assert.equal(flow(afterwards, 'MTN MoMo').in, flow(before, 'MTN MoMo').in + 8500 * UM);
+  assert.equal(flow(afterwards, 'Espèces').out, flow(before, 'Espèces').out + 18500 * UM);
+  assert.equal(afterwards.total.closing, before.total.closing - 10000 * UM);
+  assert.equal(await bookClosing(), afterwards.total.closing);
+});
+
+test('repas extérieur : montant nul ou négatif, moyen du livreur inconnu, membre désactivé sont refusés', async () => {
+  const member = await newMember('Karim');
+  ok(await recharge(member.id, { amount: 20000 * UM, method: 'Espèces' }));
+  const payments = server.club.get('SELECT COUNT(*) AS n FROM payments').n;
+  for (const amount of [0, -1000 * UM, 1.5, 'abc', null]) {
+    refused(await outside(member.id, { amount, label: 'Test', courier_method: 'Espèces' }), 400);
+  }
+  refused(await outside(member.id, { amount: 1000 * UM, label: 'Test', courier_method: CARD_METHOD }), 400);
+  refused(await outside(member.id, { amount: 1000 * UM, label: 'Test' }), 400);
+  refused(await outside(member.id, { amount: 1000 * UM, courier_method: 'Espèces' }), 400);
+  assert.equal(server.club.get('SELECT COUNT(*) AS n FROM payments').n, payments);
+  assert.equal(balance(member.id), 20000 * UM);
+  ok(await manager.post(`/api/members/${member.id}/deactivate`, { reason: 'Parti du club' }));
+  refused(await outside(member.id, { amount: 1000 * UM, label: 'Test', courier_method: 'Espèces' }), 409, 'MEMBRE_DESACTIVE');
+});
+
 test('migration sans perte : V15 garde réservations, crédits et lignes, et rend l’abonnement facultatif', async () => {
   const source = new Server({}, { lenientTariffs: true });
   const old = new Server({});
