@@ -2,6 +2,7 @@
 // created with the installation code (SETUP_TOKEN secret on Cloudflare). The same code gives that
 // account a new identifier and password when they are lost.
 import { useEffect, useRef, useState } from 'react';
+import BrandLogo from '../components/ui/BrandLogo.jsx';
 import { FormError, Notice, PasswordField, Skeleton } from '../components/ui/ui.jsx';
 import { prefersReducedMotion } from '../lib/smoke.js';
 import { api } from '../lib/api.js';
@@ -21,7 +22,6 @@ function LoginForm({ onSignedIn, onForgot }) {
   };
   return (
     <form className="login-card" onSubmit={onSubmit} noValidate>
-      <p className="login-eyebrow">Limen · Club privé</p>
       <div><h1>Connexion</h1><p className="muted">Espace réservé au personnel et aux propriétaires.</p></div>
       <label className="field"><span>Identifiant</span>
         <input autoComplete="username" autoCapitalize="none" spellCheck="false" required autoFocus value={v.login} onChange={set('login')} /></label>
@@ -48,7 +48,6 @@ function SetupForm({ tokenConfigured, onSignedIn }) {
   };
   return (
     <form className="login-card" onSubmit={onSubmit} noValidate>
-      <p className="login-eyebrow">Limen · Club privé</p>
       <div>
         <h1>Installation du club</h1>
         <p className="muted">Créez le compte du premier propriétaire. Il pourra ensuite créer les comptes des associés et du gérant.</p>
@@ -90,7 +89,6 @@ function ResetForm({ tokenConfigured, onSignedIn, onBack }) {
   };
   return (
     <form className="login-card" onSubmit={onSubmit} noValidate>
-      <p className="login-eyebrow">Limen · Club privé</p>
       <div>
         <h1>Identifiants oubliés</h1>
         <p className="muted">Avec le code d’installation, choisissez un nouvel identifiant et un nouveau mot de passe pour le compte du propriétaire.</p>
@@ -143,6 +141,7 @@ export default function Login() {
     <div className={`login-page${leaving ? ' is-leaving' : ''}`}>
       <video ref={smoke} className="login-smoke" src="/login-smoke.mp4" poster="/login-smoke.jpg" muted loop playsInline preload="auto" aria-hidden="true" />
       <div className="login-stack">
+        <BrandLogo className="login-logo" />
         {!setup && <div className="login-card"><Skeleton /></div>}
         {setup && (setup.needed
           ? <SetupForm tokenConfigured={setup.token_configured} onSignedIn={onSignedIn} />

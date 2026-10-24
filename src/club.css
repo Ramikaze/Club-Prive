@@ -16,6 +16,7 @@
   --charcoal-2: #2e241c;
   --charcoal-3: #3d3026;
   --on-charcoal: #f7efe2;
+  --logo-gold: #c39550;
   --on-charcoal-2: #c2b29f;
   --bronze: #9e652e;
   --bronze-on-charcoal: #d1a16c;
@@ -202,8 +203,8 @@ p { margin: 0; }
 }
 
 .brand { display: flex; align-items: center; gap: 12px; padding: 0 8px; }
-.brand-name { font-family: var(--font-display); font-size: 1.05rem; font-weight: 600; line-height: 1.2; }
-.brand-sub { color: var(--on-charcoal-2); font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; }
+/* The club logo (BrandLogo), in the gold of the client's artwork. */
+.brand-logo { display: block; width: 168px; height: auto; color: var(--logo-gold); }
 
 .side-nav { display: grid; gap: 4px; }
 .side-nav a {
@@ -254,7 +255,7 @@ main:focus { outline: none; }
     padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
   }
   .topbar .brand { padding: 0; flex: 1; min-width: 0; }
-  .topbar .brand-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .topbar .brand-logo { width: 92px; }
   .topbar .icon-btn { color: var(--on-charcoal); }
   .tabbar {
     display: grid; grid-template-columns: repeat(5, 1fr);
@@ -729,7 +730,6 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
   box-shadow: 0 30px 70px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 240, 220, 0.04);
 }
 .login-card h1 { font-size: 1.6rem; }
-.login-eyebrow { margin: 0; color: var(--bronze-text); font-size: 0.74rem; font-weight: 600; letter-spacing: 0.24em; text-transform: uppercase; }
 .login-link {
   justify-self: center; border: 0; background: none; padding: 6px 8px; border-radius: 6px;
   font: inherit; font-size: 0.88rem; color: var(--text-2); cursor: pointer;
@@ -737,6 +737,7 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 }
 .login-link:hover { color: var(--text); }
 .login-stack { width: min(400px, 100%); display: grid; gap: 12px; justify-items: center; position: relative; z-index: 1; }
+.login-logo { width: min(300px, 78%); height: auto; margin-bottom: 14px; color: var(--logo-gold); }
 
 /* Cigar smoke behind the card: a filmed loop (public/login-smoke.mp4, smoke on black). Screen blending
    drops the black, so the smoke floats over the brown background; sepia warms it towards bronze. */

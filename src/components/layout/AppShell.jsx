@@ -2,6 +2,7 @@
 // space (frame, watermark, banner) and its entry, account menu, password change and the guided tour.
 import { useEffect, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import BrandLogo from '../ui/BrandLogo.jsx';
 import Icon from '../ui/Icon.jsx';
 import { Modal, openDialog, closeAllDialogs } from '../ui/Modal.jsx';
 import { FormError, PasswordField } from '../ui/ui.jsx';
@@ -143,9 +144,7 @@ export default function AppShell() {
   return (
     <div className={`shell${entering ? ' is-entering' : ''}${demo ? ' is-demo' : ''}`}>
       <aside className="sidebar" aria-label="Navigation principale">
-        <div className="brand">
-          <div><div className="brand-name">{settings.club_name}</div><div className="brand-sub">Club privé</div></div>
-        </div>
+        <div className="brand"><BrandLogo className="brand-logo" /></div>
         <nav className="side-nav" data-tour="nav">
           {NAV.filter((n) => !n.admin || isAdmin).map((n) => (n.group
             ? <div key={n.group} className="side-nav-label">{n.group}</div>
@@ -173,7 +172,7 @@ export default function AppShell() {
       </aside>
       <div className="main-col">
         <header className="topbar">
-          <div className="brand"><div className="brand-name">{settings.club_name}</div></div>
+          <div className="brand"><BrandLogo className="brand-logo" /></div>
           <button type="button" className="icon-btn" data-tour="menu" aria-label="Compte, rubriques et réglages"
             onClick={() => openDialog(AccountMenu, { onTour: startTour })}><Icon name="menu" /></button>
         </header>
