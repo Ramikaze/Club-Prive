@@ -587,6 +587,51 @@ test('repas extérieur : montant nul ou négatif, moyen du livreur inconnu, memb
   refused(await outside(member.id, { amount: 1000 * UM, label: 'Test', courier_method: 'Espèces' }), 409, 'MEMBRE_DESACTIVE');
 });
 
+test('catégorie des repas : elle ne se renomme ni ne se désactive, aucune dépense à la main dessus, et son absence est une erreur claire', async () => {
+  const cat = server.club.get("SELECT * FROM categories WHERE name = 'Avance repas client'");
+  assert.ok(cat);
+  refused(await admin.put(`/api/ledger/categories/${cat.id}`, { name: 'Autre nom' }), 409, 'CATEGORIE_PROTEGEE');
+  refused(await admin.put(`/api/ledger/categories/${cat.id}`, { active: false }), 409, 'CATEGORIE_PROTEGEE');
+  refused(await admin.post('/api/ledger/entries', { kind: 'depense', category_id: cat.id, method: 'Espèces', amount: 1000 * UM }), 400);
+  assert.equal(server.club.get('SELECT name, active FROM categories WHERE id = ?', cat.id).name, 'Avance repas client');
+  const member = await newMember('Lucie');
+  ok(await recharge(member.id, { amount: 5000 * UM, method: 'Espèces' }));
+  server.club.run('UPDATE categories SET name = ? WHERE id = ?', 'Renommée de force', cat.id);
+  try {
+    refused(await outside(member.id, { amount: 1000 * UM, label: 'Test', courier_method: 'Espèces' }), 409, 'CATEGORIE_REPAS_ABSENTE');
+    assert.equal(balance(member.id), 5000 * UM);
+  } finally {
+    server.club.run('UPDATE categories SET name = ? WHERE id = ?', 'Avance repas client', cat.id);
+  }
+});
+
+test('annulation d’un repas extérieur : réservée à un administrateur, la carte et la caisse reviennent, les clôtures restent égales', async () => {
+  const member = await newMember('Marc');
+  ok(await recharge(member.id, { amount: 10000 * UM, method: 'Espèces' }));
+  const { payment } = ok(await outside(member.id, { amount: 18500 * UM, label: 'Chez Awa', courier_method: 'Espèces', rest_method: 'MTN MoMo' }));
+  assert.equal(balance(member.id), 0);
+  const before = await treasury();
+  refused(await manager.post(`/api/payments/${payment.id}/cancel-meal`, { reason: 'Erreur de saisie' }), 403);
+  refused(await admin.post(`/api/payments/${payment.id}/cancel-meal`, {}), 400);
+  const recharged = server.club.get("SELECT id FROM payments WHERE member_id = ? AND kind = 'recharge'", member.id).id;
+  refused(await admin.post(`/api/payments/${recharged}/cancel-meal`, { reason: 'Erreur de saisie' }), 409, 'PAS_UN_REPAS');
+  const r = ok(await admin.post(`/api/payments/${payment.id}/cancel-meal`, { reason: 'Erreur de saisie' }));
+  assert.equal(r.wallet.balance, 10000 * UM);
+  assert.equal(balance(member.id), 10000 * UM);
+  assert.ok(r.payment.cancelled_at);
+  assert.equal(r.wallet.movements[0].kind, 'remboursement');
+  refused(await admin.post(`/api/payments/${payment.id}/cancel-meal`, { reason: 'Encore' }), 409, 'DEJA_ANNULEE');
+  const expense = server.club.get("SELECT status, cancel_reason FROM ledger_entries WHERE reference = ?", `ENC-${payment.id}`);
+  assert.equal(expense.status, 'annulee');
+  assert.equal(expense.cancel_reason, 'Erreur de saisie');
+  const afterwards = await treasury();
+  // The courier's pay is back in the till and the MoMo share leaves on the cancellation day.
+  assert.equal(afterwards.total.closing, before.total.closing + 18500 * UM - 8500 * UM);
+  assert.equal(await bookClosing(), afterwards.total.closing);
+  assert.equal(afterwards.result.expenses, before.result.expenses);
+  assert.ok(ok(await admin.get('/api/audit')).some((a) => a.action === 'carte.annuler_repas' && a.entity_id === member.id));
+});
+
 test('migration sans perte : V15 garde réservations, crédits et lignes, et rend l’abonnement facultatif', async () => {
   const source = new Server({}, { lenientTariffs: true });
   const old = new Server({});

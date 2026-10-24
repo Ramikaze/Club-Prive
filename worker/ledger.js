@@ -18,7 +18,7 @@ const CATEGORY_KIND = { depense: 'Dépense', recette: 'Entrée diverse' };
 const MOVEMENT_KIND = {
   ouverture: "Solde d'ouverture", encaissement: 'Encaissement', remboursement: 'Remboursement',
   depense: 'Dépense', recette: 'Entrée diverse', transfert: 'Transfert',
-  recharge: 'Recharge de carte', annulation_recharge: 'Annulation de recharge',
+  recharge: 'Recharge de carte', annulation_recharge: 'Annulation de recharge', annulation_repas: 'Annulation de repas',
 };
 
 export const DEFAULT_CATEGORIES = {
@@ -100,6 +100,9 @@ export const ledgerMethods = {
     if (!c) throw notFound('Catégorie');
     const name = input.name !== undefined ? text(input.name, 'Nom de la catégorie', { required: true, max: 60 }) : c.name;
     const active = input.active !== undefined ? flag(input.active) : !!c.active;
+    if (c.kind === 'depense' && c.name === OUTSIDE_MEAL_CATEGORY && (name !== c.name || !active)) {
+      throw conflict('CATEGORIE_PROTEGEE', `La catégorie « ${OUTSIDE_MEAL_CATEGORY} » sert aux repas commandés à l'extérieur : elle ne se renomme ni ne se désactive.`);
+    }
     if (this.get('SELECT 1 AS x FROM categories WHERE kind = ? AND name = ? AND id <> ?', c.kind, name, c.id)) {
       throw conflict('CATEGORIE_EXISTANTE', 'Cette catégorie existe déjà.');
     }
@@ -186,6 +189,9 @@ export const ledgerMethods = {
     } else {
       category = this.get('SELECT * FROM categories WHERE id = ?', toId(input.category_id, 'Catégorie'));
       if (!category || category.kind !== kind || !category.active) throw invalid('Catégorie invalide ou inactive.');
+      if (kind === 'depense' && category.name === OUTSIDE_MEAL_CATEGORY) {
+        throw invalid(`La catégorie « ${OUTSIDE_MEAL_CATEGORY} » est réservée aux repas commandés à l'extérieur.`);
+      }
       if (kind === 'depense' && input.account) {
         if (!ACCOUNTS.includes(input.account)) throw invalid('Sous-compte invalide.');
         account = input.account;
@@ -254,8 +260,8 @@ export const ledgerMethods = {
       if (r.total) add(r.method, 'in', r.total);
     }
     for (const r of this.all(
-      `SELECT method, SUM(amount) AS total FROM payments
-       WHERE kind = 'recharge' AND cancelled_at >= ? AND cancelled_at < ? GROUP BY method`, a, b,
+      `SELECT method, SUM(amount - card_amount) AS total FROM payments
+       WHERE kind IN ('recharge', 'repas') AND cancelled_at >= ? AND cancelled_at < ? GROUP BY method`, a, b,
     )) {
       add(r.method, 'out', r.total);
     }
@@ -411,13 +417,24 @@ export const ledgerMethods = {
     // A meal ordered outside: the cash share comes in (the courier's pay goes out as an expense entry below).
     for (const r of this.all(
       `SELECT p.*, m.first_name, m.last_name FROM payments p JOIN members m ON m.id = p.member_id
-       WHERE p.kind = 'repas' AND p.card_amount < p.amount AND p.paid_at >= ? AND p.paid_at < ? ORDER BY p.paid_at, p.id`, a, b,
+       WHERE p.kind = 'repas' AND p.card_amount < p.amount
+         AND ((p.paid_at >= ? AND p.paid_at < ?) OR (p.cancelled_at >= ? AND p.cancelled_at < ?))
+       ORDER BY p.paid_at, p.id`, a, b, a, b,
     )) {
-      rows.push({
-        key: `M-${r.id}`, ...when(r.paid_at), type: 'encaissement', ref: `ENC-${r.id}`, label: `Repas extérieur : ${r.label}`,
-        detail: `${r.first_name} ${r.last_name}`, reference: r.reference, account: null, method: r.method,
-        in: r.amount - r.card_amount, out: 0,
-      });
+      const base = { ref: `ENC-${r.id}`, reference: r.reference, account: null, method: r.method };
+      const member = `${r.first_name} ${r.last_name}`;
+      if (r.paid_at >= a && r.paid_at < b) {
+        rows.push({
+          ...base, key: `M-${r.id}`, ...when(r.paid_at), type: 'encaissement', label: `Repas extérieur : ${r.label}`,
+          detail: member, in: r.amount - r.card_amount, out: 0,
+        });
+      }
+      if (r.cancelled_at && r.cancelled_at >= a && r.cancelled_at < b) {
+        rows.push({
+          ...base, key: `MA-${r.id}`, ...when(r.cancelled_at), type: 'annulation_repas', label: `Annulation du repas extérieur : ${r.label}`,
+          detail: `${member} — ${r.cancel_reason}`, in: 0, out: r.amount - r.card_amount,
+        });
+      }
     }
     for (const r of this.all(
       `SELECT rf.*, c.label, m.first_name, m.last_name FROM refunds rf

@@ -1256,7 +1256,7 @@ export class Club {
   // A meal the member orders from an outside restaurant: the club pays the courier from the till (an expense
   // under « Avance repas client », not a cost of the club) and takes the same exact amount from the member: the
   // card pays what it can, another method the rest. A payment of its own with a ticket, no line, no revenue.
-  recordOutsideMeal(actor, memberId, input) {
+  recordOutsideMeal(actor, memberId, input, { demo = false } = {}) {
     const s = this.settings();
     const m = this.memberRow(memberId);
     this.assertMemberActive(m, 'de commander un repas');
@@ -1278,19 +1278,21 @@ export class Club {
     const today = this.bizToday();
     this.assertOpen(today, 'Ce repas');
     const category = this.get("SELECT id FROM categories WHERE kind = 'depense' AND name = ?", OUTSIDE_MEAL_CATEGORY);
+    if (!category) throw conflict('CATEGORIE_REPAS_ABSENTE', `La catégorie de dépense « ${OUTSIDE_MEAL_CATEGORY} » est introuvable : contactez l'administrateur.`);
     const now = this.nowIso();
     const memberName = `${m.first_name} ${m.last_name}`;
     const paymentId = this.tx(() => {
-      this.insert(
-        `INSERT INTO ledger_entries (kind, biz_date, category_id, account, method, to_method, amount, label, reference,
-           status, is_demo, created_at, created_by)
-         VALUES ('depense', ?, ?, NULL, ?, NULL, ?, ?, ?, 'active', 0, ?, ?)`,
-        today, category.id, courier, amount, `Repas extérieur — ${label} — ${memberName}`, reference, now, actor.id,
-      );
       const id = this.insert(
         `INSERT INTO payments (member_id, reservation_id, amount, method, reference, paid_at, created_by, ticket_code, card_amount, kind, label)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'repas', ?)`,
         m.id, reservationId, amount, method, reference, now, actor.id, this.freshTicketCode(), cardAmount, label,
+      );
+      // The expense carries the payment's ticket number as its reference, which is how a cancellation finds it.
+      this.insert(
+        `INSERT INTO ledger_entries (kind, biz_date, category_id, account, method, to_method, amount, label, reference,
+           status, is_demo, created_at, created_by)
+         VALUES ('depense', ?, ?, NULL, ?, NULL, ?, ?, ?, 'active', ?, ?, ?)`,
+        today, category.id, courier, amount, `Repas extérieur — ${label} — ${memberName}`, `ENC-${id}`, demo ? 1 : 0, now, actor.id,
       );
       if (cardAmount > 0) this.walletMove(actor, m.id, 'paiement', -cardAmount, { paymentId: id });
       return id;
@@ -1301,6 +1303,42 @@ export class Club {
       livreur_paye_depuis: courier, libelle: label, reservation_id: reservationId, solde: wallet.balance,
     });
     return { payment: this.paymentDTO(this.paymentRow(paymentId)), wallet };
+  }
+
+  // Only an administrator cancels an outside meal, with a reason: the courier's expense is cancelled, the card
+  // part goes back on the card, and the cash share leaves the till on the day of the cancellation.
+  cancelOutsideMeal(actor, paymentId, input) {
+    if (actor.role !== 'admin') throw forbidden("L'annulation d'un repas extérieur est réservée à un administrateur.");
+    const p = this.get('SELECT * FROM payments WHERE id = ?', toId(paymentId, 'Encaissement'));
+    if (!p) throw notFound('Encaissement');
+    if (p.kind !== 'repas') throw conflict('PAS_UN_REPAS', "Cet encaissement n'est pas un repas commandé à l'extérieur.");
+    if (p.cancelled_at) throw conflict('DEJA_ANNULEE', 'Repas déjà annulé.');
+    const reason = text(input.reason, "Motif d'annulation", { required: true, min: 3, max: 300 });
+    const today = this.bizToday();
+    this.assertOpen(today, 'Cette annulation');
+    const expense = this.get(
+      `SELECT e.* FROM ledger_entries e JOIN categories c ON c.id = e.category_id
+       WHERE c.name = ? AND e.reference = ? AND e.status = 'active'`, OUTSIDE_MEAL_CATEGORY, `ENC-${p.id}`,
+    );
+    if (expense) this.assertOpen(expense.biz_date, 'Cette annulation');
+    this.tx(() => {
+      if (p.card_amount > 0) this.walletMove(actor, p.member_id, 'remboursement', p.card_amount, { paymentId: p.id, reason });
+      this.run(
+        'UPDATE payments SET cancelled_at = ?, cancelled_by = ?, cancel_reason = ? WHERE id = ?',
+        this.nowIso(), actor.id, reason, p.id,
+      );
+      if (expense) {
+        this.run(
+          "UPDATE ledger_entries SET status = 'annulee', cancelled_at = ?, cancelled_by = ?, cancel_reason = ? WHERE id = ?",
+          this.nowIso(), actor.id, reason, expense.id,
+        );
+      }
+    });
+    const wallet = this.walletDTO(p.member_id);
+    this.audit(actor, 'carte.annuler_repas', 'member', p.member_id, {
+      payment_id: p.id, montant: p.amount, carte: p.card_amount, motif: reason, solde: wallet.balance, operation_id: expense?.id ?? null,
+    });
+    return { payment: this.paymentDTO(this.paymentRow(p.id)), wallet };
   }
 
   // Only an administrator cancels a recharge, with a reason: the money leaves the till on the day of the
