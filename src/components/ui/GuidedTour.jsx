@@ -35,13 +35,13 @@ const STEPS = [
   },
   {
     route: '/salles', targets: ['.room-card.is-free .room-card-actions .btn-primary', '.rooms-grid'], icon: 'plus', title: 'Installer un membre',
-    body: '« Installer un membre » ouvre une réservation qui commence tout de suite : titulaire, durée et membres présents. Chaque membre doit avoir une carte active, une formule valide et du crédit.',
-    features: ['« Réserver un créneau » pour plus tard', 'Le crédit de chaque membre présent est engagé à part'],
+    body: '« Installer un membre » ouvre une réservation qui commence tout de suite : client titulaire, durée et nombre de personnes. Le titulaire doit avoir une carte active, une formule valide et du crédit.',
+    features: ['« Réserver un créneau » pour plus tard', 'Ses invités sont comptés, sans crédit à engager'],
   },
   {
     route: '/salles', targets: ['.room-card .session-timer', '.room-card.is-occupied', '.rooms-grid'], icon: 'clock', title: 'Le compteur de séance',
-    body: 'Il démarre dès l’arrivée du membre et défile à la seconde : heure d’arrivée, temps passé, temps restant jusqu’à la fin prévue.',
-    features: ['Orange dans les 15 dernières minutes', 'Rouge avec la durée du dépassement', '« Prolonger » depuis la carte de la salle'],
+    body: 'Il démarre dès l’arrivée du client et décompte à la seconde le crédit temps de sa carte, puis le temps payant une fois le crédit épuisé. L’heure d’arrivée et la fin prévue restent affichées.',
+    features: ['Orange dans les 15 dernières minutes', 'Rouge quand le crédit est épuisé ou la séance dépassée', '« Prolonger » depuis la carte de la salle'],
   },
   {
     route: '/salles', targets: ['.room-card .conso', '.room-card.is-occupied', '.rooms-grid'], icon: 'receipt', title: 'Consommations par membre',

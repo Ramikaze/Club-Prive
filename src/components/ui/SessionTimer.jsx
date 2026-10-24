@@ -1,5 +1,6 @@
 // Live counter of a session in a room. It starts when the member's arrival is recorded (status
-// "en cours", started_at) and shows the time spent, what remains of the booking, then the overrun.
+// "en cours", started_at) and counts down the time credit the card carried in (card_credit_min), then
+// the paid time once the credit runs out. The booking's planned end stays shown underneath.
 import { useEffect, useState } from 'react';
 import { fmtDuration, parts } from '../../lib/format.js';
 
@@ -25,43 +26,53 @@ const minutes = (ms) => Math.max(1, Math.ceil(Math.abs(ms) / 60000));
 
 export const isRunning = (r) => r?.status === 'en_cours' && Boolean(r.started_at);
 
+// Time credit left on the card, in ms (negative once it is used up). Without the figure, the booking's
+// own length stands in.
+const creditLeft = (r, now) => {
+  const started = Date.parse(r.started_at);
+  const creditMs = r.card_credit_min != null ? r.card_credit_min * 60000 : Date.parse(r.end_at) - started;
+  return { creditMs, left: started + creditMs - now };
+};
+
 export default function SessionTimer({ reservation: r, compact = false }) {
   const now = useNow(1000);
   if (!isRunning(r)) return null;
   const started = Date.parse(r.started_at);
-  const end = Date.parse(r.end_at);
-  const elapsed = now - started;
-  const remaining = end - now;
-  const over = remaining < 0;
-  const ending = !over && remaining <= ENDING_SOON_MS;
-  const progress = Math.min(1, Math.max(0, elapsed / Math.max(1, end - started)));
+  const remaining = Date.parse(r.end_at) - now;
+  const { creditMs, left } = creditLeft(r, now);
+  const spent = left < 0;
+  const over = spent || remaining < 0;
+  const ending = !over && (left <= ENDING_SOON_MS || remaining <= ENDING_SOON_MS);
+  const progress = creditMs > 0 ? Math.min(1, Math.max(0, left / creditMs)) : 0;
   const state = over ? 'is-over' : ending ? 'is-ending' : '';
   return (
     <div className={`session-timer ${state} ${compact ? 'is-compact' : ''}`} role="timer"
-      aria-label={`En salle depuis ${fmtDuration(Math.floor(elapsed / 60000))}`}>
+      aria-label={spent
+        ? `Crédit temps épuisé depuis ${fmtDuration(minutes(left))}`
+        : `Crédit temps restant sur la carte : ${fmtDuration(Math.floor(left / 60000))}`}>
       <div className="session-timer-main">
-        <span className="session-timer-label">En salle depuis {parts(started).time}</span>
-        <span className="session-timer-clock">{clock(elapsed)}</span>
+        <span className="session-timer-label">{spent ? 'Crédit épuisé · temps payant' : 'Crédit temps restant sur la carte'}</span>
+        <span className="session-timer-clock">{spent ? `+${clock(-left)}` : clock(left)}</span>
       </div>
       <div className="session-timer-track" aria-hidden="true"><span style={{ transform: `scaleX(${progress})` }} /></div>
       <div className="session-timer-foot">
-        {over
+        {remaining < 0
           ? `Dépassement de ${fmtDuration(minutes(remaining))} : fin prévue à ${r.end_time}`
-          : `Fin prévue à ${r.end_time} · reste ${fmtDuration(minutes(remaining))}`}
+          : `Arrivé à ${parts(started).time} · fin prévue à ${r.end_time}`}
       </div>
     </div>
   );
 }
 
-// One line for lists: "en salle depuis 1 h 05", refreshed every 15 seconds.
+// One line for lists: "crédit restant 1 h 05", refreshed every 15 seconds.
 export function TimeInRoom({ reservation: r }) {
   const now = useNow(15000);
   if (!isRunning(r)) return null;
-  const elapsed = Math.max(0, Math.floor((now - Date.parse(r.started_at)) / 60000));
-  const over = now > Date.parse(r.end_at);
+  const { left } = creditLeft(r, now);
+  const over = left < 0 || now > Date.parse(r.end_at);
   return (
     <span className={over ? 'session-inline is-over' : 'session-inline'}>
-      en salle depuis {fmtDuration(elapsed)}{over ? ' · dépassement' : ''}
+      {left < 0 ? `crédit épuisé depuis ${fmtDuration(minutes(left))}` : `crédit restant ${fmtDuration(Math.floor(left / 60000))}`}
     </span>
   );
 }
