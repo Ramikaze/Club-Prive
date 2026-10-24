@@ -1,6 +1,7 @@
 // Member card, CFA credit: recharges at the till, the administrator's cancellation, the balance that never goes
 // below zero and follows the member, the treasury (cash in at the recharge, never revenue), the members' credit
-// frozen in the monthly closing, the V15 migration and the data reset.
+// frozen in the monthly closing, notes and the room paid with the card (refunds and cancellations back to the
+// card), the V15 migration and the data reset.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { addDays, addMonths, localToUtcMs } from '../shared/time.js';
@@ -325,6 +326,157 @@ test('mois clôturé : un mouvement de carte hors recharge est refusé aussi', a
     server.club.run('DELETE FROM closed_periods WHERE month = ?', today.slice(0, 7));
   }
   assert.equal(balance(member.id), 3000 * UM);
+});
+
+// ---------------------------------------------------------------- the room paid with the card
+
+let roomId;
+const book = (body) => manager.post('/api/reservations', { room_id: roomId, start_time: '15:00', ...body });
+const quote = (body) => manager.post('/api/reservations/quote', { room_id: roomId, start_time: '15:00', ...body });
+const timeLines = (detail) => detail.charges.filter((c) => c.kind === 'temps_supplementaire');
+const withPlan = async (first_name) => {
+  const member = await newMember(first_name);
+  const plan = server.club.get("SELECT id FROM plans WHERE code = 'MENSUELLE'");
+  ok(await admin.put(`/api/plans/${plan.id}`, { price_validated: true }));
+  ok(await manager.post(`/api/members/${member.id}/subscriptions`, { plan_id: plan.id, start_date: today }));
+  return member;
+};
+
+test('salle : tarif non validé, la réservation payée par la carte est refusée et la carte intacte', async () => {
+  roomId = ok(await manager.get('/api/rooms'))[0].id;
+  const member = await newMember('Lucie');
+  ok(await recharge(member.id, { amount: 100000 * UM, method: 'Espèces' }));
+  refused(await book({ member_id: member.id, date: addDays(today, 1), duration_min: 120, pay_with_card: true }), 409, 'TARIF_NON_VALIDE');
+  assert.equal(balance(member.id), 100000 * UM);
+  assert.equal(server.club.get('SELECT COUNT(*) AS n FROM reservations WHERE member_id = ?', member.id).n, 0);
+  // From here the administrator has validated the tariff: 25 000 FCFA the hour, 15 000 FCFA the half hour left.
+  ok(await admin.put('/api/settings', { overtime_tariff: { hour: 25000 * UM, half: 15000 * UM, validated: true } }));
+});
+
+test('salle avec abonnement : les heures de la formule d’abord, le reste payé par la carte', async () => {
+  const member = await withPlan('Mathis');
+  ok(await recharge(member.id, { amount: 100000 * UM, method: 'Espèces' }));
+  const body = { member_id: member.id, date: addDays(today, 2), duration_min: 180, pay_with_card: true };
+  const q = ok(await quote(body));
+  assert.equal(q.included_minutes, 120);
+  assert.equal(q.supplement_amount, 25000 * UM);
+  assert.equal(q.card_balance, 100000 * UM);
+  assert.equal(q.card_amount, 25000 * UM);
+  assert.equal(q.rest_amount, 0);
+  const d = ok(await book(body));
+  assert.equal(d.reservation.included_minutes, 120);
+  assert.equal(d.reservation.paid_minutes, 60);
+  assert.equal(d.reservation.paid_by_card, 25000 * UM);
+  assert.equal(d.reservation.due_amount, 0);
+  assert.ok(d.reservation.subscription_id);
+  assert.ok(timeLines(d).every((c) => c.status === 'payee'));
+  assert.equal(timeLines(d).reduce((sum, c) => sum + c.amount, 0), 25000 * UM);
+  assert.equal(balance(member.id), 75000 * UM);
+  assert.equal(d.payments.length, 1);
+  assert.equal(d.payments[0].method, CARD_METHOD);
+  assert.ok(d.credit_movements.some((m) => m.kind === 'engagement' && m.minutes === 120));
+});
+
+let nora; // booked 2 hours without a plan, paid by the card; extended in the last test of the room
+let noraBooking;
+
+test('salle sans abonnement : réservée si payée par la carte, refusée sinon', async () => {
+  nora = await newMember('Nora');
+  ok(await recharge(nora.id, { amount: 100000 * UM, method: 'Espèces' }));
+  const body = { member_id: nora.id, date: addDays(today, 3), duration_min: 120 };
+  refused(await quote(body), 409, 'ABONNEMENT_INVALIDE');
+  refused(await book(body), 409, 'ABONNEMENT_INVALIDE');
+  const q = ok(await quote({ ...body, pay_with_card: true }));
+  assert.equal(q.subscription, null);
+  assert.equal(q.included_minutes, 0);
+  assert.equal(q.supplement_amount, 50000 * UM);
+  assert.equal(q.card_amount, 50000 * UM);
+  const d = ok(await book({ ...body, pay_with_card: true }));
+  noraBooking = d.reservation;
+  assert.equal(d.reservation.subscription_id, null);
+  assert.equal(d.subscription, null);
+  assert.equal(d.reservation.paid_minutes, 120);
+  assert.equal(d.reservation.paid_by_card, 50000 * UM);
+  assert.equal(d.reservation.due_amount, 0);
+  assert.equal(balance(nora.id), 50000 * UM);
+  assert.equal(server.club.get('SELECT COUNT(*) AS n FROM credit_movements WHERE reservation_id = ?', d.reservation.id).n, 0);
+  assert.ok(ok(await admin.get('/api/audit')).some((a) => a.action === 'carte.payer' && a.entity_id === nora.id));
+});
+
+test('salle, solde insuffisant : la carte paie ce qu’elle a, le reste est à encaisser ou payé par le moyen choisi', async () => {
+  const member = await newMember('Oscar');
+  ok(await recharge(member.id, { amount: 30000 * UM, method: 'Espèces' }));
+  const q = ok(await quote({ member_id: member.id, date: addDays(today, 4), duration_min: 120, pay_with_card: true }));
+  assert.equal(q.card_amount, 30000 * UM);
+  assert.equal(q.rest_amount, 20000 * UM);
+  const d = ok(await book({ member_id: member.id, date: addDays(today, 4), duration_min: 120, pay_with_card: true }));
+  assert.equal(balance(member.id), 0);
+  assert.equal(d.reservation.paid_by_card, 30000 * UM);
+  assert.equal(d.reservation.due_amount, 20000 * UM);
+  const lines = timeLines(d);
+  assert.deepEqual(lines.map((c) => [c.status, c.amount]), [['payee', 30000 * UM], ['due', 20000 * UM]]);
+  assert.match(lines[0].label, / — payé par carte$/);
+  assert.match(lines[1].label, / — reste à encaisser$/);
+  assert.ok(lines.every((c) => c.quantity === 1 && c.amount === c.unit_price));
+
+  // With a method for the rest, nothing is left to collect.
+  ok(await recharge(member.id, { amount: 30000 * UM, method: 'Espèces' }));
+  const before = await treasury();
+  const paid = ok(await book({ member_id: member.id, date: addDays(today, 5), duration_min: 120, pay_with_card: true, deposit_method: 'Espèces' }));
+  assert.equal(paid.reservation.due_amount, 0);
+  assert.equal(paid.reservation.paid_by_card, 30000 * UM);
+  assert.equal(balance(member.id), 0);
+  assert.equal(cash(await treasury()).in, cash(before).in + 20000 * UM);
+});
+
+test('salle 3 h ou plus : acompte et solde payés par la carte ; annulée la veille tout revient, absence le jour seul le solde', async () => {
+  const early = await newMember('Paul');
+  ok(await recharge(early.id, { amount: 100000 * UM, method: 'Espèces' }));
+  const booked = ok(await book({ member_id: early.id, date: addDays(today, 6), duration_min: 180, pay_with_card: true }));
+  assert.equal(booked.reservation.deposit_amount, 37500 * UM);
+  assert.deepEqual(timeLines(booked).map((c) => [!!c.deposit, c.status, c.amount]), [[true, 'payee', 37500 * UM], [false, 'payee', 37500 * UM]]);
+  assert.equal(balance(early.id), 25000 * UM);
+  const before = await treasury();
+  const cancelled = ok(await manager.post(`/api/reservations/${booked.reservation.id}/cancel`, { reason: 'Changement de programme' }));
+  assert.equal(cancelled.reservation.status, 'annulee');
+  assert.equal(balance(early.id), 100000 * UM);
+  assert.ok(timeLines(cancelled).every((c) => c.status === 'remboursee'));
+  assert.equal(cash(await treasury()).out, cash(before).out); // nothing leaves the till
+  const moves = ok(await manager.get(`/api/members/${early.id}`)).wallet.movements.filter((m) => m.kind === 'remboursement');
+  assert.equal(moves.reduce((sum, m) => sum + m.amount, 0), 75000 * UM);
+  assert.ok(ok(await admin.get('/api/audit')).some((a) => a.action === 'carte.rembourser' && a.entity_id === early.id));
+
+  // A card that cannot take the deposit needs a method for the rest, or the booking is not recorded.
+  const short = await newMember('Rose');
+  ok(await recharge(short.id, { amount: 20000 * UM, method: 'Espèces' }));
+  refused(await book({ member_id: short.id, date: addDays(today, 7), duration_min: 180, pay_with_card: true }), 400, 'ACOMPTE_REQUIS');
+  assert.equal(balance(short.id), 20000 * UM);
+
+  const absent = await newMember('Quentin');
+  ok(await recharge(absent.id, { amount: 100000 * UM, method: 'Espèces' }));
+  const tonight = ok(await book({ member_id: absent.id, date: today, start_time: '23:30', duration_min: 180, pay_with_card: true }));
+  assert.equal(tonight.reservation.late_cancellation, true);
+  assert.equal(balance(absent.id), 25000 * UM);
+  const gone = ok(await manager.post(`/api/reservations/${tonight.reservation.id}/cancel`, { reason: 'Membre absent', no_show: true }));
+  assert.equal(gone.deposit_kept, 37500 * UM);
+  assert.equal(balance(absent.id), 62500 * UM);
+  assert.deepEqual(timeLines(gone).map((c) => [!!c.deposit, c.status]), [[true, 'payee'], [false, 'remboursee']]);
+});
+
+test('salle, prolongation payée par la carte : la demi-heure en plus est prise sur la carte', async () => {
+  const q = ok(await manager.post(`/api/reservations/${noraBooking.id}/extend/quote`, { minutes: 30, pay_with_card: true }));
+  assert.equal(q.supplement_delta, 15000 * UM);
+  assert.equal(q.card_amount, 15000 * UM);
+  refused(await manager.post(`/api/reservations/${noraBooking.id}/extend`, { minutes: 30 }), 409, 'ABONNEMENT_INVALIDE');
+  const d = ok(await manager.post(`/api/reservations/${noraBooking.id}/extend`, { minutes: 30, pay_with_card: true }));
+  assert.equal(balance(nora.id), 35000 * UM);
+  assert.equal(d.reservation.duration_min, 150);
+  assert.equal(d.reservation.due_amount, 0);
+  assert.equal(d.reservation.paid_by_card, 65000 * UM);
+  // The session ends normally: no plan, no credit to consume.
+  const done = ok(await manager.post(`/api/reservations/${noraBooking.id}/finish`));
+  assert.equal(done.reservation.status, 'terminee');
+  assert.equal(done.credit_movements.length, 0);
 });
 
 // A database at version 14 holding the harness's own records: built with the first 14 migrations, then filled
