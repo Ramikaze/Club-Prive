@@ -30,9 +30,11 @@ const NO_REDIRECT = new Set(['/api/login', '/api/setup']);
 // A download answers with the file itself, named by the server; only its failures are JSON.
 const fileName = (res) => /filename="?([^";]+)"?/i.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? 'export.csv';
 
-async function request(method, url, body, key, asFile = false) {
+// `anonymous` is for the public pages (the receipt check): no demo header, since they always answer from the
+// real club whatever space this browser was left in.
+async function request(method, url, body, key, asFile = false, anonymous = false) {
   const headers = { Accept: asFile ? 'text/csv, application/json' : 'application/json' };
-  if (isDemoSpace()) headers['X-Club-Espace'] = 'demo';
+  if (isDemoSpace() && !anonymous) headers['X-Club-Espace'] = 'demo';
   if (method !== 'GET') headers['Content-Type'] = 'application/json';
   if (key) headers['Idempotency-Key'] = key;
   const retriable = method === 'GET' || Boolean(key);
@@ -83,6 +85,8 @@ function saveFile(blob, name) {
 
 export const api = {
   get: (url) => request('GET', url),
+  // A public read: never carries the demo-space header.
+  getPublic: (url) => request('GET', url, undefined, null, false, true),
   post: (url, body, key = newKey()) => request('POST', url, body, key),
   put: (url, body, key = newKey()) => request('PUT', url, body, key),
   del: (url, body = {}, key = newKey()) => request('DELETE', url, body, key),

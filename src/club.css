@@ -811,6 +811,39 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .btn-demo:hover, .side-user .btn-demo:hover { background: var(--demo); }
 .btn-demo:focus-visible { box-shadow: 0 0 0 2px var(--charcoal), 0 0 0 4px color-mix(in srgb, #fff 45%, var(--demo)); }
 
+/* ------------------------------------------------------------------ public receipt check */
+
+/* The page a customer reaches from the QR code (#/ticket/...): one centred column, built for a phone first. */
+.ticket-public { min-height: 100vh; padding: 20px 16px 40px; display: flex; justify-content: center; align-items: flex-start; }
+.ticket-public-column { width: min(440px, 100%); display: grid; gap: 14px; }
+.ticket-public-banner { padding: 14px 16px; font-size: 1rem; font-weight: 600; line-height: 1.4; }
+.ticket-public-wait { text-align: center; color: var(--text-2); }
+.ticket-public-card { display: grid; gap: 16px; padding: 22px 20px; overflow-wrap: anywhere; }
+.ticket-public-head { display: grid; gap: 4px; justify-items: center; text-align: center; }
+.ticket-public-logo { width: min(200px, 70%); height: auto; color: var(--text); margin-bottom: 8px; }
+.ticket-public-kicker { margin: 8px 0 0; font-size: 0.78rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-2); }
+.ticket-public-number { margin: 0; font-family: var(--mono); font-size: 1.35rem; font-weight: 650; }
+.ticket-public-head .muted { margin: 0; }
+.ticket-public-lines { list-style: none; margin: 0; padding: 12px 0; display: grid; gap: 8px; border-top: 1px dashed var(--border-strong); border-bottom: 1px dashed var(--border-strong); }
+.ticket-public-lines li { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.ticket-public-label { min-width: 0; }
+.ticket-public-amount { flex: none; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ticket-public-total { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.ticket-public-total strong { font-size: 1.5rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ticket-public-facts { margin: 0; display: grid; gap: 6px; font-size: 0.92rem; }
+.ticket-public-facts > div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.ticket-public-facts dt { color: var(--text-2); }
+.ticket-public-facts dd { margin: 0; text-align: right; font-weight: 550; }
+.ticket-public-status { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 0.85rem; font-weight: 600; }
+.ticket-public-status-ok { background: var(--ok-soft); color: var(--ok); }
+.ticket-public-status-warn { background: var(--warn-soft); color: var(--warn); }
+.ticket-public-status-danger { background: var(--danger-soft); color: var(--danger); }
+.ticket-public-compare { margin: 0; padding: 0 4px; text-align: center; color: var(--text-2); font-size: 0.92rem; }
+.ticket-public-again { justify-self: center; padding: 8px; font-size: 0.92rem; }
+.ticket-public-form { display: grid; gap: 14px; }
+.ticket-public-form input { font-family: var(--mono); text-transform: uppercase; }
+.ticket-public-form input::placeholder { text-transform: none; }
+
 /* ------------------------------------------------------------------ print */
 
 @media print {

@@ -1,6 +1,6 @@
 // Boot (session check), sign-in, then the routed application. Every rule is enforced by the server;
 // the admin guard here only avoids showing pages the server would refuse.
-import { Component, useEffect } from 'react';
+import { Component, useEffect, useState } from 'react';
 import { HashRouter, Routes, Route, Link } from 'react-router-dom';
 import AppShell from './components/layout/AppShell.jsx';
 import { DialogRoot, closeAllDialogs } from './components/ui/Modal.jsx';
@@ -22,6 +22,7 @@ import Treasury from './pages/Treasury.jsx';
 import Ledger from './pages/Ledger.jsx';
 import Closing from './pages/Closing.jsx';
 import Settings from './pages/Settings.jsx';
+import PublicTicket, { isPublicTicketHash } from './pages/PublicTicket.jsx';
 import { api, setUnauthorizedHandler } from './lib/api.js';
 import { isDemoSpace, leaveDemo } from './lib/space.js';
 import { applyTheme } from './lib/theme.js';
@@ -95,6 +96,14 @@ async function boot() {
 }
 
 export default function App() {
+  // The receipt check is public: a customer has no account, so it is drawn whatever the session says and
+  // follows the address bar (a scan, a typed number) without waiting for boot().
+  const [hash, setHash] = useState(() => window.location.hash);
+  useEffect(() => {
+    const onHashChange = () => setHash(window.location.hash);
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
   const status = useStore((s) => s.status);
   const bootError = useStore((s) => s.bootError);
 
@@ -107,6 +116,7 @@ export default function App() {
     boot();
   }, []);
 
+  if (isPublicTicketHash(hash)) return <><PublicTicket hash={hash} /><Toasts /></>;
   if (status === 'boot') return <div className="boot">Chargement…</div>;
   if (status === 'offline') {
     // The server answered and refused (a 4xx, such as a conflict while the demo fills for the first time):
