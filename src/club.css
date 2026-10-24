@@ -393,8 +393,6 @@ table.table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
 .table td.num, .table th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .table tr.is-clickable { cursor: pointer; }
 .table tr.is-clickable:hover td { background: var(--surface-2, var(--surface)); }
-.table tr.is-clickable { cursor: pointer; }
-.table tr.is-clickable:hover td { background: var(--surface-2); }
 .table tr.is-muted td { color: var(--text-3); }
 .table tr.is-muted td .strike { text-decoration: line-through; }
 .table tfoot td { font-weight: 650; border-top: 2px solid var(--border); border-bottom: 0; }
