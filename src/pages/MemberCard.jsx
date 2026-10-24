@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useParams } from 'react-router-dom';
+import BrandLogo from '../components/ui/BrandLogo.jsx';
 import Icon from '../components/ui/Icon.jsx';
 import { Loaded, PageHead } from '../components/ui/ui.jsx';
 import { api } from '../lib/api.js';
@@ -47,7 +48,7 @@ function CardPage({ v }) {
       {active ? null : <div className="notice notice-danger no-print" style={{ marginBottom: 14 }}><Icon name="alert" /><span>Carte désactivée{v.card.deactivation_reason ? ` : ${v.card.deactivation_reason}` : ''}.</span></div>}
       <article className={`member-card ${active ? '' : 'inactive'}`} aria-label={`Carte de membre de ${v.member.name}, numéro ${v.card.code}`}>
         <div className="mc-top">
-          <div className="mc-club">{v.club_name}</div>
+          <div className="mc-club" role="img" aria-label={v.club_name}><BrandLogo className="mc-logo" /></div>
           <div className="mc-kind">Carte de membre · {v.card.kind}</div>
         </div>
         <div className="mc-mid">

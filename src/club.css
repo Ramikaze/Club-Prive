@@ -692,7 +692,9 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 }
 .member-card::after { content: ""; position: absolute; inset: 10px; border: 1px solid rgba(200, 146, 90, 0.35); border-radius: 10px; pointer-events: none; }
 .member-card .mc-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
-.member-card .mc-club { font-family: var(--font-display); font-size: 1.05rem; font-weight: 600; }
+.member-card .mc-club { line-height: 0; }
+/* Logo in the card gold; height ~7 mm at card scale (428 px = 85.6 mm), width follows the artwork ratio. */
+.member-card .mc-logo { display: block; height: 35px; width: auto; color: #c8925a; }
 .member-card .mc-kind { font-size: 0.68rem; letter-spacing: 0.12em; text-transform: uppercase; color: #c8925a; }
 .member-card .mc-mid { display: flex; justify-content: space-between; align-items: center; gap: 14px; }
 .member-card .mc-identity { min-width: 0; flex: 1; }
@@ -899,6 +901,7 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
   main { padding: 0; }
   .member-card { box-shadow: none; width: 85.6mm; height: 54mm; max-width: none; padding: 4.5mm 5.5mm; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .member-card .mc-qr { width: 15.5mm; height: 15.5mm; padding: 0.8mm; }
+  .member-card .mc-logo { height: 7mm; }
 
   /* The receipt page (body class set by the page, with the 80 mm @page): only the paper prints, centred in
      the roll's printable column, without the demo frame and watermark the shell would draw over it. */
