@@ -1,6 +1,7 @@
 // Payment, refund and line cancellation dialogs. Each dialog keeps one idempotency key for its
 // whole life, so a double click or a retry after a network error never records the operation twice.
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api, newKey } from '../lib/api.js';
 import { money } from '../lib/format.js';
 import { useStore, useSettings, isAdminNow } from '../store/useStore.js';
@@ -15,6 +16,7 @@ function PaymentDialog({ close, due, memberName, onDone }) {
   const methods = useSettings().payment_methods;
   const [key] = useState(newKey);
   const { busy, error, submit } = useSubmit();
+  const navigate = useNavigate();
   const [checked, setChecked] = useState(() => new Set(due.map((c) => c.id)));
   const [method, setMethod] = useState(methods[0] ?? '');
   const [reference, setReference] = useState('');
@@ -39,6 +41,8 @@ function PaymentDialog({ close, due, memberName, onDone }) {
       const res = await api.post('/api/payments', { charge_ids: ids, method, reference }, key);
       close();
       toast(`Encaissement enregistré : ${money(res.payment.amount)}.`);
+      // The cash receipt is the next thing the manager needs: open its page (print, WhatsApp).
+      navigate(`/caisse/ticket/${res.payment.id}`);
       onDone?.(res);
     });
   };

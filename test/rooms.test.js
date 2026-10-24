@@ -389,3 +389,14 @@ test('acompte : 3 h ou plus avec du temps payant, 50 % tout de suite, le solde a
   const early = await manager.post(`/api/reservations/${bruno.reservation.id}/cancel`, { reason: 'Membre absent', no_show: true });
   assert.notEqual(early.status, 200);
 });
+
+test('séance en cours : le crédit temps de la carte à décompter est connu', async () => {
+  const before = credit(members[0]).available;
+  const booked = await book({ duration_min: 60 });
+  const res = ok(await manager.post(`/api/reservations/${booked.id}/start`, {})).reservation;
+  assert.equal(res.status, 'en_cours');
+  // The hour taken by the booking plus what the card still holds: the whole credit at arrival.
+  assert.equal(res.card_credit_min, before);
+  const detail = ok(await manager.get(`/api/reservations/${res.id}`));
+  assert.equal(detail.reservation.card_credit_min, before);
+});

@@ -9,6 +9,8 @@ import { text, int, toId, flag, frDate } from './validate.js';
 import { ledgerMethods, DEFAULT_CATEGORIES } from './ledger.js';
 import { loungeMethods } from './lounge.js';
 import { seedDemo } from './seed.js';
+import { newTicketCode, formatTicketNumber, normalizeTicketCode, memberInitials, TICKET_CODE_LENGTH } from '../shared/ticket.js';
+import { timingSafeEqual } from './auth.js';
 import { decodePhoto } from './photos.js';
 import {
   localParts, localToUtcMs, addDays, addMonths, daysBetween, monthsElapsed, isValidDate, isValidTimeZone, parseHHMM,
@@ -36,7 +38,8 @@ const SESSION_DAYS = 14;
 // categories are kept.
 const WIPE_ORDER = [
   'humidor_readings', 'humidors',
-  'idempotency_keys', 'payment_allocations', 'refunds', 'stock_movements', 'credit_movements', 'charges', 'payments',
+  'idempotency_keys', 'payment_allocations', 'refunds', 'stock_movements', 'credit_movements', 'charges',
+  'ticket_events', 'payments',
   'reservation_attendees', 'reservations', 'cards', 'subscriptions', 'members', 'product_photos', 'products',
   'ledger_entries', 'closed_periods', 'audit_log',
 ];
@@ -58,6 +61,9 @@ export function defaultSettings() {
     // The club's WhatsApp number, as an administrator types it. It closes the booking confirmation sent to members
     // (« Pour toute question : … ») and is left out of the message while empty. Set in Settings, never in the code.
     club_whatsapp: '',
+    // Free text printed above and below the items of the cash receipt (4 and 2 lines at most).
+    ticket_header: '',
+    ticket_footer: 'Merci de votre visite',
     currency: { label: 'FCFA', decimals: 0 },
     timezone: 'Africa/Brazzaville',
     hours: { open: '06:00' }, // start of the business day; the room can be booked at any hour
@@ -174,8 +180,24 @@ export class Club {
     );
   }
 
+  // A payment gets its check code when it is recorded; this gives one to those recorded before codes existed.
+  fillTicketCodes() {
+    for (const { id } of this.all('SELECT id FROM payments WHERE ticket_code IS NULL')) {
+      this.run('UPDATE payments SET ticket_code = ? WHERE id = ?', this.freshTicketCode(), id);
+    }
+  }
+
+  // A code no payment holds yet (a collision is a 1 in 31^12 event, but the unique index must never fail).
+  freshTicketCode() {
+    for (;;) {
+      const code = newTicketCode((n) => crypto.getRandomValues(new Uint8Array(n)));
+      if (!this.get('SELECT 1 AS x FROM payments WHERE ticket_code = ?', code)) return code;
+    }
+  }
+
   bootstrap() {
     this.tx(() => {
+      this.fillTicketCodes();
       for (const [key, value] of Object.entries(defaultSettings())) {
         this.run('INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, ?)', key, JSON.stringify(value), this.nowIso());
       }
@@ -290,6 +312,15 @@ export class Club {
       case 'club_whatsapp':
         // Free text, trimmed; empty clears the number.
         return text(v, 'Numéro WhatsApp du club', { max: 30 }) ?? '';
+      case 'ticket_header':
+      case 'ticket_footer': {
+        const header = key === 'ticket_header';
+        const out = text(v, header ? 'En-tête du ticket' : 'Pied du ticket', { max: header ? 200 : 120 }) ?? '';
+        if (out.split('\n').length > (header ? 4 : 2)) {
+          throw invalid(`${header ? 'En-tête' : 'Pied'} du ticket : ${header ? 4 : 2} lignes au maximum.`);
+        }
+        return out;
+      }
       case 'currency': {
         if (!v || typeof v !== 'object') throw invalid('Devise invalide.');
         return {
@@ -1237,7 +1268,16 @@ export class Club {
       notes: r.notes, created_at: r.created_at, created_by_name: r.created_by_name ?? null,
       started_at: r.started_at, finished_at: r.finished_at, cancelled_at: r.cancelled_at, cancel_reason: r.cancel_reason,
       due_amount: r.due_amount ?? 0, billed_amount: r.billed_amount ?? 0,
+      card_credit_min: r.status === 'en_cours' ? this.cardCreditAtEntry(r) : null,
     };
+  }
+
+  // Time credit the holder's card carried into a running session: the minutes this booking took from the
+  // card plus what the card still has free. The room view counts it down from the arrival.
+  cardCreditAtEntry(r) {
+    const sub = r.subscription_id ? this.get('SELECT * FROM subscriptions WHERE id = ?', r.subscription_id) : null;
+    const free = sub ? this.credit(sub, this.bizToday()).available : 0;
+    return (r.included_minutes ?? 0) + free;
   }
 
   // The bookings that strictly overlap [startMs, endMs). One that ends after startMs began after startMs less
@@ -2073,7 +2113,7 @@ export class Club {
     return {
       id: p.id, member_id: p.member_id, member_name: p.first_name ? `${p.first_name} ${p.last_name}` : undefined,
       member_no: p.member_no, reservation_id: p.reservation_id, amount: p.amount, method: p.method, reference: p.reference,
-      paid_at: p.paid_at, created_by_name: p.created_by_name ?? null, allocations, by_account: byAccount,
+      paid_at: p.paid_at, ticket_code: p.ticket_code ?? null, created_by_name: p.created_by_name ?? null, allocations, by_account: byAccount,
     };
   }
 
@@ -2104,8 +2144,8 @@ export class Club {
     const reservationIds = new Set(charges.map((c) => c.reservation_id));
     const reservationId = reservationIds.size === 1 ? [...reservationIds][0] : null;
     const paymentId = this.insert(
-      'INSERT INTO payments (member_id, reservation_id, amount, method, reference, paid_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      charges[0].member_id, reservationId, total, method, reference, this.nowIso(), actor.id,
+      'INSERT INTO payments (member_id, reservation_id, amount, method, reference, paid_at, created_by, ticket_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      charges[0].member_id, reservationId, total, method, reference, this.nowIso(), actor.id, this.freshTicketCode(),
     );
     for (const c of charges) {
       this.run('INSERT INTO payment_allocations (payment_id, charge_id, account, amount) VALUES (?, ?, ?, ?)', paymentId, c.id, c.account, c.amount);
@@ -2146,6 +2186,137 @@ export class Club {
       refund_id: refundId, charge_id: c.id, libelle: c.label, montant: c.amount, sous_compte: c.account, motif: reason, remis_en_stock: restock,
     });
     return c.reservation_id ? this.reservationDetail(c.reservation_id) : this.memberDetail(c.member_id);
+  }
+
+  // ---------------------------------------------------------------- cash receipt (ticket de caisse)
+
+  ticketPaymentRow(id) {
+    const n = Number(id);
+    if (!Number.isSafeInteger(n) || n < 1) return null;
+    return this.get(
+      `SELECT p.*, m.first_name, m.last_name, m.member_no, m.phone AS member_phone, u.name AS created_by_name FROM payments p
+       JOIN members m ON m.id = p.member_id LEFT JOIN users u ON u.id = p.created_by WHERE p.id = ?`, n,
+    ) ?? null;
+  }
+
+  // « valide » without refund, « rembourse » when every line of the payment is refunded, else partial.
+  ticketStatus(paymentId) {
+    const lines = this.get('SELECT COUNT(*) AS n FROM payment_allocations WHERE payment_id = ?', paymentId).n;
+    const refunds = this.get('SELECT COUNT(*) AS n FROM refunds WHERE payment_id = ?', paymentId).n;
+    if (!refunds) return 'valide';
+    return refunds >= lines ? 'rembourse' : 'partiellement_rembourse';
+  }
+
+  // The receipt for the staff: the payment, its refunds, the next copy number and the club's texts. Only an
+  // administrator also gets the list of copies already given out.
+  ticketFor(actor, id) {
+    const p = this.ticketPaymentRow(id);
+    if (!p) throw notFound('Paiement');
+    const refunds = this.all('SELECT amount, created_at FROM refunds WHERE payment_id = ? ORDER BY id', p.id);
+    const last = this.get('SELECT COALESCE(MAX(copy_no), 0) AS n FROM ticket_events WHERE payment_id = ?', p.id).n;
+    const s = this.settings();
+    const ticket = {
+      ...this.paymentDTO(p),
+      number: formatTicketNumber(p.id),
+      member_phone: p.member_phone ?? '',
+      refunded_amount: refunds.reduce((sum, r) => sum + r.amount, 0),
+      refunds,
+      status: this.ticketStatus(p.id),
+      next_copy_no: last + 1,
+      header: s.ticket_header,
+      footer: s.ticket_footer,
+      club_name: s.club_name,
+      demo: this.demo,
+    };
+    if (actor.role !== 'admin') return { ticket };
+    const events = this.all(
+      `SELECT e.at, e.kind, e.copy_no, e.phone, u.name AS user_name FROM ticket_events e
+       LEFT JOIN users u ON u.id = e.user_id WHERE e.payment_id = ? ORDER BY e.copy_no`, p.id,
+    );
+    return { ticket, events };
+  }
+
+  // Each print or WhatsApp send is one numbered copy (the first is the original). A WhatsApp send keeps the
+  // number it went to, as the member's file has it at that moment.
+  recordTicketEvent(actor, id, input) {
+    const kind = input?.kind;
+    if (kind !== 'impression' && kind !== 'whatsapp') throw invalid('Sortie de ticket inconnue.');
+    const p = this.ticketPaymentRow(id);
+    if (!p) throw notFound('Paiement');
+    const copyNo = this.get('SELECT COALESCE(MAX(copy_no), 0) AS n FROM ticket_events WHERE payment_id = ?', p.id).n + 1;
+    const at = this.nowIso();
+    const phone = kind === 'whatsapp' ? (p.member_phone || null) : null;
+    this.run(
+      'INSERT INTO ticket_events (payment_id, kind, copy_no, phone, at, user_id) VALUES (?, ?, ?, ?, ?, ?)',
+      p.id, kind, copyNo, phone, at, actor.id,
+    );
+    this.audit(actor, kind === 'whatsapp' ? 'ticket.whatsapp' : 'ticket.imprimer', 'payment', p.id, { copy_no: copyNo });
+    return { copy_no: copyNo, printed_by_name: actor.name, at };
+  }
+
+  // What anyone holding the ticket may see, after the check code: no name, phone, member number or reference.
+  // Null when the number is unknown or the code is wrong (the caller answers both the same way). The code is
+  // compared in constant time, and an unknown number is compared against a dummy code so it costs the same.
+  publicTicket(id, code) {
+    const p = this.ticketPaymentRow(id);
+    const encoder = new TextEncoder();
+    const given = encoder.encode(normalizeTicketCode(code));
+    // Only a full-length code can open a ticket: an empty or short one (`----` normalizes to nothing) must not
+    // match a payment that has no code. When any check fails the comparison still runs, against a dummy code.
+    const valid = Boolean(p) && given.length === TICKET_CODE_LENGTH && p.ticket_code?.length === TICKET_CODE_LENGTH;
+    const stored = encoder.encode(valid ? p.ticket_code : '0'.repeat(given.length));
+    if (!timingSafeEqual(given, stored) || !valid) return null;
+    const lines = this.all(
+      `SELECT c.label, c.quantity, pa.amount FROM payment_allocations pa JOIN charges c ON c.id = pa.charge_id
+       WHERE pa.payment_id = ? ORDER BY pa.id`, p.id,
+    );
+    const refunded = this.get('SELECT COALESCE(SUM(amount), 0) AS n FROM refunds WHERE payment_id = ?', p.id).n;
+    const s = this.settings();
+    return {
+      club_name: s.club_name,
+      // Club settings, not personal data: the public page has no session to read them from.
+      currency: s.currency,
+      timezone: s.timezone,
+      number: formatTicketNumber(p.id),
+      paid_at: p.paid_at,
+      lines,
+      total: p.amount,
+      method: p.method,
+      initials: memberInitials(p.first_name, p.last_name),
+      status: this.ticketStatus(p.id),
+      refunded_amount: refunded,
+    };
+  }
+
+  // The administrator's history of copies given out, most recent first; `copies_total` counts every copy of the
+  // same payment, whatever the filters, so a ticket given out three times or more stands out.
+  ticketEvents(query = {}) {
+    const where = [];
+    const args = [];
+    if (query.from) {
+      const [a, b] = this.periodBounds(query.from, query.to ?? query.from);
+      where.push('e.at >= ? AND e.at < ?');
+      args.push(a, b);
+    }
+    if (query.user_id !== undefined && query.user_id !== '') {
+      where.push('e.user_id = ?');
+      args.push(toId(query.user_id, 'Utilisateur'));
+    }
+    const rows = this.all(
+      `SELECT e.at, e.kind, e.copy_no, e.payment_id, p.amount, e.user_id, u.name AS user_name,
+              m.first_name, m.last_name,
+              (SELECT COUNT(*) FROM ticket_events x WHERE x.payment_id = e.payment_id) AS copies_total
+       FROM ticket_events e JOIN payments p ON p.id = e.payment_id JOIN members m ON m.id = p.member_id
+       LEFT JOIN users u ON u.id = e.user_id
+       ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY e.at DESC, e.id DESC LIMIT 1000`, ...args,
+    );
+    return {
+      events: rows.map((r) => ({
+        at: r.at, kind: r.kind, copy_no: r.copy_no, payment_id: r.payment_id, number: formatTicketNumber(r.payment_id),
+        member_name: `${r.first_name} ${r.last_name}`, amount: r.amount, user_id: r.user_id, user_name: r.user_name ?? null,
+        copies_total: r.copies_total,
+      })),
+    };
   }
 
   openCharges() {

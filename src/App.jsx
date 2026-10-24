@@ -1,6 +1,6 @@
 // Boot (session check), sign-in, then the routed application. Every rule is enforced by the server;
 // the admin guard here only avoids showing pages the server would refuse.
-import { Component, useEffect } from 'react';
+import { Component, useEffect, useRef, useState } from 'react';
 import { HashRouter, Routes, Route, Link } from 'react-router-dom';
 import AppShell from './components/layout/AppShell.jsx';
 import { DialogRoot, closeAllDialogs } from './components/ui/Modal.jsx';
@@ -17,11 +17,14 @@ import Reservation from './pages/Reservation.jsx';
 import Products from './pages/Products.jsx';
 import Lounge, { HumidorPage } from './pages/Lounge.jsx';
 import Cash from './pages/Cash.jsx';
+import Ticket from './pages/Ticket.jsx';
+import TicketHistory from './pages/TicketHistory.jsx';
 import Expenses from './pages/Expenses.jsx';
 import Treasury from './pages/Treasury.jsx';
 import Ledger from './pages/Ledger.jsx';
 import Closing from './pages/Closing.jsx';
 import Settings from './pages/Settings.jsx';
+import PublicTicket, { isPublicTicketHash } from './pages/PublicTicket.jsx';
 import { api, setUnauthorizedHandler } from './lib/api.js';
 import { isDemoSpace, leaveDemo } from './lib/space.js';
 import { applyTheme } from './lib/theme.js';
@@ -95,6 +98,14 @@ async function boot() {
 }
 
 export default function App() {
+  // The receipt check is public: a customer has no account, so it is drawn whatever the session says and
+  // follows the address bar (a scan, a typed number) without waiting for boot().
+  const [hash, setHash] = useState(() => window.location.hash);
+  useEffect(() => {
+    const onHashChange = () => setHash(window.location.hash);
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
   const status = useStore((s) => s.status);
   const bootError = useStore((s) => s.bootError);
 
@@ -104,9 +115,18 @@ export default function App() {
       closeAllDialogs();
       useStore.getState().signOut();
     });
-    boot();
   }, []);
+  // The session is read once, but not while the public receipt check is showing: a visitor has no session, so
+  // the 401 would sign out and retitle the tab. It runs as soon as the visitor leaves that page.
+  const isPublic = isPublicTicketHash(hash);
+  const booted = useRef(false);
+  useEffect(() => {
+    if (isPublic || booted.current) return;
+    booted.current = true;
+    boot();
+  }, [isPublic]);
 
+  if (isPublic) return <><PublicTicket hash={hash} /><Toasts /></>;
   if (status === 'boot') return <div className="boot">Chargement…</div>;
   if (status === 'offline') {
     // The server answered and refused (a 4xx, such as a conflict while the demo fills for the first time):
@@ -138,6 +158,8 @@ export default function App() {
             <Route path="lounge" element={<Lounge />} />
             <Route path="lounge/caves/:id" element={<HumidorPage />} />
             <Route path="caisse" element={<Cash />} />
+            <Route path="caisse/ticket/:id" element={<Ticket />} />
+            <Route path="caisse/historique-tickets" element={<AdminOnly><TicketHistory /></AdminOnly>} />
             <Route path="depenses" element={<Expenses />} />
             <Route path="tresorerie" element={<AdminOnly><Treasury /></AdminOnly>} />
             <Route path="grand-livre" element={<AdminOnly><Ledger /></AdminOnly>} />

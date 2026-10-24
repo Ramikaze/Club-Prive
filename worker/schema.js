@@ -501,7 +501,26 @@ const V13 = [
   )`,
 ];
 
-export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13];
+// Cash receipt: every payment carries a check code (the proof printed on the ticket; NULL only until
+// fillTicketCodes() has run at startup), and every printing or WhatsApp sending of a ticket is kept, one
+// numbered copy after the other. SQLite cannot add a UNIQUE column, hence the separate unique index.
+const V14 = [
+  'ALTER TABLE payments ADD COLUMN ticket_code TEXT',
+  'CREATE UNIQUE INDEX payments_ticket_code ON payments(ticket_code)',
+  `CREATE TABLE ticket_events (
+    id INTEGER PRIMARY KEY,
+    payment_id INTEGER NOT NULL REFERENCES payments(id),
+    kind TEXT NOT NULL CHECK (kind IN ('impression', 'whatsapp')),
+    copy_no INTEGER NOT NULL CHECK (copy_no >= 1),
+    phone TEXT,
+    at TEXT NOT NULL,
+    user_id INTEGER REFERENCES users(id),
+    UNIQUE (payment_id, copy_no)
+  )`,
+  'CREATE INDEX ticket_events_at ON ticket_events(at)',
+];
+
+export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14];
 
 export function migrate(db) {
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');

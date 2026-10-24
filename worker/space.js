@@ -11,9 +11,10 @@ import { notSignedIn } from './errors.js';
 export const SPACE_HEADER = 'x-club-espace';
 
 // Sign-in, sign-out and installation work on sessions and accounts, which exist in the real club
-// only: they go there whatever space the browser asks for. The demo space refuses them too
-// (worker/api.js), so one mistake in this file is not enough to reach it.
-export const ALWAYS_REAL = /^\/api\/(login|logout|setup)(\/|$)/;
+// only: they go there whatever space the browser asks for. So does the public check of a receipt
+// (/api/tickets/...): a ticket is checked against the real club's payments, never the demo's. The demo
+// space refuses them too (worker/api.js), so one mistake in this file is not enough to reach it.
+export const ALWAYS_REAL = /^\/api\/(login|logout|setup|tickets)(\/|$)/;
 
 // The answer the API gives a request without a valid session (errorResponse in worker/api.js), for
 // the one request the router turns away itself.
