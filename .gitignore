@@ -34,3 +34,6 @@ photos-cigares/
 
 # Isolated working copies that Claude Code agents create (never committed)
 .claude/worktrees/
+
+# Knowledge graph of the project built by graphify (local tool, never committed)
+graphify-out/
