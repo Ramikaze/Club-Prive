@@ -497,10 +497,10 @@ function confirmationText(detail) {
   });
 }
 
-// The demo shows the message and sends nothing.
-function DemoMessageDialog({ close, text }) {
+// The demo shows the message and sends nothing. The receipt page reuses it with its own title.
+export function DemoMessageDialog({ close, text, title = 'Confirmation WhatsApp' }) {
   return (
-    <Modal title="Confirmation WhatsApp" onClose={close}>
+    <Modal title={title} onClose={close}>
       <div className="form-grid">
         <Notice kind="info">En démo, aucun message n'est envoyé.</Notice>
         <p className="subtle">Voici le message que WhatsApp afficherait, prêt à envoyer au client :</p>

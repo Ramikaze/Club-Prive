@@ -17,6 +17,7 @@ import Reservation from './pages/Reservation.jsx';
 import Products from './pages/Products.jsx';
 import Lounge, { HumidorPage } from './pages/Lounge.jsx';
 import Cash from './pages/Cash.jsx';
+import Ticket from './pages/Ticket.jsx';
 import Expenses from './pages/Expenses.jsx';
 import Treasury from './pages/Treasury.jsx';
 import Ledger from './pages/Ledger.jsx';
@@ -148,6 +149,7 @@ export default function App() {
             <Route path="lounge" element={<Lounge />} />
             <Route path="lounge/caves/:id" element={<HumidorPage />} />
             <Route path="caisse" element={<Cash />} />
+            <Route path="caisse/ticket/:id" element={<Ticket />} />
             <Route path="depenses" element={<Expenses />} />
             <Route path="tresorerie" element={<AdminOnly><Treasury /></AdminOnly>} />
             <Route path="grand-livre" element={<AdminOnly><Ledger /></AdminOnly>} />

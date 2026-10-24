@@ -20,7 +20,7 @@ function JournalTable({ payments }) {
   if (!payments.length) return <Empty icon="wallet">Aucun encaissement sur la période.</Empty>;
   return (
     <div className="table-wrap"><table className="table stack-sm">
-      <thead><tr><th>Date</th><th>N°</th><th>Membre</th><th>Moyen</th><th>Ventilation</th><th className="num">Total</th><th>Par</th></tr></thead>
+      <thead><tr><th>Date</th><th>N°</th><th>Membre</th><th>Moyen</th><th>Ventilation</th><th className="num">Total</th><th>Par</th><th><span className="sr-only">Ticket</span></th></tr></thead>
       <tbody>{payments.map((p) => (
         <tr key={p.id}>
           <td data-label="Date" className="nowrap">{dateTime(p.paid_at)}</td>
@@ -30,6 +30,7 @@ function JournalTable({ payments }) {
           <td data-label="Ventilation"><Ventilation byAccount={p.by_account} /></td>
           <td data-label="Total" className="num"><strong>{money(p.amount)}</strong></td>
           <td data-label="Par">{p.created_by_name ?? ''}</td>
+          <td className="num"><Link className="btn btn-sm" to={`/caisse/ticket/${p.id}`}>Ticket</Link></td>
         </tr>
       ))}</tbody>
     </table></div>

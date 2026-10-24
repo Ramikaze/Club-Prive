@@ -844,6 +844,48 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .ticket-public-form input { font-family: var(--mono); text-transform: uppercase; }
 .ticket-public-form input::placeholder { text-transform: none; }
 
+/* ------------------------------------------------------------------ cash receipt (staff page) */
+
+/* The paper: an 80 mm roll whose printable column is 72 mm, black on white in both themes. The screen preview
+   and the printout are the same element, so what is seen is what comes out. */
+.ticket-stage { display: flex; justify-content: center; padding: 8px 0 28px; }
+.ticket-page .notice { margin-bottom: 12px; }
+.ticket-page .card { margin-top: 16px; }
+.ticket-sheet {
+  position: relative; box-sizing: border-box; width: 72mm; max-width: 100%; padding: 4mm 2mm; overflow: hidden;
+  background: #fff; color: #000; font: 10pt/1.35 Arial, Helvetica, sans-serif;
+  box-shadow: var(--shadow-lg); -webkit-print-color-adjust: exact; print-color-adjust: exact; overflow-wrap: anywhere;
+}
+.ticket-sheet p, .ticket-sheet h2, .ticket-sheet dl, .ticket-sheet ul { margin: 0; padding: 0; }
+.ts-head { text-align: center; padding-bottom: 2mm; }
+.ts-logo { display: block; width: 46mm; height: auto; margin: 0 auto 1.5mm; color: #000; }
+.ts-club { font: 700 11pt/1.2 Arial, Helvetica, sans-serif; letter-spacing: 0; }
+.ts-header { margin-top: 1mm; font-size: 9pt; white-space: pre-line; }
+.ts-title { text-align: center; padding: 1.5mm 0; border-top: 1px dashed #000; border-bottom: 1px dashed #000; }
+.ts-title strong { display: block; font-size: 11pt; letter-spacing: 0.04em; }
+.ts-copy { display: inline-block; margin-top: 1mm; padding: 0 2mm; border: 1.5px solid #000; font-weight: 700; font-size: 10pt; text-transform: uppercase; }
+.ts-facts { display: grid; gap: 0.8mm; padding: 2mm 0; }
+.ts-facts > div { display: flex; justify-content: space-between; gap: 3mm; align-items: baseline; }
+.ts-facts dt { flex: none; }
+.ts-facts dd { margin: 0; text-align: right; font-weight: 700; }
+.ts-lines { list-style: none; display: grid; gap: 1.2mm; padding: 2mm 0; border-top: 1px dashed #000; }
+.ts-lines li { display: flex; justify-content: space-between; gap: 3mm; align-items: baseline; }
+.ts-amount { flex: none; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ts-total { display: flex; justify-content: space-between; gap: 3mm; align-items: baseline; padding: 1.5mm 0; border-top: 2px solid #000; border-bottom: 1px dashed #000; font-size: 12pt; }
+.ts-total strong { font-size: 15pt; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ts-refunds { padding: 1.5mm 0; border-bottom: 1px dashed #000; font-weight: 700; }
+.ts-verify { display: grid; justify-items: center; gap: 1mm; padding: 3mm 0 2mm; text-align: center; }
+.ts-qr { width: 34mm; height: 34mm; display: block; }
+.ts-code { font: 700 11pt/1.2 ui-monospace, Menlo, Consolas, monospace; letter-spacing: 0.08em; }
+.ts-footer { padding-top: 2mm; border-top: 1px dashed #000; text-align: center; white-space: pre-line; }
+.ts-demo { margin: 1mm 0 2mm; padding: 1.5mm; border: 2px solid #000; text-align: center; font-weight: 800; letter-spacing: 0.06em; }
+.ts-demo:last-child { margin: 2mm 0 0; }
+/* A diagonal mark across the demo paper: faint enough to read the lines, plain enough to copy as a fake. */
+.ticket-sheet:has(.ts-demo)::after {
+  content: "DÉMO — SANS VALEUR"; position: absolute; top: 50%; left: 50%; width: 120%; text-align: center;
+  transform: translate(-50%, -50%) rotate(-35deg); font-size: 20pt; font-weight: 900; color: rgba(0, 0, 0, 0.16); pointer-events: none;
+}
+
 /* ------------------------------------------------------------------ print */
 
 @media print {
@@ -853,4 +895,11 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
   main { padding: 0; }
   .member-card { box-shadow: none; width: 85.6mm; height: 54mm; max-width: none; padding: 4.5mm 5.5mm; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .member-card .mc-qr { width: 15.5mm; height: 15.5mm; padding: 0.8mm; }
+
+  /* The receipt page (body class set by the page, with the 80 mm @page): only the paper prints, centred in
+     the roll's printable column, without the demo frame and watermark the shell would draw over it. */
+  body.print-ticket main { max-width: none; margin: 0; }
+  body.print-ticket .shell.is-demo::before, body.print-ticket .demo-watermark { display: none !important; }
+  body.print-ticket .ticket-stage { display: block; padding: 0; }
+  body.print-ticket .ticket-sheet { width: 72mm; margin: 0 auto; box-shadow: none; break-inside: avoid; }
 }

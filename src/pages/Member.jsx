@@ -224,7 +224,8 @@ function MemberDetail({ m, reload }) {
               <div className="list-item" key={p.id}>
                 <div className="grow"><div className="title">{money(p.amount)} — {p.method}</div>
                   <div className="meta">{dateTime(p.paid_at)}{p.reservation_id ? <> · <Link to={`/reservations/${p.reservation_id}`}>réservation n° {p.reservation_id}</Link></> : ' · abonnement'}</div></div>
-                <span className="chip chip-ok">n° {p.id}</span></div>
+                <span className="chip chip-ok">n° {p.id}</span>
+                <Link className="btn btn-sm" to={`/caisse/ticket/${p.id}`}>Ticket</Link></div>
             ))}</div>
           ) : <Empty icon="wallet">Aucun paiement.</Empty>}
         </section>
