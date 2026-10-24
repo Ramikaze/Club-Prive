@@ -9,7 +9,7 @@ import { text, int, toId, flag, frDate } from './validate.js';
 import { ledgerMethods, DEFAULT_CATEGORIES } from './ledger.js';
 import { loungeMethods } from './lounge.js';
 import { seedDemo } from './seed.js';
-import { newTicketCode, formatTicketNumber, normalizeTicketCode, memberInitials } from '../shared/ticket.js';
+import { newTicketCode, formatTicketNumber, normalizeTicketCode, memberInitials, TICKET_CODE_LENGTH } from '../shared/ticket.js';
 import { timingSafeEqual } from './auth.js';
 import { decodePhoto } from './photos.js';
 import {
@@ -2261,8 +2261,11 @@ export class Club {
     const p = this.ticketPaymentRow(id);
     const encoder = new TextEncoder();
     const given = encoder.encode(normalizeTicketCode(code));
-    const stored = encoder.encode(p?.ticket_code ?? '0'.repeat(given.length));
-    if (!timingSafeEqual(given, stored) || !p) return null;
+    // Only a full-length code can open a ticket: an empty or short one (`----` normalizes to nothing) must not
+    // match a payment that has no code. When any check fails the comparison still runs, against a dummy code.
+    const valid = Boolean(p) && given.length === TICKET_CODE_LENGTH && p.ticket_code?.length === TICKET_CODE_LENGTH;
+    const stored = encoder.encode(valid ? p.ticket_code : '0'.repeat(given.length));
+    if (!timingSafeEqual(given, stored) || !valid) return null;
     const lines = this.all(
       `SELECT c.label, c.quantity, pa.amount FROM payment_allocations pa JOIN charges c ON c.id = pa.charge_id
        WHERE pa.payment_id = ? ORDER BY pa.id`, p.id,

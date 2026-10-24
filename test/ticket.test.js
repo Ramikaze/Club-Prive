@@ -179,6 +179,29 @@ test('faux ticket : mauvais code et identifiant inconnu donnent la même répons
   assert.deepEqual(junkId.data, wrongCode.data);
 });
 
+test('paiement sans code : un code vide ou court ne l\u2019ouvre jamais, même réponse que les autres échecs', async () => {
+  const visitor = new Client(server);
+  const noCode = await collectWithCharge('SansCode'); // a payment of its own: the other tests keep their code
+  const id = noCode.payment.id;
+  const reference = await visitor.call('GET', `/api/tickets/${id}/AAAA-AAAA-AAAA`, undefined, from('10.0.1.1'));
+  assert.equal(reference.status, 404);
+  server.db.run('UPDATE payments SET ticket_code = NULL WHERE id = ?', id);
+  try {
+    for (const [ip, code] of [['10.0.1.2', '----'], ['10.0.1.4', 'AAAA-AAAA-AAAA'], ['10.0.1.5', 'AAAA-AAAA']]) {
+      const r = await visitor.call('GET', `/api/tickets/${id}/${code}`, undefined, from(ip));
+      assert.equal(r.status, 404, `code « ${code} »`);
+      assert.deepEqual(r.data, reference.data);
+    }
+    // No code at all does not even reach the route (generic 404).
+    assert.equal((await visitor.call('GET', `/api/tickets/${id}/`, undefined, from('10.0.1.3'))).status, 404);
+    // The failure still counts for the throttle: the 6th empty attempt from one address is locked out.
+    for (let i = 0; i < 5; i += 1) assert.equal((await visitor.call('GET', `/api/tickets/${id}/----`, undefined, from('10.0.1.6'))).status, 404);
+    assert.equal((await visitor.call('GET', `/api/tickets/${id}/----`, undefined, from('10.0.1.6'))).status, 429);
+  } finally {
+    server.db.run('UPDATE payments SET ticket_code = ? WHERE id = ?', 'ZZZZZZZZZZZZ', id);
+  }
+});
+
 test('limitation : 5 mauvais codes, la 6e demande répond 429 même avec le bon code', async () => {
   const visitor = new Client(server);
   const { payment } = numbered;

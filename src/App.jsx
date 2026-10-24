@@ -1,6 +1,6 @@
 // Boot (session check), sign-in, then the routed application. Every rule is enforced by the server;
 // the admin guard here only avoids showing pages the server would refuse.
-import { Component, useEffect, useState } from 'react';
+import { Component, useEffect, useRef, useState } from 'react';
 import { HashRouter, Routes, Route, Link } from 'react-router-dom';
 import AppShell from './components/layout/AppShell.jsx';
 import { DialogRoot, closeAllDialogs } from './components/ui/Modal.jsx';
@@ -115,10 +115,18 @@ export default function App() {
       closeAllDialogs();
       useStore.getState().signOut();
     });
-    boot();
   }, []);
+  // The session is read once, but not while the public receipt check is showing: a visitor has no session, so
+  // the 401 would sign out and retitle the tab. It runs as soon as the visitor leaves that page.
+  const isPublic = isPublicTicketHash(hash);
+  const booted = useRef(false);
+  useEffect(() => {
+    if (isPublic || booted.current) return;
+    booted.current = true;
+    boot();
+  }, [isPublic]);
 
-  if (isPublicTicketHash(hash)) return <><PublicTicket hash={hash} /><Toasts /></>;
+  if (isPublic) return <><PublicTicket hash={hash} /><Toasts /></>;
   if (status === 'boot') return <div className="boot">Chargement…</div>;
   if (status === 'offline') {
     // The server answered and refused (a 4xx, such as a conflict while the demo fills for the first time):

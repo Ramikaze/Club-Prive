@@ -36,7 +36,7 @@ function setRollLength() {
   style.textContent = `@page { size: 80mm ${height}mm; margin: 0; }`;
 }
 
-const KIND_LABEL = { impression: 'Impression demandée', whatsapp: 'Envoi WhatsApp' };
+const KIND_LABEL = { impression: 'Impression demandée', whatsapp: 'WhatsApp' };
 
 // The text sent on WhatsApp for one copy: the same content as the sheet. The demo has no verification link.
 function whatsAppText(ticket, copyNo) {
@@ -231,8 +231,8 @@ export default function Ticket() {
   const state = useLoad(() => api.get(`/api/payments/${id}/ticket`), [id]);
 
   // The roll size (@page) applies to the whole printout and cannot be limited to a class, so it exists only
-  // while this page is open: the member card keeps its own page size (its length is set at print time, see
-  // setRollLength). The body class scopes the page's other print rules in club.css.
+  // while this page is open: the member card keeps its own page size (the roll's length is set at print time,
+  // see setRollLength). The body class scopes the page's other print rules in club.css.
   useEffect(() => {
     document.body.classList.add('print-ticket');
     const style = document.createElement('style');

@@ -2,6 +2,7 @@
 // or sent on WhatsApp) over a period, with who did it. A receipt that came out 3 times or more is flagged.
 import { Link, useNavigate } from 'react-router-dom';
 import { Empty, Loaded, Notice, PageHead } from '../components/ui/ui.jsx';
+import { copyLabel } from '../components/ui/TicketSheet.jsx';
 import PeriodPicker, { usePeriod } from '../components/ui/PeriodPicker.jsx';
 import { api, qs } from '../lib/api.js';
 import { dateTime, money } from '../lib/format.js';
@@ -28,7 +29,7 @@ function EventsTable({ events }) {
           <td data-label="Montant" className="num">{money(e.amount)}</td>
           <td data-label="Type">{KIND_LABEL[e.kind] ?? e.kind}</td>
           <td data-label="Exemplaire">
-            {e.copy_no === 1 ? 'Original' : `Duplicata n°${e.copy_no}`}
+            {copyLabel(e.copy_no)}
             {e.copies_total >= FLAG_FROM && <> <span className="chip chip-warn">{FLAG_FROM} sorties ou plus</span></>}
           </td>
           <td data-label="Par">{e.user_name ?? ''}</td>
