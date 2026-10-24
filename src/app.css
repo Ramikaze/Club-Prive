@@ -741,3 +741,37 @@
 
 .member-choice { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .member-choice .btn[aria-pressed="true"] { background: var(--bronze); border-color: var(--bronze); color: var(--on-bronze); }
+
+/* ------------------------------------------------------------------ live rooms (dashboard)
+   One tile per room, read top to bottom: name and status, who is in it and when, the timer, what was served,
+   then the action. A busy room carries a bronze bar on its left, a free one stays quiet. */
+
+.live-rooms { display: grid; gap: 12px; }
+.live-room {
+  display: grid; gap: 12px; padding: 14px 16px; border-radius: var(--radius-sm);
+  background: var(--surface); border: 1px solid var(--border);
+}
+.live-room.is-busy { border-left: 4px solid var(--bronze); }
+.live-room.is-busy:has(.notice-ending) { border-color: var(--ending-line); }
+.live-room-head { display: flex; align-items: center; gap: 6px 12px; flex-wrap: wrap; }
+.live-room-name { font-weight: 650; font-size: 1.02rem; color: var(--text); text-decoration: none; }
+.live-room-name:hover { text-decoration: underline; }
+.live-room-cap { display: inline-flex; align-items: center; gap: 4px; color: var(--text-3); font-size: 0.82rem; }
+.live-room-head .chip { margin-left: auto; }
+.live-room-guest { display: grid; gap: 4px; }
+.live-room-member { font-size: 1.15rem; font-weight: 650; color: var(--text); text-decoration: none; }
+.live-room-member:hover { text-decoration: underline; }
+.live-room-facts, .live-room-next { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; color: var(--text-2); font-size: 0.9rem; margin: 0; }
+.live-room-facts span, .live-room-next { display: inline-flex; align-items: center; gap: 6px; }
+.live-room-label {
+  font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-3); margin-bottom: 6px;
+}
+.live-room-items ul { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.live-room-items li {
+  padding: 3px 10px; border-radius: 999px; font-size: 0.84rem;
+  background: var(--bronze-soft); color: var(--bronze-text);
+}
+.live-room-items p { margin: 0; font-size: 0.88rem; }
+.live-room-actions { display: flex; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
+@media (max-width: 599px) { .live-room-actions .btn { flex: 1; justify-content: center; } }

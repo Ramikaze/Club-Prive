@@ -4,7 +4,7 @@ import { useLoad } from '../lib/hooks.js';
 import { money, fmtDuration, dayLabel } from '../lib/format.js';
 import { useIsAdmin } from '../store/useStore.js';
 import Icon from '../components/ui/Icon.jsx';
-import { TimeInRoom, isRunning } from '../components/ui/SessionTimer.jsx';
+import SessionTimer, { isRunning } from '../components/ui/SessionTimer.jsx';
 import EndingSoonNotice from '../components/ui/EndingSoonNotice.jsx';
 import { Chip, AccountTag, Empty, Loaded, PageHead, Segmented } from '../components/ui/ui.jsx';
 import {
@@ -55,6 +55,63 @@ function TodaySessionRow({ r, onReload }) {
         <Chip group="res" value={r.status} />
       </div>
     </div>
+  );
+}
+
+// One room of the live board: name and status on top, then who is in it, the timer and what was served.
+function LiveRoom({ rm, bizDay, onReload }) {
+  const r = rm.current;
+  const items = r?.items_summary ? r.items_summary.split(' · ') : [];
+  return (
+    <article className={`live-room ${r ? 'is-busy' : 'is-free'}`}>
+      <header className="live-room-head">
+        <Link className="live-room-name" to="/salles">{rm.name}</Link>
+        <span className="live-room-cap"><Icon name="users" size={14} /> {rm.capacity} places</span>
+        <span className={`chip ${r ? 'chip-warn' : 'chip-ok'}`}>{r ? 'Occupée' : 'Disponible'}</span>
+      </header>
+
+      {r ? (
+        <>
+          <div className="live-room-guest">
+            <Link className="live-room-member" to={`/reservations/${r.id}`}>{r.member_name}</Link>
+            <div className="live-room-facts">
+              <span><Icon name="users" size={14} /> {r.party_size || 1} pers.</span>
+              <span><Icon name="clock" size={14} /> {r.start_time} – {r.end_time}</span>
+            </div>
+          </div>
+          {isRunning(r) && <SessionTimer reservation={r} compact />}
+          <div className="live-room-items">
+            <div className="live-room-label">Consommations</div>
+            {items.length
+              ? <ul>{items.map((it, i) => <li key={i}>{it}</li>)}</ul>
+              : <p className="subtle">Rien de servi pour l’instant</p>}
+          </div>
+          <EndingSoonNotice reservation={r} onExtended={onReload} />
+          <div className="live-room-actions">
+            <button type="button" className="btn btn-sm btn-primary" onClick={() => openConsumptionDialog(r, onReload)}>
+              <Icon name="plus" /> Bouteille / Cigare
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="live-room-next">
+            {rm.next
+              ? <><Icon name="clock" size={14} /> Prochaine arrivée à <strong>{rm.next.start_time}</strong> · {rm.next.member_name}</>
+              : 'Libre, aucune réservation à venir'}
+          </p>
+          <div className="live-room-actions">
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => openBookingDialog({ date: bizDay, room_id: rm.id, start_now: true }, onReload)}
+            >
+              Installer un client
+            </button>
+          </div>
+        </>
+      )}
+    </article>
   );
 }
 
@@ -139,49 +196,10 @@ export default function Dashboard() {
                     <h2>État des salles en direct</h2>
                     <Link className="btn btn-sm" to="/salles"><Icon name="rooms" /> Gérer les salles</Link>
                   </div>
-                  <div className="list">
-                    {roomsStatus.map((rm) => {
-                      const r = rm.current;
-                      return (
-                        <div key={rm.id} className="list-item list-item-interactive">
-                          <Link className="list-item-main" to="/salles">
-                            <div className="grow">
-                              <div className="title">
-                                {rm.name}{' '}
-                                <span className="subtle" style={{ fontWeight: 400 }}>· jusqu’à {rm.capacity} pers.</span>
-                              </div>
-                              <div className="meta">
-                                {r
-                                  ? <>{`${r.member_name} · ${r.party_size || 1} pers. · ${r.start_time} – ${r.end_time}${r.items_summary ? ` · ${r.items_summary}` : ''}`}{isRunning(r) && <> · <TimeInRoom reservation={r} /></>}</>
-                                  : (rm.next ? `Prochaine : ${rm.next.start_time} (${rm.next.member_name})` : 'Immédiatement disponible')}
-                              </div>
-                            </div>
-                          </Link>
-                          <div className="res-row-actions">
-                            {r ? (
-                              <>
-                                <button type="button" className="btn btn-sm btn-primary" onClick={() => openConsumptionDialog(r, reload)}>
-                                  <Icon name="plus" /> Bouteille / Cigare
-                                </button>
-                                <span className="chip chip-warn">Occupée</span>
-                              </>
-                            ) : (
-                              <>
-                                <button
-                                  type="button"
-                                  className="btn btn-sm"
-                                  onClick={() => openBookingDialog({ date: d.biz_day, room_id: rm.id, start_now: true }, reload)}
-                                >
-                                  Installer
-                                </button>
-                                <span className="chip chip-ok">Disponible</span>
-                              </>
-                            )}
-                          </div>
-                          {r && <EndingSoonNotice reservation={r} onExtended={reload} />}
-                        </div>
-                      );
-                    })}
+                  <div className="live-rooms">
+                    {roomsStatus.map((rm) => (
+                      <LiveRoom key={rm.id} rm={rm} bizDay={d.biz_day} onReload={reload} />
+                    ))}
                   </div>
                 </section>
 
