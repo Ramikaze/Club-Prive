@@ -9,6 +9,7 @@ import { text, int, toId, flag, frDate } from './validate.js';
 import { ledgerMethods, DEFAULT_CATEGORIES } from './ledger.js';
 import { loungeMethods } from './lounge.js';
 import { seedDemo } from './seed.js';
+import { newTicketCode } from '../shared/ticket.js';
 import { decodePhoto } from './photos.js';
 import {
   localParts, localToUtcMs, addDays, addMonths, daysBetween, monthsElapsed, isValidDate, isValidTimeZone, parseHHMM,
@@ -36,7 +37,8 @@ const SESSION_DAYS = 14;
 // categories are kept.
 const WIPE_ORDER = [
   'humidor_readings', 'humidors',
-  'idempotency_keys', 'payment_allocations', 'refunds', 'stock_movements', 'credit_movements', 'charges', 'payments',
+  'idempotency_keys', 'payment_allocations', 'refunds', 'stock_movements', 'credit_movements', 'charges',
+  'ticket_events', 'payments',
   'reservation_attendees', 'reservations', 'cards', 'subscriptions', 'members', 'product_photos', 'products',
   'ledger_entries', 'closed_periods', 'audit_log',
 ];
@@ -58,6 +60,9 @@ export function defaultSettings() {
     // The club's WhatsApp number, as an administrator types it. It closes the booking confirmation sent to members
     // (« Pour toute question : … ») and is left out of the message while empty. Set in Settings, never in the code.
     club_whatsapp: '',
+    // Free text printed above and below the items of the cash receipt (4 and 2 lines at most).
+    ticket_header: '',
+    ticket_footer: 'Merci de votre visite',
     currency: { label: 'FCFA', decimals: 0 },
     timezone: 'Africa/Brazzaville',
     hours: { open: '06:00' }, // start of the business day; the room can be booked at any hour
@@ -174,8 +179,24 @@ export class Club {
     );
   }
 
+  // A payment gets its check code when it is recorded; this gives one to those recorded before codes existed.
+  fillTicketCodes() {
+    for (const { id } of this.all('SELECT id FROM payments WHERE ticket_code IS NULL')) {
+      this.run('UPDATE payments SET ticket_code = ? WHERE id = ?', this.freshTicketCode(), id);
+    }
+  }
+
+  // A code no payment holds yet (a collision is a 1 in 31^12 event, but the unique index must never fail).
+  freshTicketCode() {
+    for (;;) {
+      const code = newTicketCode((n) => crypto.getRandomValues(new Uint8Array(n)));
+      if (!this.get('SELECT 1 AS x FROM payments WHERE ticket_code = ?', code)) return code;
+    }
+  }
+
   bootstrap() {
     this.tx(() => {
+      this.fillTicketCodes();
       for (const [key, value] of Object.entries(defaultSettings())) {
         this.run('INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, ?)', key, JSON.stringify(value), this.nowIso());
       }
@@ -290,6 +311,15 @@ export class Club {
       case 'club_whatsapp':
         // Free text, trimmed; empty clears the number.
         return text(v, 'Numéro WhatsApp du club', { max: 30 }) ?? '';
+      case 'ticket_header':
+      case 'ticket_footer': {
+        const header = key === 'ticket_header';
+        const out = text(v, header ? 'En-tête du ticket' : 'Pied du ticket', { max: header ? 200 : 120 }) ?? '';
+        if (out.split('\n').length > (header ? 4 : 2)) {
+          throw invalid(`${header ? 'En-tête' : 'Pied'} du ticket : ${header ? 4 : 2} lignes au maximum.`);
+        }
+        return out;
+      }
       case 'currency': {
         if (!v || typeof v !== 'object') throw invalid('Devise invalide.');
         return {
@@ -1237,7 +1267,16 @@ export class Club {
       notes: r.notes, created_at: r.created_at, created_by_name: r.created_by_name ?? null,
       started_at: r.started_at, finished_at: r.finished_at, cancelled_at: r.cancelled_at, cancel_reason: r.cancel_reason,
       due_amount: r.due_amount ?? 0, billed_amount: r.billed_amount ?? 0,
+      card_credit_min: r.status === 'en_cours' ? this.cardCreditAtEntry(r) : null,
     };
+  }
+
+  // Time credit the holder's card carried into a running session: the minutes this booking took from the
+  // card plus what the card still has free. The room view counts it down from the arrival.
+  cardCreditAtEntry(r) {
+    const sub = r.subscription_id ? this.get('SELECT * FROM subscriptions WHERE id = ?', r.subscription_id) : null;
+    const free = sub ? this.credit(sub, this.bizToday()).available : 0;
+    return (r.included_minutes ?? 0) + free;
   }
 
   // The bookings that strictly overlap [startMs, endMs). One that ends after startMs began after startMs less
@@ -2073,7 +2112,7 @@ export class Club {
     return {
       id: p.id, member_id: p.member_id, member_name: p.first_name ? `${p.first_name} ${p.last_name}` : undefined,
       member_no: p.member_no, reservation_id: p.reservation_id, amount: p.amount, method: p.method, reference: p.reference,
-      paid_at: p.paid_at, created_by_name: p.created_by_name ?? null, allocations, by_account: byAccount,
+      paid_at: p.paid_at, ticket_code: p.ticket_code ?? null, created_by_name: p.created_by_name ?? null, allocations, by_account: byAccount,
     };
   }
 
@@ -2104,8 +2143,8 @@ export class Club {
     const reservationIds = new Set(charges.map((c) => c.reservation_id));
     const reservationId = reservationIds.size === 1 ? [...reservationIds][0] : null;
     const paymentId = this.insert(
-      'INSERT INTO payments (member_id, reservation_id, amount, method, reference, paid_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      charges[0].member_id, reservationId, total, method, reference, this.nowIso(), actor.id,
+      'INSERT INTO payments (member_id, reservation_id, amount, method, reference, paid_at, created_by, ticket_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      charges[0].member_id, reservationId, total, method, reference, this.nowIso(), actor.id, this.freshTicketCode(),
     );
     for (const c of charges) {
       this.run('INSERT INTO payment_allocations (payment_id, charge_id, account, amount) VALUES (?, ?, ?, ?)', paymentId, c.id, c.account, c.amount);
