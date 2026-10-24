@@ -179,6 +179,7 @@ function AdminCash() {
           title="Encaissements & Notes"
           lead={`${from === to ? dayLabel(from, 'title') : `Du ${dayLabel(from, 'medium')} au ${dayLabel(to, 'medium')}`}`}
           tour="cash"
+          actions={<Link className="btn" to="/caisse/historique-tickets"><Icon name="receipt" /> Historique des tickets</Link>}
         />
         <div className="toolbar">
           <Segmented label="Période" value={p} options={PRESETS} onChange={(k) => setQuery({ p: k, compte: account })} />

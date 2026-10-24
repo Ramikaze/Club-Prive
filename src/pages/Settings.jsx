@@ -432,6 +432,42 @@ function RulesSection({ save }) {
   );
 }
 
+// Free text printed on the cash receipt; the counters show what is left before the server's limits.
+const TICKET_LIMITS = { header: { chars: 200, lines: 4 }, footer: { chars: 120, lines: 2 } };
+
+function TicketTextField({ name, label, rows, limit, defaultValue, help }) {
+  const [value, setValue] = useState(defaultValue);
+  const lines = value ? value.split('\n').length : 0;
+  const over = value.length > limit.chars || lines > limit.lines;
+  return (
+    <label className="field"><span>{label}</span>
+      <textarea name={name} rows={rows} value={value} onChange={(e) => setValue(e.target.value)} aria-invalid={over || undefined} />
+      <span className={`help${over ? ' is-over' : ''}`} aria-live="polite">
+        {value.length} / {limit.chars} caractères · {lines} / {limit.lines} lignes. {help}</span></label>
+  );
+}
+
+function TicketSection({ save }) {
+  const s = useSettings();
+  // The form sends line breaks as CRLF: the server counts plain LF.
+  const clean = (t) => String(t ?? '').replace(/\r\n?/g, '\n');
+  const { busy, error, onSubmit } = useFormAction((v) => save({
+    ticket_header: clean(v.ticket_header), ticket_footer: clean(v.ticket_footer),
+  }));
+  return (
+    <section className="card settings-section" id="sec-ticket">
+      <div className="card-head"><h2>Ticket de caisse</h2><span className="subtle">textes imprimés sur le ticket</span></div>
+      <form className="form-grid" onSubmit={onSubmit} noValidate>
+        <TicketTextField name="ticket_header" label="En-tête du ticket" rows={4} limit={TICKET_LIMITS.header}
+          defaultValue={s.ticket_header ?? ''} help="Sous le nom du club (adresse, téléphone…). Vide : rien." />
+        <TicketTextField name="ticket_footer" label="Pied du ticket" rows={2} limit={TICKET_LIMITS.footer}
+          defaultValue={s.ticket_footer ?? ''} help="Dernière ligne du ticket." />
+        <FormFooter busy={busy} error={error} />
+      </form>
+    </section>
+  );
+}
+
 function PaymentsSection({ save }) {
   const s = useSettings();
   const { busy, error, onSubmit } = useFormAction((v) => save({
@@ -691,6 +727,7 @@ function SettingsPage() {
             <ClubSection key={`club-${version}`} save={save} />
             <HoursSection key={`hours-${version}`} save={save} />
             <RulesSection key={`rules-${version}`} save={save} />
+            <TicketSection key={`ticket-${version}`} save={save} />
           </>
         )}
 
