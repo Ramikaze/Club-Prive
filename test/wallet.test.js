@@ -100,6 +100,11 @@ test('trésorerie : la recharge entre en caisse le jour même, sans être une re
   const salesAfter = ok(await admin.get(`/api/finance/summary?from=${today}`));
   assert.equal(salesAfter.total.collected, sales.total.collected);
   assert.equal(afterwards.result.revenue, before.result.revenue);
+  // « Encaissements & Notes » shows it apart, as a recharge, by method.
+  assert.equal(salesAfter.recharges.collected, sales.recharges.collected + 20000 * UM);
+  assert.equal(salesAfter.recharges.n, sales.recharges.n + 1);
+  const especes = (s) => s.recharges.methods.find((x) => x.method === 'Espèces')?.total ?? 0;
+  assert.equal(especes(salesAfter), especes(sales) + 20000 * UM);
   // The general ledger agrees with the treasury.
   const book = ok(await admin.get(`/api/ledger/book?from=${today}&to=${today}`));
   assert.equal(book.closing, afterwards.total.closing);

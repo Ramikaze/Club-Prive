@@ -3147,7 +3147,20 @@ export class Club {
          WHERE paid_at >= ? AND paid_at < ? AND kind NOT IN ('recharge', 'repas') AND card_amount > 0
        ) GROUP BY method ORDER BY total DESC`, a, b, CARD_METHOD, CARD_METHOD, a, b,
     );
-    return { from, to, accounts, total, methods };
+    // Money received on the members' cards: cash in the till, but not revenue yet (it becomes revenue when spent),
+    // so it is shown apart and never added to the accounts' totals. A cancelled recharge counts on its cancel day.
+    const rechargeMethods = this.all(
+      `SELECT method, SUM(amount) AS total, COUNT(*) AS n FROM payments
+       WHERE kind = 'recharge' AND paid_at >= ? AND paid_at < ? GROUP BY method ORDER BY total DESC`, a, b,
+    );
+    const collected = rechargeMethods.reduce((sum, x) => sum + x.total, 0);
+    const { cancelled } = this.get(
+      "SELECT COALESCE(SUM(amount), 0) AS cancelled FROM payments WHERE kind = 'recharge' AND cancelled_at >= ? AND cancelled_at < ?", a, b,
+    );
+    const recharges = {
+      collected, cancelled, net: collected - cancelled, n: rechargeMethods.reduce((sum, x) => sum + x.n, 0), methods: rechargeMethods,
+    };
+    return { from, to, accounts, total, methods, recharges };
   }
 
   journal(from, to) {

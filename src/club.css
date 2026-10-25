@@ -965,3 +965,7 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 
 /* Picture of a ticket before it is shared on WhatsApp. */
 .ticket-image-preview { display: block; max-width: 100%; max-height: 55vh; margin: 0 auto; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+
+/* Recharges of the members' cards, shown apart from the sales. */
+.recharges-card .card-head h2 { display: inline-flex; align-items: center; gap: 8px; }
+.recharges-card .card-head .big { font-size: 1.4rem; font-weight: 700; }

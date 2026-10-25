@@ -89,6 +89,33 @@ function AccountCard({ a, total = false }) {
   );
 }
 
+// The money members put on their card: received in the till, but it becomes revenue only when spent, so it is
+// shown apart and is not part of the total above.
+function RechargesCard({ r }) {
+  return (
+    <section className="card section-gap recharges-card">
+      <div className="card-head"><h2><Icon name="card" /> Recharges carte CFA</h2><span className="big">{money(r.net)}</span></div>
+      <dl className="calc">
+        <div><dt>Encaissé sur les cartes <span className="subtle">({r.n} recharge{r.n > 1 ? 's' : ''})</span></dt><dd>{money(r.collected)}</dd></div>
+        {r.methods.map((x) => <div key={x.method}><dt className="subtle">dont {x.method}</dt><dd>{money(x.total)}</dd></div>)}
+        {r.cancelled ? <div><dt>Recharges annulées</dt><dd>−{money(r.cancelled)}</dd></div> : null}
+        <div className="total"><dt>Net reçu sur les cartes</dt><dd>{money(r.net)}</dd></div>
+      </dl>
+      <p className="subtle">Cet argent est dans la caisse ; il devient une recette quand le membre consomme, c’est pourquoi il ne s’ajoute pas au total des ventes.</p>
+    </section>
+  );
+}
+
+// The day's recharges as the manager's journal lists them (the summary is the administrator's).
+function rechargesOf(payments) {
+  const list = payments.filter((p) => p.kind === 'recharge');
+  const methods = {};
+  for (const p of list) methods[p.method] = { method: p.method, total: (methods[p.method]?.total ?? 0) + p.amount };
+  const collected = list.reduce((sum, p) => sum + p.amount, 0);
+  const cancelled = list.filter((p) => p.cancelled_at).reduce((sum, p) => sum + p.amount, 0);
+  return { collected, cancelled, net: collected - cancelled, n: list.length, methods: Object.values(methods) };
+}
+
 // The page's period: a preset, or the dates chosen in « Du » and « au » (one day or several). Chosen dates that
 // match a preset show that preset selected.
 function periodFor(query) {
@@ -127,8 +154,9 @@ function ManagerCash() {
             {Object.entries(by).map(([k, v]) => (
               <div key={k} className="account-card"><h3><i className={`dot dot-${k}`} /> {ACCOUNT_LABEL[k]}</h3><div className="big">{money(v)}</div><div className="subtle">net encaissé aujourd’hui</div></div>
             ))}
-            <div className="account-card total"><h3>Total</h3><div className="big">{money(total)}</div><div className="calc-line"><span>{journal.payments.length} encaissement(s)</span><span /></div></div>
+            <div className="account-card total"><h3>Total</h3><div className="big">{money(total)}</div><div className="calc-line"><span>{journal.payments.filter((p) => p.kind !== 'recharge').length} encaissement(s)</span><span /></div></div>
           </div>
+          <RechargesCard r={rechargesOf(journal.payments)} />
           <div className="grid">
             <section className="card"><div className="card-head"><h2>Reste à encaisser</h2></div><OpenTable groups={open} onPay={(g) => payGroup(g, state.reload)} /></section>
             <section className="card"><div className="card-head"><h2>Encaissements du jour</h2></div><JournalTable payments={journal.payments} /></section>
@@ -198,6 +226,7 @@ function AdminCash() {
           {sum.accounts.map((a) => <AccountCard key={a.account} a={a} />)}
           <AccountCard a={sum.total} total />
         </div>
+        <RechargesCard r={sum.recharges} />
 
         <div className="grid-2 section-gap">
           <section className="card">
