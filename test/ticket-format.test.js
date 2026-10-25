@@ -131,7 +131,7 @@ test('ticketWhatsAppText : part de la carte, reste, solde, crédit temps et annu
   const mixed = ticketWhatsAppText({ ...base, cardAmount: 2500000, balance: 0, timeAvailable: 90 });
   assert.ok(!mixed.includes('Payé : Espèces'));
   assert.ok(mixed.includes('Payé par carte membre : 25000 FCFA\nReste payé (Espèces) : 35000 FCFA\n'));
-  assert.ok(mixed.includes('Solde carte : 0 FCFA\nCrédit temps : 1 h 30 disponibles'));
+  assert.ok(mixed.includes('Solde carte : 0 FCFA\nCrédit temps (à ce jour) : 1 h 30 disponibles'));
   const allCard = ticketWhatsAppText({ ...base, method: 'Carte membre', cardAmount: 6000000, balance: 1000000 });
   assert.ok(allCard.includes('Payé par carte membre : 60000 FCFA\n'));
   assert.ok(!allCard.includes('Reste payé'));

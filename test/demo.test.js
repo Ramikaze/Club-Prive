@@ -885,6 +885,8 @@ test('carte de débit en démo : recharge, paiement par la carte et renouvelleme
   assert.ok(plan.price > 0 && plan.price <= 70000 * UM, String(plan.price));
   const today = demo.club.bizToday();
   const start = addDays(today, -31);
+  // This space's renewals started before that plan ended (a fresh database starts them today).
+  demo.club.run("UPDATE meta SET value = ? WHERE key = 'renewals_since'", start);
   const sub = ok(await asAdmin.post(`/api/members/${member.id}/subscriptions`, { plan_id: plan.id, start_date: start }));
   assert.ok(sub.end_date < today, sub.end_date);
   ok(await asAdmin.get('/api/dashboard'));

@@ -78,7 +78,7 @@ export default function TicketSheet({ ticket, copyNo, printedBy, printedAt }) {
       {ticket.wallet_balance_after !== null && (
         <dl className="ts-facts ts-balances">
           <div><dt>Solde carte</dt><dd>{money(ticket.wallet_balance_after)}</dd></div>
-          {ticket.time_available !== null && <div><dt>Crédit temps</dt><dd>{fmtDuration(ticket.time_available)} disponibles</dd></div>}
+          {ticket.time_available !== null && <div><dt>Crédit temps (à ce jour)</dt><dd>{fmtDuration(ticket.time_available)} disponibles</dd></div>}
         </dl>
       )}
 

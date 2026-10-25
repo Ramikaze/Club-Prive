@@ -366,7 +366,7 @@ test('salle avec abonnement : les heures de la formule d’abord, le reste payé
   const d = ok(await book(body));
   assert.equal(d.reservation.included_minutes, 120);
   assert.equal(d.reservation.paid_minutes, 60);
-  assert.equal(d.reservation.paid_by_card, 25000 * UM);
+  assert.equal(d.reservation.paid_by_card, undefined); // the card's share is read from the lines and payments
   assert.equal(d.reservation.due_amount, 0);
   assert.ok(d.reservation.subscription_id);
   assert.ok(timeLines(d).every((c) => c.status === 'payee'));
@@ -396,7 +396,6 @@ test('salle sans abonnement : réservée si payée par la carte, refusée sinon'
   assert.equal(d.reservation.subscription_id, null);
   assert.equal(d.subscription, null);
   assert.equal(d.reservation.paid_minutes, 120);
-  assert.equal(d.reservation.paid_by_card, 50000 * UM);
   assert.equal(d.reservation.due_amount, 0);
   assert.equal(balance(nora.id), 50000 * UM);
   assert.equal(server.club.get('SELECT COUNT(*) AS n FROM credit_movements WHERE reservation_id = ?', d.reservation.id).n, 0);
@@ -411,7 +410,6 @@ test('salle, solde insuffisant : la carte paie ce qu’elle a, le reste est à e
   assert.equal(q.rest_amount, 20000 * UM);
   const d = ok(await book({ member_id: member.id, date: addDays(today, 4), duration_min: 120, pay_with_card: true }));
   assert.equal(balance(member.id), 0);
-  assert.equal(d.reservation.paid_by_card, 30000 * UM);
   assert.equal(d.reservation.due_amount, 20000 * UM);
   const lines = timeLines(d);
   assert.deepEqual(lines.map((c) => [c.status, c.amount]), [['payee', 30000 * UM], ['due', 20000 * UM]]);
@@ -424,7 +422,6 @@ test('salle, solde insuffisant : la carte paie ce qu’elle a, le reste est à e
   const before = await treasury();
   const paid = ok(await book({ member_id: member.id, date: addDays(today, 5), duration_min: 120, pay_with_card: true, deposit_method: 'Espèces' }));
   assert.equal(paid.reservation.due_amount, 0);
-  assert.equal(paid.reservation.paid_by_card, 30000 * UM);
   assert.equal(balance(member.id), 0);
   assert.equal(cash(await treasury()).in, cash(before).in + 20000 * UM);
 });
@@ -465,6 +462,30 @@ test('salle 3 h ou plus : acompte et solde payés par la carte ; annulée la vei
   assert.deepEqual(timeLines(gone).map((c) => [!!c.deposit, c.status]), [[true, 'payee'], [false, 'remboursee']]);
 });
 
+test('salle annulée : seul le temps retourne sur la carte, un produit payé par la carte reste encaissé', async () => {
+  const member = await newMember('Sacha');
+  ok(await recharge(member.id, { amount: 100000 * UM, method: 'Espèces' }));
+  const booked = ok(await book({ member_id: member.id, date: addDays(today, 8), duration_min: 120, pay_with_card: true }));
+  const cigar = ok(await admin.post('/api/products', { category: 'cigare', name: 'Robusto carte', reference: 'T-ROB-C', price: 10000 * UM, initial_stock: 5 })).id;
+  const added = ok(await manager.post(`/api/reservations/${booked.reservation.id}/items`, { product_id: cigar, quantity: 1 }));
+  const item = added.charges.find((c) => c.kind === 'produit');
+  ok(await pay({ charge_ids: [item.id], card: true, method: 'Espèces' }));
+  assert.equal(balance(member.id), 40000 * UM);
+  const cancelled = ok(await manager.post(`/api/reservations/${booked.reservation.id}/cancel`, { reason: 'Changement de programme' }));
+  // The room time goes back to the card; the cigar stays paid, for a refund decided at the till as before.
+  assert.equal(cancelled.refunded_to_card, 50000 * UM);
+  assert.equal(cancelled.paid_lines_to_review, 1);
+  assert.equal(cancelled.charges.find((c) => c.id === item.id).status, 'payee');
+  assert.equal(balance(member.id), 90000 * UM);
+  assert.equal(server.club.get('SELECT stock_qty FROM products WHERE id = ?', cigar).stock_qty, 4);
+});
+
+test('séance sans abonnement : aucun crédit temps à décompter, la minuterie suit la fin de la réservation', async () => {
+  const row = server.club.reservationRow(noraBooking.id);
+  assert.equal(row.subscription_id, null);
+  assert.equal(server.club.reservationDTO({ ...row, status: 'en_cours' }).card_credit_min, null);
+});
+
 test('salle, prolongation payée par la carte : la demi-heure en plus est prise sur la carte', async () => {
   const q = ok(await manager.post(`/api/reservations/${noraBooking.id}/extend/quote`, { minutes: 30, pay_with_card: true }));
   assert.equal(q.supplement_delta, 15000 * UM);
@@ -474,7 +495,6 @@ test('salle, prolongation payée par la carte : la demi-heure en plus est prise 
   assert.equal(balance(nora.id), 35000 * UM);
   assert.equal(d.reservation.duration_min, 150);
   assert.equal(d.reservation.due_amount, 0);
-  assert.equal(d.reservation.paid_by_card, 65000 * UM);
   // The session ends normally: no plan, no credit to consume.
   const done = ok(await manager.post(`/api/reservations/${noraBooking.id}/finish`));
   assert.equal(done.reservation.status, 'terminee');
@@ -615,6 +635,12 @@ test('annulation d’un repas extérieur : réservée à un administrateur, la c
   refused(await admin.post(`/api/payments/${payment.id}/cancel-meal`, {}), 400);
   const recharged = server.club.get("SELECT id FROM payments WHERE member_id = ? AND kind = 'recharge'", member.id).id;
   refused(await admin.post(`/api/payments/${recharged}/cancel-meal`, { reason: 'Erreur de saisie' }), 409, 'PAS_UN_REPAS');
+  // The courier's expense alone cannot be cancelled: it would leave the meal paid and the card debited.
+  const expenseId = server.club.get('SELECT id FROM ledger_entries WHERE reference = ?', `ENC-${payment.id}`).id;
+  const alone = await admin.post(`/api/ledger/entries/${expenseId}/cancel`, { reason: 'Erreur de saisie' });
+  refused(alone, 409, 'DEPENSE_REPAS');
+  assert.match(alone.data.error.message, /« Annuler le repas »/);
+  assert.equal(server.club.get('SELECT status FROM ledger_entries WHERE id = ?', expenseId).status, 'active');
   const r = ok(await admin.post(`/api/payments/${payment.id}/cancel-meal`, { reason: 'Erreur de saisie' }));
   assert.equal(r.wallet.balance, 10000 * UM);
   assert.equal(balance(member.id), 10000 * UM);
@@ -819,6 +845,75 @@ test('formule annuelle : renouvelée en annuelle, à son prix', async () => {
   }
 });
 
+test('renouvellements isolés : la panne d’un membre ne bloque ni l’accueil ni les autres, et ne laisse rien', async () => {
+  const broken = await subscribed('Ulysse');
+  const fine = await subscribed('Valérie');
+  for (const { member } of [broken, fine]) ok(await recharge(member.id, { amount: 60000 * UM, method: 'Espèces' }));
+  const club = server.club;
+  const activate = club.activateSubscription;
+  const logError = console.error;
+  // Ulysse's renewal fails after its subscription and line are written: both must be rolled back.
+  club.activateSubscription = function (actor, memberId, input) {
+    const r = activate.call(this, actor, memberId, input);
+    if (memberId === broken.member.id) throw new Error('Panne simulée');
+    return r;
+  };
+  console.error = () => {};
+  const charges = () => club.get('SELECT COUNT(*) AS n FROM charges WHERE member_id = ?', broken.member.id).n;
+  const linesBefore = charges();
+  atDay(addDays(broken.end, 1));
+  try {
+    ok(await manager.get('/api/dashboard'));
+    assert.equal(subscriptionsOf(broken.member.id).length, 1);
+    assert.equal(charges(), linesBefore);
+    assert.equal(balance(broken.member.id), 60000 * UM);
+    assert.equal(subscriptionsOf(fine.member.id).length, 2);
+    assert.equal(balance(fine.member.id), 10000 * UM);
+    // The scheduled run goes on past the failing member too.
+    const run = server.api.runRenewals();
+    assert.deepEqual(run.failed, [broken.member.id]);
+    assert.equal(subscriptionsOf(broken.member.id).length, 1);
+    // Once the fault is gone, the next run renews Ulysse.
+    club.activateSubscription = activate;
+    server.api.runRenewals();
+    assert.equal(subscriptionsOf(broken.member.id).length, 2);
+    assert.equal(balance(broken.member.id), 10000 * UM);
+  } finally {
+    club.activateSubscription = activate;
+    console.error = logError;
+    club.at = null;
+  }
+});
+
+test('mise en service : une formule finie avant le début des renouvellements n’est jamais reprise sur la carte', async () => {
+  const lapsed = await subscribed('Wilfried');
+  const current = await subscribed('Xéna');
+  const since = () => server.club.get("SELECT value FROM meta WHERE key = 'renewals_since'")?.value;
+  const setSince = (day) => server.club.run("UPDATE meta SET value = ? WHERE key = 'renewals_since'", day);
+  // Set once, on the business day the database first ran this version.
+  const started = since();
+  assert.equal(started, today);
+  atDay(addDays(lapsed.end, 1));
+  try {
+    // Renewals started the day after Wilfried's plan ended: no alert, and a recharge takes nothing.
+    setSince(addDays(lapsed.end, 1));
+    assert.equal(await renewalOf(lapsed.member.id), null);
+    assert.ok(!ok(await manager.get('/api/dashboard')).renewal_alerts.some((a) => a.member_id === lapsed.member.id));
+    ok(await recharge(lapsed.member.id, { amount: 60000 * UM, method: 'Espèces' }));
+    assert.equal(subscriptionsOf(lapsed.member.id).length, 1);
+    assert.equal(balance(lapsed.member.id), 60000 * UM);
+    // A plan ending on the day renewals started is renewed as before.
+    setSince(current.end);
+    assert.equal((await renewalOf(current.member.id)).state, 'bloque');
+    ok(await recharge(current.member.id, { amount: 60000 * UM, method: 'Espèces' }));
+    assert.equal(subscriptionsOf(current.member.id).length, 2);
+    assert.equal(balance(current.member.id), 10000 * UM);
+  } finally {
+    setSince(started);
+    server.club.at = null;
+  }
+});
+
 // ---------------------------------------------------------------------------- the card's cash receipt
 
 const ticketOf = async (paymentId) => ok(await manager.get(`/api/payments/${paymentId}/ticket`)).ticket;
@@ -901,7 +996,8 @@ test('ticket d’un repas extérieur : son libellé, la part de la carte, signat
   assert.equal(t.time_available, null);
   assert.equal(t.signature_required, true);
   assert.equal(t.status, 'valide');
-  assert.deepEqual(publicOf(payment.id).lines, [{ label: 'Chez Fatou', quantity: 1, amount: 18500 * UM }]);
+  // The public page names no restaurant: the label is free text typed by the staff.
+  assert.deepEqual(publicOf(payment.id).lines, [{ label: 'Repas commandé à l’extérieur', quantity: 1, amount: 18500 * UM }]);
 
   ok(await admin.post(`/api/payments/${payment.id}/cancel-meal`, { reason: 'Erreur de saisie' }));
   const cancelled = await ticketOf(payment.id);

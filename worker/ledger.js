@@ -216,6 +216,14 @@ export const ledgerMethods = {
     const e = this.get('SELECT * FROM ledger_entries WHERE id = ?', toId(entryId, 'Opération'));
     if (!e) throw notFound('Opération');
     if (e.status !== 'active') throw conflict('DEJA_ANNULEE', 'Opération déjà annulée.');
+    // The courier's pay for an outside meal goes with the meal's payment: cancelled alone, it would leave the meal
+    // paid and the card debited. cancelOutsideMeal cancels both together.
+    if (e.category_id && this.get('SELECT name FROM categories WHERE id = ?', e.category_id)?.name === OUTSIDE_MEAL_CATEGORY) {
+      throw conflict(
+        'DEPENSE_REPAS',
+        "Cette dépense paie le livreur d'un repas commandé à l'extérieur : elle ne s'annule pas seule. Ouvrez la fiche du membre et cliquez sur « Annuler le repas » : la dépense et le paiement seront annulés ensemble, et la carte recréditée.",
+      );
+    }
     this.assertOpen(e.biz_date, 'Cette opération');
     const reason = text(input.reason, "Motif d'annulation", { required: true, min: 3, max: 300 });
     this.run(

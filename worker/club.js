@@ -109,10 +109,7 @@ const RES_SELECT = `
     cu.name AS created_by_name, au.name AS off_hours_authorized_by_name,
     (SELECT COALESCE(SUM(c.amount), 0) FROM charges c WHERE c.reservation_id = r.id AND c.status = 'due') AS due_amount,
     (SELECT COALESCE(SUM(c.amount), 0) FROM charges c WHERE c.reservation_id = r.id AND c.status IN ('due', 'payee')) AS billed_amount,
-    (SELECT GROUP_CONCAT(c.quantity || '× ' || c.label, ' · ') FROM charges c WHERE c.reservation_id = r.id AND c.kind = 'produit' AND c.status IN ('due', 'payee')) AS items_summary,
-    (SELECT COALESCE(SUM(p.card_amount), 0) FROM payments p WHERE p.id IN (
-       SELECT pa.payment_id FROM payment_allocations pa JOIN charges c ON c.id = pa.charge_id WHERE c.reservation_id = r.id
-     )) AS paid_by_card
+    (SELECT GROUP_CONCAT(c.quantity || '× ' || c.label, ' · ') FROM charges c WHERE c.reservation_id = r.id AND c.kind = 'produit' AND c.status IN ('due', 'payee')) AS items_summary
   FROM reservations r
   JOIN members m ON m.id = r.member_id
   LEFT JOIN rooms rm ON rm.id = r.room_id
@@ -232,6 +229,9 @@ export class Club {
         this.retireExtraRooms();
         this.run("INSERT INTO meta (key, value) VALUES ('single_room', ?)", this.nowIso());
       }
+      // The automatic renewals leave alone the subscriptions that ended before the card existed: a member whose
+      // plan lapsed long ago is not debited at the first recharge. Set once, on the first business day of the card.
+      this.run("INSERT OR IGNORE INTO meta (key, value) VALUES ('renewals_since', ?)", this.bizToday());
       if (!this.get('SELECT 1 AS x FROM categories LIMIT 1')) {
         for (const [kind, names] of Object.entries(DEFAULT_CATEGORIES)) {
           for (const name of names) this.run('INSERT INTO categories (kind, name, created_at) VALUES (?, ?, ?)', kind, name, this.nowIso());
@@ -1080,6 +1080,9 @@ export class Club {
   renewalBase(memberId) {
     const sub = this.get('SELECT * FROM subscriptions WHERE member_id = ? ORDER BY start_date DESC, id DESC LIMIT 1', memberId);
     if (!sub || sub.status !== 'active') return null;
+    // A subscription that ended before the renewals started (meta renewals_since) is never renewed nor announced.
+    const since = this.get("SELECT value FROM meta WHERE key = 'renewals_since'")?.value;
+    if (since && sub.end_date < since) return null;
     const plan = this.get('SELECT * FROM plans WHERE id = ?', sub.plan_id);
     if (!plan?.active || plan.price == null || (!plan.price_validated && !this.settings().demo_mode)) return null;
     return { sub, plan };
@@ -1104,6 +1107,16 @@ export class Club {
     };
   }
 
+  // The members whose renewal may be due on `today`: the scheduled run and the home page renew each one in its own
+  // transaction (worker/api.js), so a member whose renewal fails holds up no one.
+  renewalCandidates(today = this.bizToday()) {
+    return this.all(
+      `SELECT DISTINCT m.id FROM members m JOIN subscriptions s ON s.member_id = m.id
+       WHERE m.active = 1 AND s.status = 'active' AND s.end_date < ? AND s.end_date >= ? ORDER BY m.id`,
+      today, addDays(today, -RENEWAL_GRACE_DAYS),
+    ).map((m) => m.id);
+  }
+
   // Renews from the card's credit, with no one at the till, the subscriptions that ended before `today` (at most
   // RENEWAL_GRACE_DAYS ago) of every active member, or of `memberId` alone: same plan, today's price, starting
   // today, which is the day after the end when the run is on time, else the day of the recharge that makes it
@@ -1114,11 +1127,7 @@ export class Club {
     const result = { renewed: [], blocked: [] };
     // A closed month takes no card movement: the renewals wait until it is reopened.
     if (this.get('SELECT 1 AS x FROM closed_periods WHERE month = ?', this.bizToday().slice(0, 7))) return result;
-    const members = memberId != null ? [this.memberRow(memberId)] : this.all(
-      `SELECT DISTINCT m.* FROM members m JOIN subscriptions s ON s.member_id = m.id
-       WHERE m.active = 1 AND s.status = 'active' AND s.end_date < ? AND s.end_date >= ? ORDER BY m.id`,
-      today, addDays(today, -RENEWAL_GRACE_DAYS),
-    );
+    const members = memberId != null ? [this.memberRow(memberId)] : this.renewalCandidates(today).map((id) => this.memberRow(id));
     for (const m of members) {
       const base = m.active !== 0 ? this.renewalBase(m.id) : null;
       if (!base) continue;
@@ -1561,15 +1570,16 @@ export class Club {
       late_cancellation: this.isLateForCancellation(r),
       notes: r.notes, created_at: r.created_at, created_by_name: r.created_by_name ?? null,
       started_at: r.started_at, finished_at: r.finished_at, cancelled_at: r.cancelled_at, cancel_reason: r.cancel_reason,
-      due_amount: r.due_amount ?? 0, billed_amount: r.billed_amount ?? 0, paid_by_card: r.paid_by_card ?? 0,
-      card_credit_min: r.status === 'en_cours' ? this.cardCreditAtEntry(r) : null,
+      due_amount: r.due_amount ?? 0, billed_amount: r.billed_amount ?? 0,
+      // Without a subscription the card carries no time: the room view counts down to the booking's end instead.
+      card_credit_min: r.status === 'en_cours' && r.subscription_id ? this.cardCreditAtEntry(r) : null,
     };
   }
 
   // Time credit the holder's card carried into a running session: the minutes this booking took from the
   // card plus what the card still has free. The room view counts it down from the arrival.
   cardCreditAtEntry(r) {
-    const sub = r.subscription_id ? this.get('SELECT * FROM subscriptions WHERE id = ?', r.subscription_id) : null;
+    const sub = this.get('SELECT * FROM subscriptions WHERE id = ?', r.subscription_id);
     const free = sub ? this.credit(sub, this.bizToday()).available : 0;
     return (r.included_minutes ?? 0) + free;
   }
@@ -2228,7 +2238,7 @@ export class Club {
     }
     // A booking of 3 hours or more can be cancelled until midnight before its business day. On the
     // day, only the member's absence can be recorded; either way the deposit stays with the club, however
-    // it was paid, the balance is cancelled and the credit hours are released. A balance paid with the
+    // it was paid, the balance is cancelled and the credit hours are released. Room time paid with the
     // card goes back to the card.
     const late = this.isLateForCancellation(r);
     const absence = flag(input.no_show);
@@ -2250,11 +2260,12 @@ export class Club {
     const due = this.all("SELECT * FROM charges WHERE reservation_id = ? AND status = 'due'", r.id);
     for (const c of due) this.voidCharge(actor, c, `${what} de la réservation : ${reason}`);
     const paid = this.all("SELECT * FROM charges WHERE reservation_id = ? AND status = 'payee'", r.id);
-    // Lines the card paid go back to the card, except the deposit, which stays with the club whichever way it
-    // was paid. A line paid partly in cash stays paid, for a refund at the till as before.
+    // Room time the card paid goes back to the card, except the deposit, which stays with the club whichever way
+    // it was paid. A line paid partly in cash, and any product, stays paid, for a refund at the till as before
+    // (which restocks it and follows its own rules).
     const toCard = [];
     for (const c of paid) {
-      if (c.deposit) continue;
+      if (c.deposit || c.kind !== 'temps_supplementaire') continue;
       const { payment, cardPart } = this.cardPartOf(c);
       if (cardPart !== c.amount) continue;
       this.writeRefund(actor, c, payment, cardPart, { method: CARD_METHOD, reason: `${what} de la réservation : ${reason}` });
@@ -2690,7 +2701,8 @@ export class Club {
     if (!timingSafeEqual(given, stored) || !valid) return null;
     const lines = paymentLines({
       kind: p.kind,
-      label: p.label,
+      // A meal's label is free text typed by the staff (a restaurant, a dish): the public page names neither.
+      label: p.kind === 'repas' ? 'Repas commandé à l’extérieur' : p.label,
       amount: p.amount,
       allocations: this.all(
         `SELECT c.label, c.quantity, pa.amount FROM payment_allocations pa JOIN charges c ON c.id = pa.charge_id
@@ -3011,13 +3023,11 @@ export class Club {
 
   // ---------------------------------------------------------------- dashboard & finance
 
-  // Writes (the renewals due today), so its caller wraps it in a transaction like any write.
+  // Reads only: the renewals due today run before it, member by member (worker/api.js).
   dashboard(actor) {
     const s = this.settings();
     const now = this.nowMs();
     const today = this.bizToday();
-    // The demo space has no scheduled task: the first home page of the day renews what is due, to the same effect.
-    this.runRenewals(today);
     const todayList = this.listReservations({ from: today, to: today });
     const current = this.all(
       `${RES_SELECT} WHERE r.status = 'en_cours' OR (r.status = 'reservee' AND r.start_ms <= ? AND r.end_ms > ?) ORDER BY r.start_ms`,

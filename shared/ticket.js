@@ -93,7 +93,7 @@ export function ticketWhatsAppText({
     `TOTAL : ${money(total)}`,
     ...payment,
     balance !== null && balance !== undefined && `Solde carte : ${money(balance)}`,
-    timeAvailable !== null && timeAvailable !== undefined && `Crédit temps : ${fmtDuration(timeAvailable)} disponibles`,
+    timeAvailable !== null && timeAvailable !== undefined && `Crédit temps (à ce jour) : ${fmtDuration(timeAvailable)} disponibles`,
     clean(cashier) && `Encaissé par : ${clean(cashier)}`,
     Number(refunded) > 0 && `Remboursé : ${money(refunded)}`,
     cancelledAt && `Annulé le ${dateTime(cancelledAt)}`,
