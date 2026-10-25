@@ -682,23 +682,20 @@ export async function quickRemoveAttendee(r, att, onDone) {
 
 // ---------------------------------------------------------------- extension
 
+// The time within the plan's credit is free; the rest is paid by the member's card, in full, when the session is
+// extended: an extension the card cannot pay is not offered (the server refuses it too).
 function ExtendDialog({ close, r, onDone, options, endRel }) {
-  const s = useSettings();
   const [key] = useState(newKey);
   const { busy, error, submit } = useSubmit();
   const [minutes, setMinutes] = useState(options[0]);
-  // A booking made without a plan is extended with the card only; one with a plan may use it for the paid time.
-  const forcedCard = !r.subscription_id;
-  const [payWithCard, setPayWithCard] = useState(forcedCard);
-  const [restMethod, setRestMethod] = useState(''); // '' = what the card cannot pay stays on the note
   const [quote, setQuote] = useState(null);
   const [quoteError, setQuoteError] = useState(null);
   const seq = useRef(0);
 
-  const requestQuote = async (value, card = payWithCard) => {
+  const requestQuote = async (value) => {
     const n = (seq.current += 1);
     try {
-      const q = await api.preview(`/api/reservations/${r.id}/extend/quote`, { minutes: Number(value), pay_with_card: card });
+      const q = await api.preview(`/api/reservations/${r.id}/extend/quote`, { minutes: Number(value) });
       if (n !== seq.current) return;
       setQuote(q);
       setQuoteError(null);
@@ -717,9 +714,7 @@ function ExtendDialog({ close, r, onDone, options, endRel }) {
   const onSubmit = (e) => {
     e.preventDefault();
     submit(async () => {
-      // The extension names the method for the rest `method` (the booking calls it `deposit_method`).
-      const body = { minutes: Number(minutes), pay_with_card: payWithCard, method: payWithCard && restMethod ? restMethod : undefined };
-      const detail = await api.post(`/api/reservations/${r.id}/extend`, body, key);
+      const detail = await api.post(`/api/reservations/${r.id}/extend`, { minutes: Number(minutes) }, key);
       close();
       toast(`Réservation prolongée jusqu’à ${detail.reservation.end_time}.`);
       onDone?.(detail);
@@ -734,6 +729,7 @@ function ExtendDialog({ close, r, onDone, options, endRel }) {
     if (q.conflicts.length) warnings.push(<Notice key="conflicts" kind="danger">{`Créneau suivant occupé : ${conflictText(q.conflicts)}.`}</Notice>);
     if (q.gap_message) warnings.push(<Notice key="gap" kind="danger">{q.gap_message}</Notice>);
     if (q.tariff_blocked) warnings.push(<Notice key="tariff" kind="danger">Le tarif de cette réservation n’a pas été validé par un administrateur : prolongation payante impossible.</Notice>);
+    if (!q.card_enough) warnings.push(<Notice key="card" kind="danger">Crédit CFA insuffisant : approvisionnez la carte avant de prolonger.</Notice>);
     box = (
       <>
         <dl className="calc">
@@ -743,14 +739,9 @@ function ExtendDialog({ close, r, onDone, options, endRel }) {
           <div><dt>Temps payant ajouté</dt><dd>{fmtDuration(q.paid_minutes)}</dd></div>
           <div><dt>Temps payant total</dt><dd>{supplementText(q.total_paid_minutes, q.tariff)}</dd></div>
           <div><dt>Supplément</dt><dd>{`${money(q.supplement_before)} → ${money(q.supplement_after)}`}</dd></div>
-          <div className="total"><dt>{payWithCard ? 'À payer' : 'À ajouter à la note'}</dt><dd>{money(q.supplement_delta)}</dd></div>
-          {payWithCard ? (
-            <>
-              <div><dt>Solde de la carte</dt><dd>{money(q.card_balance)}</dd></div>
-              <div><dt>Payé par la carte, maintenant</dt><dd>{money(q.card_amount)}</dd></div>
-              <div><dt>Reste à payer</dt><dd>{money(q.rest_amount)}</dd></div>
-            </>
-          ) : null}
+          <div className="total"><dt>Payé par la carte</dt><dd>{money(q.card_amount)}</dd></div>
+          <div><dt>Solde de la carte</dt><dd>{money(q.card_balance)}</dd></div>
+          <div><dt>Solde après</dt><dd>{money(Math.max(0, q.balance_after))}</dd></div>
         </dl>
         <p className="subtle" style={{ marginTop: 6 }}>{`Le tarif appliqué reste celui de la réservation confirmée (${money(q.tariff.hour)} / h, ${money(q.tariff.half)} / 30 min).`}</p>
         {warnings.length ? <div className="stack" style={{ marginTop: 10 }}>{warnings}</div> : null}
@@ -758,8 +749,7 @@ function ExtendDialog({ close, r, onDone, options, endRel }) {
     );
   }
 
-  const blocked = Boolean(quoteError) || !q || q.conflicts.length > 0 || q.gap_conflicts.length > 0 || q.tariff_blocked;
-  const rest = payWithCard && q && !quoteError ? q.rest_amount : 0;
+  const blocked = Boolean(quoteError) || !q || q.conflicts.length > 0 || q.gap_conflicts.length > 0 || q.tariff_blocked || !q.card_enough;
 
   return (
     <Modal title="Prolonger la réservation" onClose={close}>
@@ -771,19 +761,7 @@ function ExtendDialog({ close, r, onDone, options, endRel }) {
               <option key={d} value={d}>{`+ ${fmtDuration(d)} (fin ${endRel + d === 1440 ? 'minuit' : relLabel(endRel + d)}${endRel + d > 1440 ? ', lendemain' : ''})`}</option>
             ))}
           </select></label>
-        <label className="check">
-          <input type="checkbox" name="pay_with_card" checked={payWithCard} disabled={forcedCard}
-            onChange={(e) => { setPayWithCard(e.target.checked); requestQuote(minutes, e.target.checked); }} />
-          <span><strong>Payer avec la carte</strong>{forcedCard ? ' (réservation sans formule : le temps est payé avec le crédit CFA)' : ''}</span>
-        </label>
         <div id="ex-quote" aria-live="polite">{box}</div>
-        {rest ? (
-          <label className="field"><span>{`Reste (${money(rest)}) payé maintenant par`}</span>
-            <select name="rest_method" value={restMethod} onChange={(e) => setRestMethod(e.target.value)}>
-              <option value="">Plus tard : le reste va sur la note, à encaisser</option>
-              {s.payment_methods.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select></label>
-        ) : null}
         <FormError error={error} />
         <div className="modal-actions"><button type="button" className="btn" onClick={close}>Annuler</button>
           <button type="submit" className="btn btn-primary" id="ex-submit" disabled={busy || blocked} aria-busy={busy}>Confirmer la prolongation</button></div>

@@ -2154,7 +2154,12 @@ export class Club {
       credit_available: p.credit?.available ?? 0, included_minutes: p.addIncluded, paid_minutes: p.addPaid,
       total_paid_minutes: p.newPaid, supplement_before: p.r.supplement_amount, supplement_after: p.newSupplement,
       supplement_delta: p.delta, tariff: p.tariff,
-      ...this.cardQuote(p.r.member_id, flag(input.pay_with_card) ? Math.max(p.delta, 0) : 0, Math.max(p.delta, 0)),
+      // The card pays all of the paid part, at once: an extension it cannot pay is refused (SOLDE_INSUFFISANT).
+      ...(() => {
+        const balance = this.walletBalance(p.r.member_id);
+        const card = Math.max(p.delta, 0);
+        return { card_balance: balance, card_amount: card, balance_after: balance - card, card_enough: card <= balance };
+      })(),
       tariff_blocked: p.addPaid > 0 && !p.tariff.validated && !s.demo_mode,
       conflicts: p.conflicts,
       gap_conflicts: p.gap_conflicts,
@@ -2164,10 +2169,6 @@ export class Club {
     };
   }
 
-  // Why a planned extension cannot go ahead, as the error to raise, or null when it can: the room is taken,
-  // the next booking would be too close, or the time beyond the credit has no tariff an administrator has
-  // validated to be billed at (the demo bills it all the same). extendReservation raises it and
-  // extensionWindow words it, so what the window calls possible is what the server accepts.
   // The instant the club closes on the night of business day `bizDay`.
   closingMs(bizDay) {
     const { timezone: tz, hours } = this.settings();
@@ -2175,6 +2176,11 @@ export class Club {
     return localToUtcMs(parseHHMM(close) <= parseHHMM(hours.open) ? addDays(bizDay, 1) : bizDay, close, tz);
   }
 
+  // Why a planned extension cannot go ahead, as the error to raise, or null when it can: it would end after the
+  // club closes, the room is taken, the next booking would be too close, the time beyond the credit has no tariff
+  // an administrator has validated to be billed at (the demo bills it all the same), or the member's card cannot
+  // pay that time in full. extendReservation raises it and extensionWindow words it, so what the window calls
+  // possible is what the server accepts.
   extensionRefusal(p) {
     const close = this.settings().hours.close ?? DEFAULT_CLOSE;
     if (p.newEnd > this.closingMs(p.r.biz_day)) return conflict('FERMETURE', `Le club ferme à ${close} : prolongation impossible au-delà.`);
@@ -2183,6 +2189,15 @@ export class Club {
     if (p.addPaid > 0 && !p.tariff.validated && !this.settings().demo_mode) {
       return conflict('TARIF_NON_VALIDE', "Le tarif des heures supplémentaires de cette réservation n'a pas été validé.");
     }
+    // The paid part is taken from the card when the session is extended, all of it: never left to collect.
+    const balance = this.walletBalance(p.r.member_id);
+    if (p.delta > balance) {
+      return conflict(
+        'SOLDE_INSUFFISANT',
+        `Crédit CFA insuffisant sur la carte : ${this.money(balance)} disponibles, ${this.money(p.delta)} nécessaires.`,
+        { balance, needed: p.delta, minutes: p.addPaid },
+      );
+    }
     return null;
   }
 
@@ -2190,11 +2205,8 @@ export class Club {
     const p = this.planExtension(id, input.minutes);
     const refusal = this.extensionRefusal(p);
     if (refusal) throw refusal;
-    // Without a plan the extension is paid with the card, as the booking was.
-    const payWithCard = flag(input.pay_with_card);
-    if (!p.r.subscription_id && !payWithCard) {
-      throw conflict('ABONNEMENT_INVALIDE', `${p.r.first_name} ${p.r.last_name} n'a pas d'abonnement : la prolongation se paie avec la carte.`);
-    }
+    // The time within the plan's credit is free; the card pays the rest in full (extensionRefusal made sure it
+    // can). pay_with_card and method, sent by older screens, are ignored.
     try {
       this.run(
         `UPDATE reservations SET end_ms = ?, duration_min = duration_min + ?, included_minutes = included_minutes + ?,
@@ -2224,18 +2236,12 @@ export class Club {
         account: 'reservations', kind: 'temps_supplementaire', member_id: p.r.member_id, reservation_id: p.r.id,
         quantity: 1, tariff_validated: p.tariff.validated ? 1 : 0,
       };
-      const extra = { label: `Prolongation +${fmtDuration(p.add)} (temps supplémentaire)`, unit_price: p.delta };
-      if (payWithCard) {
-        this.insertTimeLinesPaidByCard(actor, line, [extra], {
-          method: text(input.method, 'Moyen de paiement', { max: 40 }), reference: null,
-        });
-      } else {
-        this.insertCharge(actor, { ...line, ...extra });
-      }
+      const chargeId = this.insertCharge(actor, { ...line, label: `Prolongation +${fmtDuration(p.add)} (temps supplémentaire)`, unit_price: p.delta });
+      this.recordPayment(actor, { charge_ids: [chargeId], card: true });
     }
     this.audit(actor, 'reservation.prolonger', 'reservation', p.r.id, {
       minutes: p.add, ancienne_fin: new Date(p.r.end_ms).toISOString(), nouvelle_fin: new Date(p.newEnd).toISOString(),
-      minutes_incluses: p.addIncluded, minutes_payantes: p.addPaid, supplement_ajoute: p.delta, carte: payWithCard,
+      minutes_incluses: p.addIncluded, minutes_payantes: p.addPaid, supplement_ajoute: p.delta, carte: Math.max(p.delta, 0),
     });
     return this.reservationDetail(p.r.id);
   }
@@ -2249,6 +2255,11 @@ export class Club {
   // the search. `next` is the next booking of the room, whatever stops the extension. `until_time` is a bare
   // time, so `until_next_day` says when that limit falls on a later calendar day than the session's current
   // end ("until 14:00" after an end at 16:00 means tomorrow).
+  // The holder's plan credit still free carries the session past its planned end on its own (finishReservation
+  // takes that time from it at the exit), up to the closing time and the next booking of the room:
+  // `credit_minutes` past the end, until `credit_until_at` (null without such credit). The question of an
+  // extension paid by the card only arises there: when the window does not reach beyond that credit,
+  // `beyond_credit_reason` says why (null for the closing time, as `reason`).
   extensionWindow(id) {
     const r = this.reservationRow(id);
     const { timezone: tz, booking: { extension_step_min: step } } = this.settings();
@@ -2269,14 +2280,21 @@ export class Club {
     }
     // A booking neither waiting nor running has nothing to extend, and nothing to say about it.
     if (refusal?.code === 'STATUT') {
-      return { possible: false, max_minutes: 0, until_time: null, until_at: null, until_next_day: false, reason: null, next: null };
+      return {
+        possible: false, max_minutes: 0, until_time: null, until_at: null, until_next_day: false, reason: null, next: null,
+        credit_minutes: 0, credit_until_at: null, beyond_credit_reason: null,
+      };
     }
     const next = this.get(
       `${RES_SELECT} WHERE r.status <> 'annulee' AND COALESCE(r.room_id, 1) = ? AND r.start_ms >= ? AND r.id <> ?
        ORDER BY r.start_ms LIMIT 1`,
       r.room_id ?? 1, r.end_ms, r.id,
     );
+    const creditMin = this.overtimeLimit(r, next?.start_ms ?? null).credit;
     return {
+      credit_minutes: creditMin,
+      credit_until_at: creditMin ? new Date(r.end_ms + creditMin * 60000).toISOString() : null,
+      beyond_credit_reason: best && creditMin && best.add <= creditMin && refusal ? this.extensionReason(refusal) : null,
       possible: best !== null,
       max_minutes: best?.add ?? 0,
       until_time: best ? localParts(best.newEnd, tz).time : null,
@@ -2288,7 +2306,8 @@ export class Club {
   }
 
   // The refusal of the shortest extension, in the words of the alert. A refusal this does not know keeps
-  // its own message, so that a rule added to extendReservation is never hidden.
+  // its own message, so that a rule added to extendReservation is never hidden. The closing time is known to
+  // everyone: reaching it says nothing (null).
   extensionReason(refusal) {
     const first = refusal.details?.conflicts?.[0];
     switch (refusal.code) {
@@ -2302,7 +2321,11 @@ export class Club {
       case 'DUREE_MAXIMALE':
         return 'Prolongation impossible : une séance ne peut pas dépasser 24 heures.';
       case 'FERMETURE':
-        return `Prolongation impossible : le club ferme à ${this.settings().hours.close ?? DEFAULT_CLOSE}.`;
+        return null;
+      case 'SOLDE_INSUFFISANT': {
+        const { balance, needed, minutes } = refusal.details;
+        return `Prolongation impossible : crédit CFA insuffisant (${this.money(balance)} sur la carte, ${this.money(needed)} pour ${fmtDuration(minutes)}).`;
+      }
       default:
         return `Prolongation impossible : ${refusal.message}`;
     }
@@ -2331,6 +2354,7 @@ export class Club {
     if (!['reservee', 'en_cours'].includes(r.status)) {
       throw conflict('STATUT', `Impossible de terminer une réservation au statut « ${RES_STATUS[r.status]} ».`);
     }
+    if (r.status === 'en_cours') this.recordOvertime(actor, r);
     // A booking without a plan has no minutes of its holder to consume.
     const open = r.subscription_id ? this.committedFor(r.id, r.subscription_id) : 0;
     if (open) this.creditMove(actor, r.subscription_id, r.id, 'consommation', open, 'Réservation terminée');
@@ -2344,6 +2368,75 @@ export class Club {
     );
     this.audit(actor, 'reservation.terminer', 'reservation', r.id, { minutes_consommees: open });
     return this.reservationDetail(r.id);
+  }
+
+  // How far a session can run past its planned end on its own: until the club closes, the next booking of the
+  // room starts (`nextStart`, its timetable cannot overlap), or the session reaches 24 hours. `credit` is the
+  // part of that the holder's plan credit still free covers, in minutes.
+  overtimeLimit(r, nextStart) {
+    const limitMs = Math.min(this.closingMs(r.biz_day), r.start_ms + MAX_SESSION_MS, nextStart ?? Infinity);
+    const room = Math.max(0, Math.floor((limitMs - r.end_ms) / 60000));
+    const sub = r.subscription_id ? this.get('SELECT * FROM subscriptions WHERE id = ?', r.subscription_id) : null;
+    const available = sub?.status === 'active' ? this.credit(sub, r.biz_day).available : 0;
+    return { limitMs, minutes: room, credit: Math.min(available, room) };
+  }
+
+  // The time a running session went on past its planned end, recorded when it is finished (the owner's rule:
+  // the time credit left on the card runs until the member leaves). Nothing when it ends on time or earlier.
+  // Counted to the minute, a minute started counting, and only up to overtimeLimit. The session is lengthened by it, without the overlap and gap checks
+  // of an extension (the people have stayed). It is taken first from the holder's plan credit, and from each
+  // attendee's own as extendReservation does; the rest is paid time, priced by the minute at the booking's
+  // hourly tariff, to the franc: the card pays what it can, the rest is left to collect.
+  recordOvertime(actor, r) {
+    const next = this.get(
+      "SELECT MIN(start_ms) AS t FROM reservations WHERE status <> 'annulee' AND COALESCE(room_id, 1) = ? AND start_ms >= ? AND id <> ?",
+      r.room_id ?? 1, r.end_ms, r.id,
+    ).t;
+    const limit = this.overtimeLimit(r, next);
+    // From the planned end, or from the arrival for a session started after it (nobody was in the room before).
+    const from = Math.max(r.end_ms, r.started_at ? Date.parse(r.started_at) : r.end_ms);
+    const add = Math.min(Math.ceil((this.nowMs() - from) / 60000), limit.minutes);
+    if (add <= 0) return;
+    const included = Math.min(limit.credit, add);
+    const paid = add - included;
+    const amount = Math.round((r.tariff_hour * paid) / 60 / 100) * 100;
+    const newEnd = r.end_ms + add * 60000;
+    this.run(
+      `UPDATE reservations SET end_ms = ?, duration_min = duration_min + ?, included_minutes = included_minutes + ?,
+         paid_minutes = paid_minutes + ?, supplement_amount = supplement_amount + ?, updated_at = ?, updated_by = ?
+       WHERE id = ?`,
+      newEnd, add, included, paid, amount, this.nowIso(), actor.id, r.id,
+    );
+    this.creditMove(actor, r.subscription_id, r.id, 'engagement', included, `Dépassement +${fmtDuration(add)}`);
+    for (const att of this.all('SELECT * FROM reservation_attendees WHERE reservation_id = ?', r.id)) {
+      const attSub = this.get('SELECT * FROM subscriptions WHERE id = ?', att.subscription_id);
+      if (attSub && attSub.status === 'active') {
+        const attAdd = Math.min(this.credit(attSub, r.biz_day).available, add);
+        if (attAdd > 0) {
+          this.run('UPDATE reservation_attendees SET included_minutes = included_minutes + ? WHERE id = ?', attAdd, att.id);
+          this.creditMove(actor, att.subscription_id, r.id, 'engagement', attAdd, `Dépassement +${fmtDuration(add)} (présence en salle)`);
+        }
+      }
+    }
+    let card = 0;
+    if (amount > 0) {
+      const line = {
+        account: 'reservations', kind: 'temps_supplementaire', member_id: r.member_id, reservation_id: r.id,
+        quantity: 1, tariff_validated: r.tariff_validated ? 1 : 0,
+      };
+      const label = `Dépassement +${fmtDuration(paid)} (temps supplémentaire)`;
+      // A tariff nobody has validated cannot be collected yet (outside the demo): all of it waits at the till.
+      if (r.tariff_validated || this.settings().demo_mode) card = Math.min(this.walletBalance(r.member_id), amount);
+      if (card > 0) {
+        const paidId = this.insertCharge(actor, { ...line, label: card < amount ? `${label} — payé par carte` : label, unit_price: card });
+        this.recordPayment(actor, { charge_ids: [paidId], card: true });
+      }
+      if (card < amount) this.insertCharge(actor, { ...line, label: `${label} — reste à encaisser`, unit_price: amount - card });
+    }
+    this.audit(actor, 'reservation.depassement', 'reservation', r.id, {
+      minutes: add, ancienne_fin: new Date(r.end_ms).toISOString(), nouvelle_fin: new Date(newEnd).toISOString(),
+      minutes_incluses: included, minutes_payantes: paid, montant: amount, carte: card, reste: amount - card,
+    });
   }
 
   cancelReservation(actor, id, input) {
