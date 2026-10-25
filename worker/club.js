@@ -20,6 +20,7 @@ import {
 import {
   ACCOUNTS, ACCOUNT_LABELS, bookingWindow, validateHours, placeInWindow, supplementAmount, supplementDetail, fmtDuration,
   isWeekend, minDurationFor, DEPOSIT_FROM, depositFor, formatMoney, CARD_METHOD, RENEWAL_WARNING_DAYS, RENEWAL_GRACE_DAYS,
+  formatFirstName, formatLastName,
 } from '../shared/rules.js';
 import { waDigits } from '../shared/whatsapp.js';
 
@@ -232,6 +233,17 @@ export class Club {
       // The automatic renewals leave alone the subscriptions that ended before the card existed: a member whose
       // plan lapsed long ago is not debited at the first recharge. Set once, on the first business day of the card.
       this.run("INSERT OR IGNORE INTO meta (key, value) VALUES ('renewals_since', ?)", this.bizToday());
+      // Members recorded before names were formatted get « Prénom NOM » once.
+      if (!this.get("SELECT 1 AS x FROM meta WHERE key = 'names_formatted'")) {
+        for (const m of this.all('SELECT id, first_name, last_name FROM members')) {
+          const first = formatFirstName(m.first_name);
+          const last = formatLastName(m.last_name);
+          if (first !== m.first_name || last !== m.last_name) {
+            this.run('UPDATE members SET first_name = ?, last_name = ? WHERE id = ?', first, last, m.id);
+          }
+        }
+        this.run("INSERT INTO meta (key, value) VALUES ('names_formatted', ?)", this.nowIso());
+      }
       if (!this.get('SELECT 1 AS x FROM categories LIMIT 1')) {
         for (const [kind, names] of Object.entries(DEFAULT_CATEGORIES)) {
           for (const name of names) this.run('INSERT INTO categories (kind, name, created_at) VALUES (?, ?, ?)', kind, name, this.nowIso());
@@ -607,8 +619,8 @@ export class Club {
 
   memberFields(input, current = {}) {
     const pick = (k) => (input[k] !== undefined ? input[k] : current[k]);
-    const first = text(pick('first_name'), 'Prénom', { required: true, max: 60 });
-    const last = text(pick('last_name'), 'Nom', { required: true, max: 60 });
+    const first = formatFirstName(text(pick('first_name'), 'Prénom', { required: true, max: 60 }));
+    const last = formatLastName(text(pick('last_name'), 'Nom', { required: true, max: 60 }));
     const phone = text(pick('phone'), 'Téléphone', { required: true, max: 30 });
     if (!/^[0-9+().\s-]{6,30}$/.test(phone)) throw invalid('Téléphone : chiffres, espaces et + uniquement (6 caractères minimum).');
     const email = text(pick('email'), 'Courriel', { max: 120 });

@@ -34,11 +34,11 @@ async function clubs({ env = {} } = {}) {
 }
 
 const memberNames = (club) => club.listMembers().map((m) => m.name).sort();
-const FICTITIOUS = ['Client Test 1', 'Client Test 2', 'Client Test 3', 'Client Test 4', 'Client Test 5'];
+const FICTITIOUS = ['Client TEST 1', 'Client TEST 2', 'Client TEST 3', 'Client TEST 4', 'Client TEST 5'];
 
 test('configuration réelle copiée dans la démo', async () => {
   const { real, demo, admin, bundle } = await clubs();
-  ok(await admin.put('/api/settings', { club_name: 'Cercle Test' }));
+  ok(await admin.put('/api/settings', { club_name: 'Cercle TEST' }));
   const annual = bundle.plans.find((p) => p.code === 'ANNUELLE');
   ok(await admin.put(`/api/plans/${annual.id}`, { price: 120000 * UM, price_validated: true }));
   // One room, « Salon »: the default one is retired.
@@ -53,7 +53,7 @@ test('configuration réelle copiée dans la démo', async () => {
   demo.club.prepareDemo(config);
 
   const settings = demo.club.settings();
-  assert.equal(settings.club_name, 'Cercle Test');
+  assert.equal(settings.club_name, 'Cercle TEST');
   assert.equal(settings.demo_mode, true);
   assert.notEqual(settings.opening_balances.amounts['Espèces'], 7 * UM); // the demo has its own, fictitious one
   const copied = demo.club.plans().find((p) => p.code === 'ANNUELLE');
@@ -191,13 +191,13 @@ test('remise à neuf : les essais disparaissent, la configuration est recopiée'
   demo.club.prepareDemo(real.club.demoConfig());
   const actor = demo.club.userRow(real.club.userByLogin('proprietaire').id);
   demo.club.tx(() => demo.club.createMember(actor, { first_name: 'Essai', last_name: 'Membre', phone: '+000 000000' }));
-  assert.ok(memberNames(demo.club).includes('Essai Membre'));
+  assert.ok(memberNames(demo.club).includes('Essai MEMBRE'));
   assert.equal(demo.club.listMembers().length, 6);
 
   ok(await admin.put('/api/settings', { club_name: 'Nom actuel' }));
   demo.club.resetDemo(real.club.demoConfig(), actor);
 
-  assert.ok(!memberNames(demo.club).includes('Essai Membre'));
+  assert.ok(!memberNames(demo.club).includes('Essai MEMBRE'));
   assert.deepEqual(memberNames(demo.club), FICTITIOUS);
   assert.equal(demo.club.settings().club_name, 'Nom actuel');
   const entry = demo.club.auditLog().find((a) => a.action === 'demo.remettre_a_neuf');
@@ -211,7 +211,7 @@ test('remise à neuf : les essais disparaissent, la configuration est recopiée'
 
 test('un remplissage ou une remise à neuf qui échoue ne laisse rien derrière lui', async () => {
   const { real, demo, admin } = await clubs();
-  ok(await admin.put('/api/settings', { club_name: 'Cercle Test' }));
+  ok(await admin.put('/api/settings', { club_name: 'Cercle TEST' }));
   const broken = { ...real.club.demoConfig(), plans: [] }; // the seed finds no plan to sell
 
   assert.throws(() => demo.club.prepareDemo(broken));
@@ -221,13 +221,13 @@ test('un remplissage ou une remise à neuf qui échoue ne laisse rien derrière 
   assert.equal(demo.club.get("SELECT COUNT(*) AS n FROM meta WHERE key = 'demo_seeded'").n, 0); // ...and no mark.
   demo.club.prepareDemo(real.club.demoConfig()); // the next try fills it, once
   assert.equal(demo.club.listMembers().length, 5);
-  assert.equal(demo.club.settings().club_name, 'Cercle Test');
+  assert.equal(demo.club.settings().club_name, 'Cercle TEST');
 
   // A failed reset keeps the trials made in the space.
   const actor = demo.club.userRow(real.club.userByLogin('proprietaire').id);
   demo.club.tx(() => demo.club.createMember(actor, { first_name: 'Essai', last_name: 'Membre', phone: '+000 000000' }));
   assert.throws(() => demo.club.resetDemo(broken, actor));
-  assert.ok(memberNames(demo.club).includes('Essai Membre'));
+  assert.ok(memberNames(demo.club).includes('Essai MEMBRE'));
   assert.equal(demo.club.listMembers().length, 6);
   assert.equal(demo.club.get("SELECT COUNT(*) AS n FROM meta WHERE key = 'demo_seeded'").n, 1);
 });
@@ -247,7 +247,7 @@ test('jamais sur le vrai club', async () => {
   }
 
   // Nothing moved: the real member, the accounts and their passwords, no demo marker.
-  assert.deepEqual(memberNames(real.club), ['Vrai Membre']);
+  assert.deepEqual(memberNames(real.club), ['Vrai MEMBRE']);
   await new Client(real).login('proprietaire', PROPRIO);
   assert.equal(real.club.userByLogin('gerant').name, 'Gérant');
   assert.equal(real.club.get("SELECT COUNT(*) AS n FROM meta WHERE key = 'demo_seeded'").n, 0);
@@ -345,8 +345,8 @@ test('une écriture faite dans la démo reste dans la démo', async () => {
 
   // The first request prepares the space (5 fictitious members), then creates a sixth.
   const created = ok(await asAdmin.post('/api/members', TRIAL));
-  assert.equal(created.name, 'Essai Gérant');
-  assert.deepEqual(memberNames(demo.club), [...FICTITIOUS, 'Essai Gérant'].sort());
+  assert.equal(created.name, 'Essai GÉRANT');
+  assert.deepEqual(memberNames(demo.club), [...FICTITIOUS, 'Essai GÉRANT'].sort());
   assert.equal(demo.club.memberRow(created.id).created_by, bundle.user.id);
   assert.equal(ok(await asAdmin.get('/api/members')).length, 6);
 
@@ -692,9 +692,9 @@ test('aiguillage : avec l’en-tête démo on est dans la démo, sans lui dans l
   const inTheDemo = askingDemo(manager);
 
   const created = ok(await inTheDemo.post('/api/members', TRIAL));
-  assert.equal(created.name, 'Essai Gérant');
+  assert.equal(created.name, 'Essai GÉRANT');
   const names = (members) => members.map((m) => m.name).sort();
-  assert.deepEqual(names(ok(await inTheDemo.get('/api/members'))), [...FICTITIOUS, 'Essai Gérant'].sort());
+  assert.deepEqual(names(ok(await inTheDemo.get('/api/members'))), [...FICTITIOUS, 'Essai GÉRANT'].sort());
   // The same session without the header, or with any other value, is the real club's: no member there.
   assert.deepEqual(ok(await manager.get('/api/members')), []);
   assert.deepEqual(ok(await manager.call('GET', '/api/members', undefined, { 'x-club-espace': 'reel' })), []);
@@ -843,7 +843,7 @@ test('aiguillage : comptes et effacement demandés en démo sont refusés, le vr
     assert.equal(refused.status, 403);
     assert.equal(refused.data.error.code, 'MODE_DEMO');
   }
-  assert.deepEqual(memberNames(real.club), ['Vrai Membre']);
+  assert.deepEqual(memberNames(real.club), ['Vrai MEMBRE']);
   assert.deepEqual(real.club.listUsers(), accountsBefore);
   await new Client(site).login('proprietaire', PROPRIO); // the real password is the old one
 });

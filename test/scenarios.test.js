@@ -29,8 +29,8 @@ const day = (n) => addDays(today, n);
 
 before(async () => {
   await server.start();
-  await server.addUser('admin', 'Admin Test', 'admin', 'admin-password-1');
-  await server.addUser('gerant', 'Gérant Test', 'gerant', 'gerant-password-1');
+  await server.addUser('admin', 'Admin TEST', 'admin', 'admin-password-1');
+  await server.addUser('gerant', 'Gérant TEST', 'gerant', 'gerant-password-1');
   admin = new Client(server);
   manager = new Client(server);
   await admin.login('admin', 'admin-password-1');
@@ -58,7 +58,7 @@ test('1. réservation d’une heure', async () => {
   assert.equal(d.reservation.included_minutes, 60);
   assert.equal(d.reservation.paid_minutes, 0);
   assert.equal(d.reservation.supplement_amount, 0);
-  assert.equal(d.reservation.created_by_name, 'Gérant Test');
+  assert.equal(d.reservation.created_by_name, 'Gérant TEST');
   assert.equal(d.subscription.credit.committed, 60);
   assert.equal(d.subscription.credit.available, 60);
   const short = await book(memberA, day(1), '17:00', 30);

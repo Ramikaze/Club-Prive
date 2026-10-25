@@ -262,7 +262,7 @@ test('historique admin : filtres, exemplaires, réservé à l\'administrateur', 
   assert.ok(mine.every((e) => e.copies_total === 3));
   const e = mine[0];
   assert.match(e.number, /^T-\d{6,}$/);
-  assert.equal(e.member_name, 'Paul Sorties');
+  assert.equal(e.member_name, 'Paul SORTIES');
   assert.equal(e.amount, numbered.payment.amount);
   assert.ok(e.user_name && e.user_id && e.at);
   assert.deepEqual(Object.keys(e).sort(), ['amount', 'at', 'copies_total', 'copy_no', 'kind', 'member_name', 'number', 'payment_id', 'user_id', 'user_name']);

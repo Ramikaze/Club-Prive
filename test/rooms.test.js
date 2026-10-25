@@ -219,13 +219,13 @@ test('consommations : chaque bouteille ou cigare est attribué au membre présen
   // Billing stays with the holder; the consumer is kept per line.
   const lines = ok(await manager.get(`/api/reservations/${res.id}`)).charges.filter((c) => c.kind === 'produit');
   assert.deepEqual(lines.map((c) => [c.label, c.member_id, c.consumer_member_id, c.consumer_name]), [
-    ['Robusto test', members[0].id, members[0].id, 'Alice Test'],
-    ['Whisky test', members[0].id, members[1].id, 'Bruno Test'],
+    ['Robusto test', members[0].id, members[0].id, 'Alice TEST'],
+    ['Whisky test', members[0].id, members[1].id, 'Bruno TEST'],
   ]);
   const room = ok(await manager.get('/api/dashboard')).rooms_status.find((rm) => rm.id === res.room_id);
   assert.deepEqual(room.current.consumptions.map((c) => [c.account, c.consumer_name, c.amount]), [
-    ['cigares', 'Alice Test', 2000000],
-    ['alcool', 'Bruno Test', 4000000],
+    ['cigares', 'Alice TEST', 2000000],
+    ['alcool', 'Bruno TEST', 4000000],
   ]);
 
 });
