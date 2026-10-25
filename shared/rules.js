@@ -22,9 +22,18 @@ export function bookingWindow(hours) {
   return { open, close: open + 1440, maxEnd: open + 1440 };
 }
 
+// The club's closing time: no session runs, nor is extended, past it. Before the start of the business day it
+// is the following night (02:30); after it, the same evening.
+export const DEFAULT_CLOSE = '02:30';
+
 export function validateHours(hours) {
   const open = parseHHMM(hours.open);
   if (open == null || open >= 1440) return 'Heure de début de journée invalide (format HH:MM).';
+  if (hours.close != null) {
+    const close = parseHHMM(hours.close);
+    if (close == null || close >= 1440) return 'Heure de fermeture invalide (format HH:MM).';
+    if (close === open) return 'La fermeture ne peut pas être à l’heure du début de la journée.';
+  }
   return null;
 }
 

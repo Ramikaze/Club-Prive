@@ -19,7 +19,7 @@ import {
 import {
   ACCOUNTS, ACCOUNT_LABELS, bookingWindow, validateHours, placeInWindow, supplementAmount, supplementDetail, fmtDuration,
   isWeekend, minDurationFor, DEPOSIT_FROM, depositFor, formatMoney, CARD_METHOD, RENEWAL_WARNING_DAYS, RENEWAL_GRACE_DAYS,
-  formatFirstName, formatLastName, CASH_METHOD,
+  formatFirstName, formatLastName, CASH_METHOD, DEFAULT_CLOSE,
 } from '../shared/rules.js';
 import { waDigits } from '../shared/whatsapp.js';
 
@@ -73,7 +73,7 @@ export function defaultSettings() {
     ticket_footer: 'Merci de votre visite',
     currency: { label: 'FCFA', decimals: 0 },
     timezone: 'Africa/Brazzaville',
-    hours: { open: '06:00' }, // start of the business day; the room can be booked at any hour
+    hours: { open: '06:00', close: DEFAULT_CLOSE }, // start of the business day, and closing time (no extension past it)
     // gap_min: minutes kept free between two bookings of the same room; 0 turns the rule off.
     booking: { slot_min: 30, min_duration_min: 60, weekend_min_duration_min: 120, extension_step_min: 30, gap_min: 30 },
     overtime_tariff: { hour: 2500000, half: 1500000, validated: false },
@@ -294,6 +294,8 @@ export class Club {
       for (const row of this.all('SELECT key, value FROM settings')) if (row.key in s) s[row.key] = JSON.parse(row.value);
       // A booking setting saved before the gap existed has no `gap_min`: it reads with the default.
       if (!Number.isInteger(s.booking.gap_min)) s.booking = { ...s.booking, gap_min: defaultSettings().booking.gap_min };
+      // Likewise hours saved before the closing time existed.
+      if (!s.hours.close) s.hours = { ...s.hours, close: DEFAULT_CLOSE };
       // Not a stored setting: it follows the space the club runs in, whatever an older `demo_mode` row says.
       s.demo_mode = this.demo;
       this.cachedSettings = s;
@@ -369,7 +371,7 @@ export class Club {
         return tz;
       }
       case 'hours': {
-        const h = { open: String(v?.open ?? '') };
+        const h = { open: String(v?.open ?? ''), close: String(v?.close ?? current?.close ?? DEFAULT_CLOSE) };
         const err = validateHours(h);
         if (err) throw invalid(err);
         return h;
@@ -2166,7 +2168,16 @@ export class Club {
   // the next booking would be too close, or the time beyond the credit has no tariff an administrator has
   // validated to be billed at (the demo bills it all the same). extendReservation raises it and
   // extensionWindow words it, so what the window calls possible is what the server accepts.
+  // The instant the club closes on the night of business day `bizDay`.
+  closingMs(bizDay) {
+    const { timezone: tz, hours } = this.settings();
+    const close = hours.close ?? DEFAULT_CLOSE;
+    return localToUtcMs(parseHHMM(close) <= parseHHMM(hours.open) ? addDays(bizDay, 1) : bizDay, close, tz);
+  }
+
   extensionRefusal(p) {
+    const close = this.settings().hours.close ?? DEFAULT_CLOSE;
+    if (p.newEnd > this.closingMs(p.r.biz_day)) return conflict('FERMETURE', `Le club ferme à ${close} : prolongation impossible au-delà.`);
     if (p.conflicts.length) return this.overlapError(p.conflicts, p.r.room_name);
     if (p.gap_conflicts.length) return this.gapError(p.gap_conflicts, { startMs: p.r.end_ms, endMs: p.newEnd, extension: true });
     if (p.addPaid > 0 && !p.tariff.validated && !this.settings().demo_mode) {
@@ -2290,6 +2301,8 @@ export class Club {
         return "Prolongation impossible : le tarif des heures supplémentaires n'est pas encore validé par un administrateur.";
       case 'DUREE_MAXIMALE':
         return 'Prolongation impossible : une séance ne peut pas dépasser 24 heures.';
+      case 'FERMETURE':
+        return `Prolongation impossible : le club ferme à ${this.settings().hours.close ?? DEFAULT_CLOSE}.`;
       default:
         return `Prolongation impossible : ${refusal.message}`;
     }

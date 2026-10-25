@@ -129,7 +129,7 @@ test('5 bis. le crédit n’est jamais compté deux fois en accès simultané', 
   assert.deepEqual(included, [0, 120]);
 });
 
-test('6. pas d’horaires : prolongation au-delà de minuit et réservation le matin, sans autorisation', async () => {
+test('6. prolongation au-delà de minuit jusqu’à la fermeture, et réservation le matin, sans autorisation', async () => {
   const e = await newMember('Émile');
   const d = ok(await book(e, day(4), '22:00', 90));
   const id = d.reservation.id;
@@ -144,10 +144,13 @@ test('6. pas d’horaires : prolongation au-delà de minuit et réservation le m
   assert.equal(ext.reservation.duration_min, 210);
   assert.equal(ext.reservation.off_hours, false);
   assert.equal(ext.reservation.supplement_amount, 40000 * UM);
-  // Until the morning, past the start of the next business day: still the same session.
-  const dawn = ok(await manager.post(`/api/reservations/${id}/extend`, { minutes: 300 }));
-  assert.equal(dawn.reservation.end_time, '06:30');
-  assert.equal(dawn.reservation.biz_day, day(4));
+  // Not past the club's closing time (02:30 by default): until then, still the same session.
+  const dawn = await manager.post(`/api/reservations/${id}/extend`, { minutes: 300 });
+  assert.equal(dawn.status, 409);
+  assert.equal(dawn.data.error.code, 'FERMETURE');
+  const closing = ok(await manager.post(`/api/reservations/${id}/extend`, { minutes: 60 }));
+  assert.equal(closing.reservation.end_time, '02:30');
+  assert.equal(closing.reservation.biz_day, day(4));
   const tooLong = await manager.post(`/api/reservations/${id}/extend`, { minutes: 1440 });
   assert.equal(tooLong.status, 400);
   assert.equal(tooLong.data.error.code, 'DUREE_MAXIMALE');

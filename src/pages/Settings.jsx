@@ -292,7 +292,7 @@ function HoursSection({ save }) {
     // A blank field would read as 0 and quietly switch the gap off.
     if (String(v.gap_min ?? '').trim() === '') throw new Error('Battement entre deux réservations : nombre entier attendu.');
     return save({
-      hours: { open: v.open },
+      hours: { open: v.open, close: v.close },
       booking: {
         slot_min: Number(v.slot_min),
         min_duration_min: Number(v.min_duration_min),
@@ -305,11 +305,13 @@ function HoursSection({ save }) {
   return (
     <section className="card settings-section" id="sec-hours">
       <div className="card-head"><h2>Journée et créneaux</h2></div>
-      <p className="subtle">Pas d’horaires d’ouverture : la salle se réserve à toute heure, de jour comme de nuit.</p>
+      <p className="subtle">La salle se réserve à toute heure ; une séance ne peut pas être prolongée après la fermeture du club.</p>
       <form className="form-grid" onSubmit={onSubmit} noValidate>
         <div className="form-row">
           <label className="field"><span>Début de la journée</span><input name="open" defaultValue={s.hours.open} pattern="\d{1,2}:\d{2}" required />
             <span className="help">Pour l’agenda et la caisse : une séance qui commence avant cette heure compte dans la journée de la veille.</span></label>
+          <label className="field"><span>Fermeture du club</span><input name="close" defaultValue={s.hours.close ?? '02:30'} pattern="\d{1,2}:\d{2}" required />
+            <span className="help">Aucune prolongation au-delà de cette heure (02:30 : la nuit suivante).</span></label>
         </div>
         <div className="form-row">
           <label className="field"><span>Créneaux</span><select name="slot_min" defaultValue={s.booking.slot_min}>{[15, 30, 60].map((n) => <option key={n} value={n}>{n} min</option>)}</select></label>
