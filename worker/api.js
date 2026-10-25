@@ -345,6 +345,9 @@ export function createApi({ db, env = {}, demo = false }) {
   add('POST', '/api/ledger/entries/:id/cancel', ADMIN, (ctx) => club.cancelEntry(ctx.user, ctx.params.id, ctx.body));
   add('GET', '/api/ledger/book', ADMIN, (ctx) => club.ledgerBook(ctx.query));
   add('GET', '/api/treasury', ADMIN, (ctx) => club.treasury(ctx.query.from, ctx.query.to ?? ctx.query.from));
+  // The cash page's « Compter la caisse »: the first cash fund (the settings change, so the bundle comes back), then counts.
+  add('POST', '/api/treasury/fund', ADMIN, (ctx) => ({ treasury: club.setCashFund(ctx.user, ctx.body), bundle: club.bundle(ctx.user) }));
+  add('POST', '/api/treasury/count', ADMIN, (ctx) => club.countCash(ctx.user, ctx.body));
   add('GET', '/api/closings', ADMIN, () => club.closings());
   add('POST', '/api/closings', ADMIN, (ctx) => club.closeMonth(ctx.user, ctx.body));
   add('POST', '/api/closings/:month/reopen', ADMIN, (ctx) => club.reopenMonth(ctx.user, ctx.params.month, ctx.body));

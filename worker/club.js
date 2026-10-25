@@ -6,7 +6,7 @@
 import { AppError, invalid, forbidden, notFound, conflict } from './errors.js';
 import { searchable, smartFilter } from '../shared/search.js';
 import { text, int, toId, flag, frDate } from './validate.js';
-import { ledgerMethods, DEFAULT_CATEGORIES, OUTSIDE_MEAL_CATEGORY } from './ledger.js';
+import { ledgerMethods, DEFAULT_CATEGORIES, OUTSIDE_MEAL_CATEGORY, CASH_GAP_CATEGORY } from './ledger.js';
 import { loungeMethods } from './lounge.js';
 import {
   newTicketCode, formatTicketNumber, normalizeTicketCode, memberInitials, paymentLines, TICKET_CODE_LENGTH,
@@ -255,6 +255,11 @@ export class Club {
       }
       if (!this.get("SELECT 1 AS x FROM categories WHERE kind = 'depense' AND name = ?", OUTSIDE_MEAL_CATEGORY)) {
         this.run("INSERT INTO categories (kind, name, created_at) VALUES ('depense', ?, ?)", OUTSIDE_MEAL_CATEGORY, this.nowIso());
+      }
+      for (const kind of ['recette', 'depense']) {
+        if (!this.get('SELECT 1 AS x FROM categories WHERE kind = ? AND name = ?', kind, CASH_GAP_CATEGORY)) {
+          this.run('INSERT INTO categories (kind, name, created_at) VALUES (?, ?, ?)', kind, CASH_GAP_CATEGORY, this.nowIso());
+        }
       }
       this.run('DELETE FROM idempotency_keys WHERE created_at < ?', new Date(Date.now() - 7 * 86400000).toISOString());
       this.run('DELETE FROM sessions WHERE expires_at < ?', new Date().toISOString());

@@ -1,6 +1,7 @@
 // The cash page's figures (src/components/cash/flows.js) on the server's own answers: a sale paid entirely with the
 // member's card, a mixed one, recharges (one cancelled), refunds (cash and card), an outside meal partly paid with
-// the card, an other receipt, an expense, a transfer and the opening balances. The Recettes and Dépenses blocks
+// the card, an other receipt, an expense, a transfer, a till counted with a surplus and one with a shortage (the
+// « Écart de caisse » entries) and the opening balances. The Recettes and Dépenses blocks
 // must add up to the figures of « Soldes », and the fund plus recettes less dépenses must be the closing balance,
 // on all accounts and on each one (its transfers included).
 import { test, before, after } from 'node:test';
@@ -100,6 +101,11 @@ test('recettes, dépenses et soldes racontent la même histoire : l’argent re�
   ok(await admin.post('/api/ledger/entries', { kind: 'recette', category_id: income.id, amount: 30000 * UM, method: wire }));
   ok(await admin.post('/api/ledger/entries', { kind: 'depense', category_id: spend.id, amount: 2500 * UM, method: cash }));
   ok(await admin.post('/api/ledger/entries', { kind: 'transfert', amount: 10000 * UM, method: cash, to_method: wire }));
+  // The cash till counted 1 500 over the books, the MoMo account 700 under: a recette and a dépense « Écart de caisse ».
+  const surplus = ok(await admin.post('/api/treasury/count', { method: cash, counted: (await pageData()).t.accounts.find((a) => a.method === cash).closing + 1500 * UM }));
+  assert.equal(surplus.gap, 1500 * UM);
+  const shortage = ok(await admin.post('/api/treasury/count', { method: momo, counted: (await pageData()).t.accounts.find((a) => a.method === momo).closing - 700 * UM }));
+  assert.equal(shortage.gap, -700 * UM);
 
   const data = await pageData();
   assertOneStory(data);
@@ -110,13 +116,16 @@ test('recettes, dépenses et soldes racontent la même histoire : l’argent re�
   assert.equal(sum['Réservations'], 12000 * UM);
   assert.equal(sum['Repas extérieurs'], 7000 * UM);
   assert.equal(sum['Approvisionnements cartes'], 58000 * UM); // 50 000 + 5 000 + 3 000, the cancelled 4 000 left out
-  assert.equal(sum['Entrées diverses'], 30000 * UM);
+  assert.equal(sum['Entrées diverses'], (30000 + 1500) * UM);
   assert.equal(all.receipts.refunds, 12000 * UM); // the card refund gives no money back
   assert.equal(all.receipts.card, 20000 * UM + 5000 * UM + 3000 * UM);
-  assert.equal(all.receipts.total, (15000 + 12000 + 7000 + 58000 + 30000 - 12000) * UM);
-  assert.equal(all.expenses, (10000 + 2500) * UM);
+  assert.equal(all.receipts.total, (15000 + 12000 + 7000 + 58000 + 30000 + 1500 - 12000) * UM);
+  assert.equal(all.expenses, (10000 + 2500 + 700) * UM);
   const onCash = figures(data, cash);
   assert.deepEqual(onCash.transfers, { received: 0, sent: 10000 * UM });
+  // After a count, the account's closing balance is what was counted.
+  assert.equal(onCash.till.closing, surplus.counted);
+  assert.equal(figures(data, momo).till.closing, shortage.counted);
 
   // Opening balances set within the period are the cash fund, not recettes.
   ok(await admin.put('/api/settings', { opening_balances: { date: today, amounts: { [cash]: 100000 * UM } } }));
