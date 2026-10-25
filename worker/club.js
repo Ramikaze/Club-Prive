@@ -248,6 +248,22 @@ export class Club {
         for (const m of this.all('SELECT id FROM members WHERE active = 1')) this.ensureCard(SYSTEM_ACTOR, m.id);
         this.run("INSERT INTO meta (key, value) VALUES ('cards_for_all', ?)", this.nowIso());
       }
+      // Members present in a room are no longer debited, only the holder is. The credit an attendee still has
+      // engaged on a booking not yet over (booked or in progress) goes back to the attendee's plan once, and the
+      // row keeps no minutes. Finished bookings keep their history as it was.
+      if (!this.get("SELECT 1 AS x FROM meta WHERE key = 'attendees_not_debited'")) {
+        const rows = this.all(
+          `SELECT ra.id, ra.reservation_id, ra.subscription_id FROM reservation_attendees ra
+           JOIN reservations r ON r.id = ra.reservation_id
+           WHERE r.status IN ('reservee', 'en_cours')`,
+        );
+        for (const ra of rows) {
+          const open = ra.subscription_id != null ? this.committedFor(ra.reservation_id, ra.subscription_id) : 0;
+          if (open > 0) this.creditMove(SYSTEM_ACTOR, ra.subscription_id, ra.reservation_id, 'liberation', open, 'Membres présents : plus de débit');
+          this.run('UPDATE reservation_attendees SET included_minutes = 0 WHERE id = ?', ra.id);
+        }
+        this.run("INSERT INTO meta (key, value) VALUES ('attendees_not_debited', ?)", this.nowIso());
+      }
       if (!this.get('SELECT 1 AS x FROM categories LIMIT 1')) {
         for (const [kind, names] of Object.entries(DEFAULT_CATEGORIES)) {
           for (const name of names) this.run('INSERT INTO categories (kind, name, created_at) VALUES (?, ?, ?)', kind, name, this.nowIso());
@@ -1150,11 +1166,9 @@ export class Club {
     if (!sub) throw notFound('Abonnement');
     if (sub.status === 'annulee') throw conflict('DEJA_ANNULE', 'Abonnement déjà annulé.');
     const reason = text(input.reason, 'Motif', { required: true, min: 3, max: 300 });
+    // Only the bookings this plan pays for hold it: a member present in someone else's room takes nothing from it.
     const active = this.get(
-      `SELECT COUNT(*) AS n FROM reservations r WHERE r.status IN ('reservee', 'en_cours')
-       AND (r.subscription_id = ? OR EXISTS (
-         SELECT 1 FROM reservation_attendees ra WHERE ra.reservation_id = r.id AND ra.subscription_id = ?
-       ))`, sub.id, sub.id,
+      "SELECT COUNT(*) AS n FROM reservations r WHERE r.status IN ('reservee', 'en_cours') AND r.subscription_id = ?", sub.id,
     );
     if (active.n > 0) {
       throw conflict('RESERVATIONS_ACTIVES', `Annulez ou terminez d'abord les ${active.n} réservation(s) rattachée(s) à cet abonnement.`);
@@ -1612,6 +1626,24 @@ export class Club {
     return { member, sub, credit };
   }
 
+  // A member present in a room besides the holder. Only the holder is debited (« Les membres présents ne doivent
+  // jamais être débités, ni à la réservation ni à l'entrée en salle »): no plan, credit or card balance is asked
+  // of an attendee. The member must still be active and identifiable: a member whose cards are all deactivated
+  // (a lost or blocked card) is turned away, as for the holder.
+  verifyAttendee(memberId) {
+    const member = this.memberRow(memberId);
+    this.assertMemberActive(member, 'toute réservation ou entrée en salle');
+    if (this.hasDeactivatedCardsOnly(member.id)) {
+      throw conflict(
+        'CARTE_DESACTIVEE',
+        `La carte de membre de ${member.first_name} ${member.last_name} est désactivée : émettez une carte active avant l'accès en salle.`,
+      );
+    }
+    return member;
+  }
+
+  // The holder first, with the minutes this booking takes from the holder's plan; the other members present
+  // carry no minutes: they are never debited.
   attendeesFor(r) {
     const primaryCard = this.activeCardCode(r.member_id);
     const list = [{
@@ -1637,8 +1669,6 @@ export class Club {
         name: `${ex.first_name} ${ex.last_name}`,
         member_no: ex.member_no,
         card_code: this.activeCardCode(ex.member_id),
-        subscription_id: ex.subscription_id,
-        included_minutes: ex.included_minutes,
         is_primary: false,
       });
     }
@@ -1848,13 +1878,8 @@ export class Club {
       const mId = toId(rawId, 'Membre accompagnant');
       if (seenIds.has(mId)) continue;
       seenIds.add(mId);
-      const att = this.verifyMemberRoomAccess(mId, place.bizDay, { requireRemainingCredit: true });
-      extraAttendees.push({
-        member: att.member,
-        sub: att.sub,
-        credit: att.credit,
-        included: Math.min(att.credit.available, duration),
-      });
+      // Only the holder is debited: an attendee needs no plan nor credit, and none of it is taken.
+      extraAttendees.push({ member: this.verifyAttendee(mId) });
     }
 
     const partySize = input.party_size === undefined || input.party_size === '' || input.party_size === null
@@ -1902,8 +1927,6 @@ export class Club {
         id: a.member.id,
         name: `${a.member.first_name} ${a.member.last_name}`,
         member_no: a.member.member_no,
-        included_minutes: a.included,
-        credit_available: a.credit.available,
       })),
       rooms_availability: p.rooms_availability,
       biz_day: p.place.bizDay,
@@ -1969,12 +1992,12 @@ export class Club {
       throw err;
     }
     if (p.sub) this.creditMove(actor, p.sub.id, id, 'engagement', p.included, 'Réservation confirmée');
+    // The members present are recorded, never debited: no plan, no minutes, no credit movement.
     for (const att of p.extraAttendees) {
       this.insert(
-        'INSERT INTO reservation_attendees (reservation_id, member_id, subscription_id, included_minutes, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?)',
-        id, att.member.id, att.sub.id, att.included, this.nowIso(), actor.id,
+        'INSERT INTO reservation_attendees (reservation_id, member_id, subscription_id, included_minutes, created_at, created_by) VALUES (?, ?, NULL, 0, ?, ?)',
+        id, att.member.id, this.nowIso(), actor.id,
       );
-      this.creditMove(actor, att.sub.id, id, 'engagement', att.included, `Présence en salle (${p.room.name})`);
     }
     // Paid time is one line, or two when a deposit is due: the deposit (paid now) and the balance
     // (paid before entering the room, or now as well when the member goes straight in). Paid with the card,
@@ -2041,7 +2064,7 @@ export class Club {
       throw conflict('STATUT', 'Impossible d’ajouter un membre sur une séance terminée ou annulée.');
     }
     const room = this.resolveRoom(r.room_id);
-    const { member, sub, credit } = this.verifyMemberRoomAccess(input.member_id, r.biz_day, { requireRemainingCredit: true });
+    const member = this.verifyAttendee(input.member_id);
     const who = `${member.first_name} ${member.last_name}`;
     if (member.id === r.member_id || this.get('SELECT 1 AS x FROM reservation_attendees WHERE reservation_id = ? AND member_id = ?', r.id, member.id)) {
       throw conflict('DEJA_PRESENT', `${who} est déjà enregistré(e) dans cette salle.`);
@@ -2050,16 +2073,13 @@ export class Club {
     const newCount = Math.max(r.party_size, 1 + n) + 1;
     this.validateOccupancy(room, newCount, 2 + n);
     this.ensureMembersAvailable([member.id], r.start_ms, r.end_ms, r.id);
-    const included = Math.min(credit.available, r.duration_min);
+    // Recorded as present, never debited: only the holder's plan pays for the room.
     this.insert(
-      'INSERT INTO reservation_attendees (reservation_id, member_id, subscription_id, included_minutes, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?)',
-      r.id, member.id, sub.id, included, this.nowIso(), actor.id,
+      'INSERT INTO reservation_attendees (reservation_id, member_id, subscription_id, included_minutes, created_at, created_by) VALUES (?, ?, NULL, 0, ?, ?)',
+      r.id, member.id, this.nowIso(), actor.id,
     );
-    this.creditMove(actor, sub.id, r.id, 'engagement', included, `Présence en salle (${room.name})`);
     this.run('UPDATE reservations SET party_size = ?, updated_at = ?, updated_by = ? WHERE id = ?', newCount, this.nowIso(), actor.id, r.id);
-    this.audit(actor, 'reservation.ajouter_membre', 'reservation', r.id, {
-      membre: who, member_no: member.member_no, minutes_engagees: included,
-    });
+    this.audit(actor, 'reservation.ajouter_membre', 'reservation', r.id, { membre: who, member_no: member.member_no });
     return this.reservationDetail(r.id);
   }
 
@@ -2074,14 +2094,11 @@ export class Club {
     }
     const row = this.get('SELECT * FROM reservation_attendees WHERE reservation_id = ? AND member_id = ?', r.id, mId);
     if (!row) throw notFound('Membre présent');
-    const open = this.committedFor(r.id, row.subscription_id);
-    if (open > 0) {
-      this.creditMove(actor, row.subscription_id, r.id, 'liberation', open, 'Retrait de la salle');
-    }
+    // Nothing of an attendee's was taken, so nothing is given back.
     this.run('DELETE FROM reservation_attendees WHERE id = ?', row.id);
     const { n } = this.get('SELECT COUNT(*) AS n FROM reservation_attendees WHERE reservation_id = ?', r.id);
     this.run('UPDATE reservations SET party_size = ?, updated_at = ?, updated_by = ? WHERE id = ?', Math.max(r.party_size - 1, 1 + n), this.nowIso(), actor.id, r.id);
-    this.audit(actor, 'reservation.retirer_membre', 'reservation', r.id, { member_id: mId, minutes_liberees: open });
+    this.audit(actor, 'reservation.retirer_membre', 'reservation', r.id, { member_id: mId });
     return this.reservationDetail(r.id);
   }
 
@@ -2348,11 +2365,8 @@ export class Club {
     if (r.status === 'en_cours') this.recordOvertime(actor, r);
     // A booking without a plan has no minutes of its holder to consume.
     const open = r.subscription_id ? this.committedFor(r.id, r.subscription_id) : 0;
+    // Only the holder's minutes are consumed: the members present were never debited.
     if (open) this.creditMove(actor, r.subscription_id, r.id, 'consommation', open, 'Réservation terminée');
-    for (const att of this.all('SELECT * FROM reservation_attendees WHERE reservation_id = ?', r.id)) {
-      const attOpen = this.committedFor(r.id, att.subscription_id);
-      this.creditMove(actor, att.subscription_id, r.id, 'consommation', attOpen, 'Réservation terminée (présence en salle)');
-    }
     this.run(
       "UPDATE reservations SET status = 'terminee', finished_at = ?, finished_by = ?, updated_at = ?, updated_by = ? WHERE id = ?",
       this.nowIso(), actor.id, this.nowIso(), actor.id, r.id,
@@ -2444,10 +2458,6 @@ export class Club {
     const what = absence ? 'Absence' : 'Annulation';
     const released = r.subscription_id ? this.committedFor(r.id, r.subscription_id) : 0;
     if (released) this.creditMove(actor, r.subscription_id, r.id, 'liberation', released, `${what} : ${reason}`);
-    for (const att of this.all('SELECT * FROM reservation_attendees WHERE reservation_id = ?', r.id)) {
-      const attReleased = this.committedFor(r.id, att.subscription_id);
-      this.creditMove(actor, att.subscription_id, r.id, 'liberation', attReleased, `${what} : ${reason}`);
-    }
     const due = this.all("SELECT * FROM charges WHERE reservation_id = ? AND status = 'due'", r.id);
     for (const c of due) this.voidCharge(actor, c, `${what} de la réservation : ${reason}`);
     const paid = this.all("SELECT * FROM charges WHERE reservation_id = ? AND status = 'payee'", r.id);

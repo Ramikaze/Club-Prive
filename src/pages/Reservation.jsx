@@ -28,7 +28,6 @@ function ReservationDetail({ d, products, reload }) {
     member_id: r.member_id,
     name: r.member_name,
     member_no: r.member_no,
-    included_minutes: r.included_minutes,
     is_primary: true,
   }];
   const itemKey = useRef(newKey());
@@ -68,7 +67,7 @@ function ReservationDetail({ d, products, reload }) {
 
   const onFinish = () => actionDialog({
     title: 'Terminer la réservation',
-    message: `Les crédits engagés des ${attendees.length} membre(s) présent(s) seront comptés comme consommés.${dueTotal ? ` Il reste ${money(dueTotal)} à encaisser sur la note.` : ''}`,
+    message: `Le crédit engagé du titulaire sera compté comme consommé ; les membres présents ne sont pas débités.${dueTotal ? ` Il reste ${money(dueTotal)} à encaisser sur la note.` : ''}`,
     confirmLabel: 'Terminer',
     run: async () => {
       await api.post(`/api/reservations/${r.id}/finish`, {});
@@ -158,7 +157,7 @@ function ReservationDetail({ d, products, reload }) {
             ) : <span>{r.room_name}</span>}
           </div>
           <div className="row" style={{ gap: 10 }}>
-            <span><strong>Membres présents ({attendees.length}/{r.room_capacity ?? 8})</strong> — carte active & crédit &gt; 0 requis</span>
+            <span><strong>Membres présents ({attendees.length}/{r.room_capacity ?? 8})</strong> — seul le titulaire est débité</span>
             {editableOccupancy && Math.max(r.party_size, attendees.length) < (r.room_capacity ?? 8) ? (
               <button type="button" className="btn btn-sm" onClick={() => openAddAttendeeDialog(r, reload)}>
                 <Icon name="plus" /> Ajouter un membre présent
@@ -177,7 +176,7 @@ function ReservationDetail({ d, products, reload }) {
                 {att.name}
               </Link>
               <span style={{ opacity: 0.85, fontWeight: 400 }}>
-                ({att.card_code || att.member_no} · −{fmtDuration(att.included_minutes)})
+                ({att.card_code || att.member_no})
               </span>
               {editableOccupancy && !att.is_primary ? (
                 <button

@@ -96,7 +96,6 @@ function RoomCard({ room, bizDay, canManage, canDelete, onReload }) {
     member_id: r.member_id,
     name: r.member_name,
     member_no: r.member_no,
-    included_minutes: r.included_minutes,
     is_primary: true,
   }] : []);
   const occupancy = Math.max(r?.party_size ?? 0, attendees.length);
@@ -168,7 +167,7 @@ function RoomCard({ room, bizDay, canManage, canDelete, onReload }) {
                 className="btn btn-sm"
                 disabled={atCapacity}
                 onClick={() => openAddAttendeeDialog(r, onReload)}
-                title={atCapacity ? `Capacité maximale atteinte (${room.capacity} personnes)` : 'Ajouter un membre ayant une carte active et du crédit disponible'}
+                title={atCapacity ? `Capacité maximale atteinte (${room.capacity} personnes)` : 'Ajouter un membre présent (seul le titulaire est débité)'}
               >
                 <Icon name="plus" /> Membre ({occupancy}/{room.capacity})
               </button>
@@ -178,7 +177,7 @@ function RoomCard({ room, bizDay, canManage, canDelete, onReload }) {
 
             <div>
               <div className="subtle" style={{ fontSize: '0.76rem', marginBottom: 5 }}>
-                Membres présents dans la salle (crédit individuel décompté) :
+                Membres présents dans la salle :
               </div>
               <div className="attendee-chips">
                 {attendees.map((att) => (
@@ -191,7 +190,7 @@ function RoomCard({ room, bizDay, canManage, canDelete, onReload }) {
                       {att.name}
                     </Link>
                     <span style={{ opacity: 0.8, fontWeight: 400 }}>
-                      ({att.card_code || att.member_no} · −{fmtDuration(att.included_minutes)})
+                      ({att.card_code || att.member_no})
                     </span>
                     {!att.is_primary && (
                       <button
@@ -199,7 +198,7 @@ function RoomCard({ room, bizDay, canManage, canDelete, onReload }) {
                         className="chip-remove-btn"
                         onClick={() => quickRemoveAttendee(r, att, onReload)}
                         aria-label={`Retirer ${att.name} de la salle`}
-                        title={`Retirer ${att.name} et libérer son crédit`}
+                        title={`Retirer ${att.name} de la salle`}
                       >
                         ×
                       </button>

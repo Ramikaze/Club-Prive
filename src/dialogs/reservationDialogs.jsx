@@ -48,8 +48,8 @@ const creditLine = (summary) => (summary?.credit
   ? ` · crédit disponible ${fmtDuration(summary.credit.available)}` : '');
 
 // Whether a member may take the room. With `card`, the booking member who has no plan, or no time left on it,
-// may still book: the time is then paid with the card's money (`cardOnly`). The people he brings along always
-// need their own plan and time.
+// may still book: the time is then paid with the card's money (`cardOnly`). The members he brings along are
+// never debited: see attendeeEligibility.
 export function memberRoomEligibility(m, { card = false } = {}) {
   if (!m) return { ok: false, reason: 'Membre inconnu' };
   if (m.active === false) return { ok: false, reason: 'Membre désactivé' };
@@ -61,6 +61,16 @@ export function memberRoomEligibility(m, { card = false } = {}) {
   else if (avail <= 0) reason = 'Crédit épuisé (0 min)';
   if (!reason) return { ok: true, available: avail };
   return card ? { ok: true, available: 0, cardOnly: true, reason } : { ok: false, reason };
+}
+
+// Whether a member may be present in someone else's room: only the holder is debited, so an attendee needs
+// neither a plan nor credit, only to be active and to have a card that is not deactivated (the server checks the
+// same).
+export function attendeeEligibility(m) {
+  if (!m) return { ok: false, reason: 'Membre inconnu' };
+  if (m.active === false) return { ok: false, reason: 'Membre désactivé' };
+  if (m.cards_deactivated) return { ok: false, reason: 'Carte désactivée' };
+  return { ok: true };
 }
 
 const conflictText = (conflicts) => conflicts.map((c) => `${c.member_name} (${c.start_time} – ${c.end_time})`).join(', ');
@@ -119,10 +129,8 @@ function QuotePanel({ q, now, card }) {
         ) : <div><dt>Formule (titulaire)</dt><dd>Aucune formule : tout le temps est payant</dd></div>}
         {q.extra_attendees?.length ? (
           <div>
-            <dt>Crédits accompagnants ({q.extra_attendees.length})</dt>
-            <dd>
-              {q.extra_attendees.map((a) => `${a.name} : −${fmtDuration(a.included_minutes)} (sur ${fmtDuration(a.credit_available)})`).join(' · ')}
-            </dd>
+            <dt>Membres présents ({q.extra_attendees.length})</dt>
+            <dd>{`${q.extra_attendees.map((a) => a.name).join(' · ')} (non débités)`}</dd>
           </div>
         ) : null}
         <div><dt>Temps payant</dt><dd>{supplementText(q.paid_minutes, q.tariff)}
@@ -578,7 +586,7 @@ function AddAttendeeDialog({ close, r, onDone }) {
   const presentIds = new Set((r.attendees ?? [{ member_id: r.member_id }]).map((a) => a.member_id));
 
   const addMember = (m) => {
-    const elig = memberRoomEligibility(m);
+    const elig = attendeeEligibility(m);
     if (!elig.ok) {
       toast(`Accès refusé pour ${m.name} : ${elig.reason}.`, 'error');
       return;
@@ -586,7 +594,7 @@ function AddAttendeeDialog({ close, r, onDone }) {
     submit(async () => {
       const res = await api.post(`/api/reservations/${r.id}/attendees`, { member_id: m.id }, newKey());
       close();
-      toast(`${m.name} ajouté(e) dans ${r.room_name} (crédit engagé sur sa carte).`);
+      toast(`${m.name} ajouté(e) dans ${r.room_name}.`);
       onDone?.(res);
     });
   };
@@ -606,12 +614,12 @@ function AddAttendeeDialog({ close, r, onDone }) {
           );
         });
         // Show eligible members first
-        filtered.sort((a, b) => Number(memberRoomEligibility(b).ok) - Number(memberRoomEligibility(a).ok));
+        filtered.sort((a, b) => Number(attendeeEligibility(b).ok) - Number(attendeeEligibility(a).ok));
 
         return (
           <div className="form-grid">
             <Notice kind="info">
-              Seuls les membres disposant d’une <strong>carte active</strong> et d’un <strong>crédit d’utilisation restant (&gt; 0 min)</strong> peuvent entrer dans la salle. Chaque membre présent consomme son propre crédit ({fmtDuration(r.duration_min)} max pour cette séance).
+              Seul le titulaire de la réservation est débité : les membres présents n’utilisent ni leur formule ni leur carte. Un membre dont la carte est désactivée ne peut pas entrer.
             </Notice>
             <div className="search">
               <Icon name="search" />
@@ -627,8 +635,7 @@ function AddAttendeeDialog({ close, r, onDone }) {
             <FormError error={error} />
             <div className="list" style={{ maxHeight: 340, overflowY: 'auto' }}>
               {filtered.length ? filtered.map((m) => {
-                const elig = memberRoomEligibility(m);
-                const deduction = elig.ok ? Math.min(elig.available, r.duration_min) : 0;
+                const elig = attendeeEligibility(m);
                 return (
                   <button
                     key={m.id}
@@ -642,13 +649,9 @@ function AddAttendeeDialog({ close, r, onDone }) {
                       <div className="title">
                         <strong>{m.name}</strong> <span className="subtle">{m.member_no}{m.card_code ? ` · carte ${m.card_code}` : ''}</span>
                       </div>
-                      <div className="meta">
-                        {subStateLabel(m.subscription)}{creditLine(m.subscription)}
-                        {elig.ok ? ` · Décompte séance : −${fmtDuration(deduction)}` : ''}
-                      </div>
                     </div>
                     {elig.ok ? (
-                      <span className="chip chip-ok">+ Faire entrer ({fmtDuration(elig.available)} dispo)</span>
+                      <span className="chip chip-ok">+ Faire entrer</span>
                     ) : (
                       <span className="chip chip-danger">{elig.reason}</span>
                     )}
@@ -673,7 +676,7 @@ export function openAddAttendeeDialog(r, onDone) {
 export async function quickRemoveAttendee(r, att, onDone) {
   try {
     const res = await api.del(`/api/reservations/${r.id}/attendees/${att.member_id}`, {}, newKey());
-    toast(`${att.name} retiré(e) de ${r.room_name} (crédit libéré).`);
+    toast(`${att.name} retiré(e) de ${r.room_name}.`);
     onDone?.(res);
   } catch (e) {
     toast(e.message, 'error');
