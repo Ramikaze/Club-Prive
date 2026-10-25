@@ -146,7 +146,7 @@ function ShareTicketDialog({ close, file, text, title, digits, demo }) {
   // message and lets the contact be chosen.
   const waHref = !demo && digits ? waLink(digits, text) : `https://wa.me/?text=${encodeURIComponent(text)}`;
   return (
-    <Modal title={title} onClose={close}>
+    <Modal title={title} size="wide" onClose={close}>
       <div className="form-grid">
         {demo ? <Notice kind="info">Démo : le ticket porte « DÉMO — SANS VALEUR » et les données sont fictives.</Notice> : null}
         <p className="muted">{useShare
@@ -154,19 +154,7 @@ function ShareTicketDialog({ close, file, text, title, digits, demo }) {
             : canCopy
               ? '« Envoyer sur WhatsApp » copie le ticket et ouvre la conversation avec le message écrit. Faites Cmd + V (ou Ctrl + V) avant d’envoyer : le ticket et le message partent ensemble.'
               : '« Envoyer sur WhatsApp » ouvre la conversation avec le message écrit ; joignez le ticket téléchargé (trombone, puis Photos ou Document).'}</p>
-        <div className="ticket-image-box">
-          <img src={url} alt={`Ticket ${file.name}`} className="ticket-image-preview" />
-          {canCopy ? (
-            <button type="button" className="btn btn-sm btn-ghost wa-copy" onClick={copyImage} title="Copier l’image du ticket" aria-label="Copier l’image du ticket">
-              <Icon name="copy" /></button>
-          ) : null}
-        </div>
-        <div className="wa-message-box">
-          <blockquote className="wa-message">{text}</blockquote>
-          <button type="button" className="btn btn-sm btn-ghost wa-copy" onClick={copyText} title="Copier le message" aria-label="Copier le message">
-            <Icon name="copy" /></button>
-        </div>
-        <div className="modal-actions">
+        <div className="modal-actions share-actions">
           <a className="btn btn-ghost" href={url} download={file.name}><Icon name="download" /> Télécharger le ticket</a>
           {useShare
             ? <button type="button" className="btn btn-primary" onClick={share}><Icon name="message" /> Envoyer sur WhatsApp</button>
@@ -174,6 +162,21 @@ function ShareTicketDialog({ close, file, text, title, digits, demo }) {
               <a className="btn btn-primary" href={waHref} target="_blank" rel="noopener noreferrer" onClick={openWhatsApp}>
                 <Icon name="message" /> {copied ? 'Ouvrir WhatsApp (ticket copié)' : 'Envoyer sur WhatsApp'}</a>
             )}
+        </div>
+        {/* The picture and the message side by side, under the buttons: nothing to scroll to send. */}
+        <div className="share-ticket">
+          <div className="ticket-image-box">
+            <img src={url} alt={`Ticket ${file.name}`} className="ticket-image-preview" />
+            {canCopy ? (
+              <button type="button" className="btn btn-sm btn-ghost wa-copy" onClick={copyImage} title="Copier l’image du ticket" aria-label="Copier l’image du ticket">
+                <Icon name="copy" /></button>
+            ) : null}
+          </div>
+          <div className="wa-message-box">
+            <blockquote className="wa-message">{text}</blockquote>
+            <button type="button" className="btn btn-sm btn-ghost wa-copy" onClick={copyText} title="Copier le message" aria-label="Copier le message">
+              <Icon name="copy" /></button>
+          </div>
         </div>
       </div>
     </Modal>

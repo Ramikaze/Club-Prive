@@ -987,3 +987,9 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .wa-copy { position: absolute; top: 6px; right: 6px; }
 .ticket-image-box { position: relative; width: fit-content; margin: 0 auto; }
 .ticket-image-box .wa-copy { top: 0; right: -46px; }
+/* WhatsApp window: buttons first, then the picture beside the message. */
+.share-actions { justify-content: flex-start; margin-top: 0; }
+.share-ticket { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 56px; align-items: start; }
+.share-ticket .ticket-image-box { margin: 0; }
+.share-ticket .ticket-image-preview { max-height: 52vh; }
+@media (max-width: 720px) { .share-ticket { grid-template-columns: minmax(0, 1fr); gap: 16px; } .share-ticket .ticket-image-box { margin: 0 auto; } }
