@@ -62,6 +62,9 @@ export function formatMoney(minor, currency = { label: 'FCFA', decimals: 0 }) {
   return `${n} ${currency.label}`;
 }
 
+// The till's cash: the courier of an outside meal is always paid with it.
+export const CASH_METHOD = 'Espèces';
+
 // Member names as the club writes them: « Jean-Pierre » (each part of the first name capitalised) and
 // « N'DIAYE » (the last name in capitals, accents kept). Spaces are trimmed and collapsed.
 const tidy = (s) => String(s ?? '').trim().replace(/\s+/g, ' ');

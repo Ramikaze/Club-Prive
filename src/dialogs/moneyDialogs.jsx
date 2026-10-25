@@ -255,8 +255,8 @@ export function openRechargeDialog(member, onDone) {
   openDialog(RechargeDialog, { member, onDone });
 }
 
-// A meal ordered from an outside restaurant: the club pays the courier from the till, and the same exact amount is
-// taken from the member, the card first, another method for the rest. One action records both.
+// A meal ordered from an outside restaurant: the club pays the courier in cash from the till, and the same exact
+// amount is taken from the member, the card first, another method for the rest. One action records both.
 function OutsideMealDialog({ close, member, onDone }) {
   const methods = useSettings().payment_methods;
   const [key] = useState(newKey);
@@ -264,7 +264,6 @@ function OutsideMealDialog({ close, member, onDone }) {
   const navigate = useNavigate();
   const [amountText, setAmountText] = useState('');
   const [label, setLabel] = useState('');
-  const [courier, setCourier] = useState(methods[0] ?? '');
   const [restMethod, setRestMethod] = useState(methods[0] ?? '');
   const [reference, setReference] = useState('');
   // The member's booking in progress or to come, to tie the meal to it (optional).
@@ -281,12 +280,12 @@ function OutsideMealDialog({ close, member, onDone }) {
       if (!amount) throw new Error('Indiquez le montant du repas.');
       if (label.trim().length < 1) throw new Error('Indiquez le restaurant ou le plat.');
       const body = {
-        amount, label, courier_method: courier, rest_method: rest > 0 ? restMethod : undefined, reference,
+        amount, label, rest_method: rest > 0 ? restMethod : undefined, reference: rest > 0 ? reference : undefined,
         reservation_id: reservationId ? Number(reservationId) : undefined,
       };
       const res = await api.post(`/api/members/${member.id}/outside-meal`, body, key);
       close();
-      toast(`Repas enregistré : ${money(amount)}, livreur payé depuis ${courier}.`);
+      toast(`Repas enregistré : ${money(amount)}, livreur payé en espèces.`);
       onDone?.(res);
       navigate(`/caisse/ticket/${res.payment.id}`);
     });
@@ -295,14 +294,9 @@ function OutsideMealDialog({ close, member, onDone }) {
   return (
     <Modal title="Repas commandé à l’extérieur" onClose={close}>
       <form className="form-grid" onSubmit={onSubmit} noValidate>
-        <p className="muted">Membre : <strong>{member.name}</strong>. Le livreur est payé avec l’argent de la caisse, et le même montant exact est payé par la carte du membre.</p>
-        <div className="form-row">
-          <label className="field"><span>Prix payé au livreur</span>
-            <input name="amount" inputMode="decimal" autoComplete="off" placeholder="18 500" required autoFocus value={amountText} onChange={(e) => setAmountText(e.target.value)} /></label>
-          <label className="field"><span>Livreur payé depuis</span>
-            <select name="courier_method" required value={courier} onChange={(e) => setCourier(e.target.value)}>
-              {methods.map((x) => <option key={x}>{x}</option>)}</select></label>
-        </div>
+        <p className="muted">Membre : <strong>{member.name}</strong>. Le livreur est payé en espèces avec l’argent de la caisse, et le même montant exact est débité du crédit CFA de la carte.</p>
+        <label className="field"><span>Prix payé au livreur (espèces)</span>
+          <input name="amount" inputMode="decimal" autoComplete="off" placeholder="18 500" required autoFocus value={amountText} onChange={(e) => setAmountText(e.target.value)} /></label>
         <label className="field"><span>Restaurant ou plat</span>
           <input name="label" maxLength={100} required placeholder="Ex. : Le Gourmet, poulet braisé" value={label} onChange={(e) => setLabel(e.target.value)} /></label>
         {bookings.length ? (
