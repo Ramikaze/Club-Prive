@@ -252,6 +252,7 @@ export function createApi({ db, env = {}, demo = false }) {
   add('GET', '/api/members', {}, (ctx) => club.listMembers(ctx.query.q, ctx.query.statut));
   add('POST', '/api/members', {}, (ctx) => club.createMember(ctx.user, ctx.body));
   add('GET', '/api/members/:id', {}, (ctx) => club.memberDetail(ctx.params.id));
+  add('GET', '/api/members/:id/statement', {}, (ctx) => club.memberStatement(ctx.params.id, ctx.query.from, ctx.query.to));
   add('PUT', '/api/members/:id', {}, (ctx) => club.updateMember(ctx.user, ctx.params.id, ctx.body));
   // Members are deactivated, never deleted: their payments and transactions stay in the books.
   add('POST', '/api/members/:id/deactivate', {}, (ctx) => club.deactivateMember(ctx.user, ctx.params.id, ctx.body));
