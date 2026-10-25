@@ -62,6 +62,16 @@ export function formatMoney(minor, currency = { label: 'FCFA', decimals: 0 }) {
   return `${n} ${currency.label}`;
 }
 
+// Member names as the club writes them: « Jean-Pierre » (each part of the first name capitalised) and
+// « N'DIAYE » (the last name in capitals, accents kept). Spaces are trimmed and collapsed.
+const tidy = (s) => String(s ?? '').trim().replace(/\s+/g, ' ');
+export function formatFirstName(s) {
+  return tidy(s).toLocaleLowerCase('fr').replace(/(^|[\s'’-])(\p{L})/gu, (_, sep, ch) => sep + ch.toLocaleUpperCase('fr'));
+}
+export function formatLastName(s) {
+  return tidy(s).toLocaleUpperCase('fr');
+}
+
 // Places an occupation [startMs, endMs) on its business day, given by its start.
 export function placeInWindow(startMs, endMs, tz, win) {
   const s = localParts(startMs, tz);

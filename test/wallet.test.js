@@ -550,7 +550,7 @@ test('repas extérieur couvert : le club paie le livreur, la carte rembourse le 
   assert.equal(expense.cat, 'Avance repas client');
   assert.equal(expense.method, 'Espèces');
   assert.equal(expense.amount, 18500 * UM);
-  assert.equal(expense.label, 'Repas extérieur — Pizzeria Roma — Ivan Carte');
+  assert.equal(expense.label, 'Repas extérieur — Pizzeria Roma — Ivan CARTE');
   const afterwards = await treasury();
   assert.equal(flow(afterwards, 'Espèces').out, flow(before, 'Espèces').out + 18500 * UM);
   assert.equal(flow(afterwards, 'Espèces').in, flow(before, 'Espèces').in);
@@ -751,7 +751,7 @@ test('renouvellement bloqué : rien n’est pris, alerte sur la fiche et l’acc
     const alert = ok(await manager.get('/api/dashboard')).renewal_alerts.find((a) => a.member_id === member.id);
     assert.equal(alert.state, 'bloque');
     assert.equal(alert.missing, 20000 * UM);
-    assert.equal(alert.member_name, 'Pauline Carte');
+    assert.equal(alert.member_name, 'Pauline CARTE');
     assert.equal(alert.phone_ok, false);
     assert.equal(subscriptionsOf(member.id).length, 1);
 

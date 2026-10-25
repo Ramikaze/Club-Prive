@@ -140,14 +140,14 @@ test('battement : prolongation', async () => {
   await book({ member_id: members[1].id, start_time: '16:30', duration_min: 90 }); // 16:30-18:00
   const quote = ok(await manager.post(`/api/reservations/${first.id}/extend/quote`, { minutes: 30 }));
   assert.deepEqual(quote.conflicts, []);
-  assert.deepEqual(quote.gap_conflicts.map((r) => r.member_name), ['Bruno Test']);
+  assert.deepEqual(quote.gap_conflicts.map((r) => r.member_name), ['Bruno TEST']);
   const refused = rejected(await extend(first.id, 30), 'BATTEMENT');
   // Not even one step fits before the next session, and the message does not name the end it already has.
   assert.equal(
     refused.message,
     "Il faut 30 minutes entre deux réservations : la séance suivante commence à 16:30, aucune prolongation n'est possible.",
   );
-  assert.deepEqual(refused.details.conflicts.map((r) => r.member_name), ['Bruno Test']);
+  assert.deepEqual(refused.details.conflicts.map((r) => r.member_name), ['Bruno TEST']);
   // The quote carries that very sentence, for the dialog to show before anything is sent.
   assert.equal(quote.gap_message, refused.message);
   assert.equal(ok(await manager.get(`/api/reservations/${first.id}`)).reservation.duration_min, 120);
@@ -401,7 +401,7 @@ test('fenêtre : suivante à fin + 90 min, battement 30', async () => {
   // An hour more still leaves the half hour before 17:30; an hour and a half does not.
   assert.deepEqual(windowOf(first.id), {
     possible: true, max_minutes: 60, until_time: '17:00', until_at: isoOf(first.end_ms + 60 * MIN), until_next_day: false, reason: null,
-    next: { member_name: 'Bruno Test', start_time: '17:30' },
+    next: { member_name: 'Bruno TEST', start_time: '17:30' },
   });
 });
 
@@ -410,8 +410,8 @@ test('fenêtre : suivante à fin + 30 min', async () => {
   await book({ member_id: members[1].id, start_time: '16:30', duration_min: 60 }); // 16:30-17:30
   assert.deepEqual(windowOf(first.id), {
     possible: false, max_minutes: 0, until_time: null, until_at: null, until_next_day: false,
-    reason: 'Prolongation impossible : la séance suivante commence à 16:30 (Bruno Test).',
-    next: { member_name: 'Bruno Test', start_time: '16:30' },
+    reason: 'Prolongation impossible : la séance suivante commence à 16:30 (Bruno TEST).',
+    next: { member_name: 'Bruno TEST', start_time: '16:30' },
   });
 });
 
@@ -463,7 +463,7 @@ test('fenêtre : la suivante est celle de la même salle, une réservation annul
   await book({ member_id: members[1].id, start_time: '21:00', duration_min: 60 });
   await book({ member_id: members[2].id, start_time: '19:00', duration_min: 60 }); // the nearest of the two
   const w = windowOf(first.id);
-  assert.deepEqual(w.next, { member_name: 'Camille Test', start_time: '19:00' });
+  assert.deepEqual(w.next, { member_name: 'Camille TEST', start_time: '19:00' });
   assert.deepEqual([w.possible, w.max_minutes, w.until_time], [true, 150, '18:30']); // 19:00 less the half hour
 });
 
@@ -526,7 +526,7 @@ test("fenêtre et prolongation d'accord", async () => {
         return session;
       },
       expect: {
-        max: 0, code: 'BATTEMENT', reason: 'Prolongation impossible : la séance suivante commence à 16:30 (Yann Test).',
+        max: 0, code: 'BATTEMENT', reason: 'Prolongation impossible : la séance suivante commence à 16:30 (Yann TEST).',
       },
     },
     {
@@ -539,7 +539,7 @@ test("fenêtre et prolongation d'accord", async () => {
         return session;
       },
       expect: {
-        max: 0, code: 'CHEVAUCHEMENT', reason: 'Prolongation impossible : la séance suivante commence à 16:00 (Yann Test).',
+        max: 0, code: 'CHEVAUCHEMENT', reason: 'Prolongation impossible : la séance suivante commence à 16:00 (Yann TEST).',
       },
     },
     {
@@ -633,7 +633,7 @@ test("fenêtre et prolongation d'accord", async () => {
         return session;
       },
       expect: {
-        max: 0, code: 'MEMBRE_OCCUPE', reason: 'Prolongation impossible : Cam Test est déjà inscrit à une autre séance à 16:00.',
+        max: 0, code: 'MEMBRE_OCCUPE', reason: 'Prolongation impossible : Cam TEST est déjà inscrit à une autre séance à 16:00.',
       },
     },
     {
@@ -646,7 +646,7 @@ test("fenêtre et prolongation d'accord", async () => {
         return session;
       },
       expect: {
-        max: 0, code: 'MEMBRE_OCCUPE', reason: 'Prolongation impossible : Cam Test est déjà inscrit à une autre séance à 16:00.',
+        max: 0, code: 'MEMBRE_OCCUPE', reason: 'Prolongation impossible : Cam TEST est déjà inscrit à une autre séance à 16:00.',
       },
     },
     {
@@ -746,7 +746,7 @@ test('fenêtre : tarif non validé et séance suivante trop proche, la salle est
     await real.book({ member_id: yann.id, start_time: '16:30', duration_min: 60 });
     // The server looks at the room before the tariff, and so does the window.
     await real.agrees(first.id, {
-      max: 0, code: 'BATTEMENT', reason: 'Prolongation impossible : la séance suivante commence à 16:30 (Yann Test).',
+      max: 0, code: 'BATTEMENT', reason: 'Prolongation impossible : la séance suivante commence à 16:30 (Yann TEST).',
     });
   } finally {
     real.server.destroy();
@@ -758,7 +758,7 @@ test('fenêtre : exposée', async () => {
   await book({ member_id: members[1].id, start_time: '17:30', duration_min: 60 });
   const expected = {
     possible: true, max_minutes: 60, until_time: '17:00', until_at: isoOf(first.end_ms + 60 * MIN), until_next_day: false, reason: null,
-    next: { member_name: 'Bruno Test', start_time: '17:30' },
+    next: { member_name: 'Bruno TEST', start_time: '17:30' },
   };
   // On the booking's page, started or not.
   assert.deepEqual(ok(await manager.get(`/api/reservations/${first.id}`)).extension_window, expected);
@@ -773,8 +773,8 @@ test('fenêtre : exposée', async () => {
   assert.equal(extended.reservation.end_time, '17:00');
   assert.deepEqual(extended.extension_window, {
     possible: false, max_minutes: 0, until_time: null, until_at: null, until_next_day: false,
-    reason: 'Prolongation impossible : la séance suivante commence à 17:30 (Bruno Test).',
-    next: { member_name: 'Bruno Test', start_time: '17:30' },
+    reason: 'Prolongation impossible : la séance suivante commence à 17:30 (Bruno TEST).',
+    next: { member_name: 'Bruno TEST', start_time: '17:30' },
   });
 });
 
