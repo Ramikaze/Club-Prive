@@ -6,7 +6,7 @@ import {
   TICKET_ALPHABET, TICKET_CODE_LENGTH, newTicketCode, formatTicketNumber, formatTicketCode,
   normalizeTicketCode, memberInitials, ticketVerifyUrl, ticketWhatsAppText, paymentLines, RECHARGE_LINE_LABEL,
 } from '../shared/ticket.js';
-import { mealWhatsAppText, rechargeWhatsAppText, renewalWhatsAppText } from '../shared/wallet.js';
+import { mealWhatsAppText, paymentWhatsAppText, rechargeWhatsAppText, renewalWhatsAppText } from '../shared/wallet.js';
 import { formatMoney } from '../shared/rules.js';
 
 // A generator that hands out the given bytes in order, then zeros.
@@ -156,7 +156,7 @@ test('mealWhatsAppText : repas, part carte, reste éventuel et nouveau solde', (
     'Bonjour Jean,',
     `Votre repas « Le Gourmet, poulet braisé » du 24/10/2026 à 20:41 (${m(18500)}) a été payé par votre carte membre.`,
     `Votre nouveau solde est de ${m(31500)}.`,
-    'Bon appétit ! L’équipe THE LIMEN · Club privé',
+    'Merci de votre confiance. L’équipe THE LIMEN · Club privé',
   ].join('\n'));
   assert.equal(mealWhatsAppText({ ...base, amount: 18500 * 100, cardAmount: 10000 * 100, balance: 0 }).split('\n')[1],
     `Votre repas « Le Gourmet, poulet braisé » du 24/10/2026 à 20:41 (${m(18500)}) : ${m(10000)} payés par votre carte membre, ${m(8500)} réglés à la caisse.`);
@@ -166,11 +166,26 @@ test('messages de la carte : numéro du ticket et lien de vérification', () => 
   const base = { clubName: 'Limen', firstName: 'Jean', at: '2026-10-24T19:41:00.000Z', timezone: 'Africa/Brazzaville' };
   const url = 'https://club.test/#/ticket/12/ABCDEFGHJKMN';
   const recharge = rechargeWhatsAppText({ ...base, amount: 100, balance: 100, number: 'T-000012', verifyUrl: url }).split('\n');
-  assert.deepEqual(recharge.slice(3), ['Ticket T-000012', `Vérifier le ticket : ${url}`, 'Merci de votre confiance. L’équipe Limen']);
+  assert.deepEqual(recharge.slice(3), ['Ticket T-000012 (ci-dessous)', `Vérifier le ticket : ${url}`, 'Merci de votre confiance. L’équipe Limen']);
   const meal = mealWhatsAppText({ ...base, label: 'Le Gourmet', amount: 100, cardAmount: 100, balance: 0, number: 'T-000013', verifyUrl: url }).split('\n');
-  assert.deepEqual(meal.slice(3), ['Ticket T-000013', `Vérifier le ticket : ${url}`, 'Bon appétit ! L’équipe Limen']);
+  assert.deepEqual(meal.slice(3), ['Ticket T-000013 (ci-dessous)', `Vérifier le ticket : ${url}`, 'Merci de votre confiance. L’équipe Limen']);
   // The demo has no verification link: only the number.
   assert.ok(!rechargeWhatsAppText({ ...base, amount: 100, balance: 100, number: 'T-000012' }).includes('Vérifier'));
+});
+
+test('paymentWhatsAppText : consommations payées en espèces, par la carte ou les deux', () => {
+  const base = { clubName: 'Limen', firstName: 'Rami', at: '2026-10-25T21:10:00.000Z', timezone: 'Africa/Brazzaville', number: 'T-000020' };
+  const m = (n) => formatMoney(n * 100);
+  assert.equal(paymentWhatsAppText({ ...base, amount: 75000 * 100, method: 'Espèces', for: 'cigares, alcool' }), [
+    'Bonjour Rami,',
+    `Votre paiement de ${m(75000)} du 25/10/2026 à 22:10 (cigares, alcool) a bien été reçu (Espèces).`,
+    'Ticket T-000020 (ci-dessous)',
+    'Merci de votre confiance. L’équipe Limen',
+  ].join('\n'));
+  const card = paymentWhatsAppText({ ...base, amount: 75000 * 100, cardAmount: 75000 * 100, balance: 25000 * 100, method: 'Carte membre' }).split('\n');
+  assert.deepEqual(card.slice(1, 3), [`Votre paiement de ${m(75000)} du 25/10/2026 à 22:10 a été payé par votre carte membre.`, `Votre nouveau solde est de ${m(25000)}.`]);
+  const mixed = paymentWhatsAppText({ ...base, amount: 75000 * 100, cardAmount: 50000 * 100, balance: 0, method: 'Espèces' }).split('\n');
+  assert.equal(mixed[1], `Votre paiement de ${m(75000)} du 25/10/2026 à 22:10 : ${m(50000)} payés par votre carte membre, ${m(25000)} réglés en Espèces.`);
 });
 
 test('rechargeWhatsAppText : montant, nouveau solde et date', () => {

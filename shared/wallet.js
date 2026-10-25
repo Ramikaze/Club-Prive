@@ -20,7 +20,7 @@ function instantText(iso, timezone) {
 const signature = (clubName) => (clean(clubName) ? `L’équipe ${clean(clubName)}` : '').trim();
 
 const ticketLines = (number, verifyUrl) => [
-  number ? `Ticket ${clean(number)}` : '',
+  number ? `Ticket ${clean(number)} (ci-dessous)` : '',
   verifyUrl ? `Vérifier le ticket : ${verifyUrl}` : '',
 ];
 
@@ -34,8 +34,28 @@ export function mealWhatsAppText({ clubName, firstName, label, amount, cardAmoun
     : `${head} : ${money(cardAmount)} payés par votre carte membre, ${money(amount - cardAmount)} réglés à la caisse.`;
   // One sentence per line; the thanks and the signature share the last one.
   return [`Bonjour ${clean(firstName)},`, body, `Votre nouveau solde est de ${money(balance)}.`, ...ticketLines(number, verifyUrl),
-    `Bon appétit ! ${signature(clubName)}`]
+    `Merci de votre confiance. ${signature(clubName)}`]
     .filter(Boolean).join('\n');
+}
+
+// The message of any other receipt (drinks and cigars taken during a session, room time, a subscription), in the
+// same words as the others: what was paid and when (with what it was for), the card's part and the rest with its
+// method, the new balance when the card paid, the ticket's number and verification link, signed by the club's team.
+export function paymentWhatsAppText({ clubName, firstName, amount, cardAmount = 0, method, balance, for: what, at, timezone, currency, number, verifyUrl }) {
+  const money = (n) => formatMoney(n, currency);
+  const head = `Votre paiement de ${money(amount)} du ${instantText(at, timezone)}${clean(what) ? ` (${clean(what)})` : ''}`;
+  const body = cardAmount <= 0
+    ? `${head} a bien été reçu (${clean(method)}).`
+    : cardAmount >= amount
+      ? `${head} a été payé par votre carte membre.`
+      : `${head} : ${money(cardAmount)} payés par votre carte membre, ${money(amount - cardAmount)} réglés en ${clean(method)}.`;
+  return [
+    `Bonjour ${clean(firstName)},`,
+    body,
+    cardAmount > 0 && balance != null ? `Votre nouveau solde est de ${money(balance)}.` : '',
+    ...ticketLines(number, verifyUrl),
+    `Merci de votre confiance. ${signature(clubName)}`,
+  ].filter(Boolean).join('\n');
 }
 
 // The receipt of a recharge, as the owner words it: the amount and when, the new balance, the ticket's number and

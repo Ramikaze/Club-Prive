@@ -16,7 +16,7 @@ import { dateTime, money } from '../lib/format.js';
 import { useLoad } from '../lib/hooks.js';
 import { useStore } from '../store/useStore.js';
 import { paymentLines, ticketVerifyUrl, ticketWhatsAppText } from '../../shared/ticket.js';
-import { mealWhatsAppText, rechargeWhatsAppText } from '../../shared/wallet.js';
+import { mealWhatsAppText, paymentWhatsAppText, rechargeWhatsAppText } from '../../shared/wallet.js';
 import { waDigits, waLink } from '../../shared/whatsapp.js';
 
 // The injected <style> that sets the roll's paper size, and the body class that lets the paper print. The paper
@@ -39,11 +39,14 @@ function setRollLength() {
 
 const KIND_LABEL = { impression: 'Impression demandée', whatsapp: 'WhatsApp' };
 
-// A recharge or an outside meal sends the member its short message instead (amount, card part, new balance,
-// when), unless it was cancelled: that one goes out as the ticket, which says so.
-const isMemberMessage = (ticket) => ['recharge', 'repas'].includes(ticket.kind) && !ticket.cancelled_at;
-const MESSAGE_TITLE = { recharge: 'Reçu d’approvisionnement par WhatsApp', repas: 'Message du repas par WhatsApp' };
-const MESSAGE_BUTTON = { recharge: 'Envoyer le reçu par WhatsApp', repas: 'Envoyer le message du repas par WhatsApp' };
+// Every receipt sends the member the same short message (what was paid and when, the card's part, the new balance,
+// the ticket's number), unless it was cancelled: that one goes out as the full ticket, which says so.
+const isMemberMessage = (ticket) => !ticket.cancelled_at;
+const MESSAGE_TITLE = { recharge: 'Reçu d’approvisionnement par WhatsApp', repas: 'Message du repas par WhatsApp', encaissement: 'Ticket par WhatsApp' };
+const MESSAGE_BUTTON = { recharge: 'Envoyer le reçu par WhatsApp', repas: 'Envoyer le message du repas par WhatsApp', encaissement: 'Envoyer par WhatsApp' };
+// What a receipt's lines were for, in the member's words.
+const FOR_LABEL = { reservations: 'salle', alcool: 'alcool', cigares: 'cigares' };
+const paidFor = (ticket) => Object.entries(ticket.by_account ?? {}).filter(([, v]) => v > 0).map(([k]) => FOR_LABEL[k] ?? k).join(', ');
 
 // The text sent on WhatsApp for one copy: the same content as the sheet. The demo has no verification link.
 function whatsAppText(ticket, copyNo) {
@@ -55,9 +58,9 @@ function whatsAppText(ticket, copyNo) {
       at: ticket.paid_at, timezone, currency, number: ticket.number,
       verifyUrl: verifiable ? ticketVerifyUrl(window.location.origin, ticket.id, ticket.ticket_code) : null,
     };
-    return ticket.kind === 'repas'
-      ? mealWhatsAppText({ ...common, label: ticket.label, cardAmount: ticket.card_amount })
-      : rechargeWhatsAppText(common);
+    if (ticket.kind === 'repas') return mealWhatsAppText({ ...common, label: ticket.label, cardAmount: ticket.card_amount });
+    if (ticket.kind === 'recharge') return rechargeWhatsAppText(common);
+    return paymentWhatsAppText({ ...common, cardAmount: ticket.card_amount, method: ticket.method, for: paidFor(ticket) });
   }
   const verifiable = !ticket.demo && Boolean(ticket.ticket_code);
   return ticketWhatsAppText({
