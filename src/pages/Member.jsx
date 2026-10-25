@@ -242,6 +242,7 @@ function MemberDetail({ m, reload }) {
         actions={(
           <>
             <button type="button" className="btn" onClick={() => openMemberDialog(m, reload)}><Icon name="edit" /> Modifier</button>
+            <Link className="btn" to={`/membres/${m.id}/releve`}><Icon name="statement" /> Relevé</Link>
             {m.active
               ? <button type="button" className="btn btn-danger" onClick={() => openDeactivateMemberDialog(m, reload)}><Icon name="ban" /> Désactiver</button>
               : <button type="button" className="btn" onClick={() => openReactivateMemberDialog(m, reload)}><Icon name="undo" /> Réactiver</button>}

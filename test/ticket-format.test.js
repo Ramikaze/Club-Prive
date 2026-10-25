@@ -7,7 +7,8 @@ import {
   normalizeTicketCode, memberInitials, ticketVerifyUrl, ticketWhatsAppText, paymentLines, RECHARGE_LINE_LABEL,
 } from '../shared/ticket.js';
 import {
-  bookingWhatsAppText, mealWhatsAppText, paymentWhatsAppText, rechargeWhatsAppText, renewalWhatsAppText, weekdayDayText,
+  bookingWhatsAppText, mealWhatsAppText, paymentWhatsAppText, rechargeWhatsAppText, renewalWhatsAppText, statementWhatsAppText,
+  weekdayDayText,
 } from '../shared/wallet.js';
 import { formatMoney } from '../shared/rules.js';
 
@@ -254,4 +255,13 @@ test('bookingWhatsAppText : une phrase par ligne, signée par l’équipe du clu
   // One person is singular; a missing or broken party size counts one.
   assert.match(bookingWhatsAppText({ ...booking, partySize: 1 }), /\(1 personne\)\.\n/);
   assert.match(bookingWhatsAppText({ ...booking, partySize: null }), /\(1 personne\)\.\n/);
+});
+
+test('statementWhatsAppText : la période du relevé, une phrase par ligne, signée par l’équipe du club', () => {
+  assert.equal(statementWhatsAppText({ clubName: 'Limen', firstName: ' Rami ', from: '2026-10-01', to: '2026-10-25' }), [
+    'Bonjour Rami,',
+    'Voici votre relevé de compte du 01/10/2026 au 25/10/2026.',
+    'Relevé (ci-dessous)',
+    'Merci de votre confiance. L’équipe Limen',
+  ].join('\n'));
 });

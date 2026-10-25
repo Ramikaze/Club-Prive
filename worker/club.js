@@ -305,11 +305,12 @@ export class Club {
   bizToday() { return this.bizDayOf(this.nowMs()); }
 
   // Financial periods follow business days (opening time to opening time the next day),
-  // so a payment taken at 01:00 belongs to the evening it was earned.
-  periodBounds(from, to) {
+  // so a payment taken at 01:00 belongs to the evening it was earned. `maxDays` caps the span (a member's
+  // statement reaches back to the day he joined).
+  periodBounds(from, to, maxDays = 400) {
     if (!isValidDate(from) || !isValidDate(to)) throw invalid('Période invalide.');
     if (to < from) throw invalid('La date de fin doit suivre la date de début.');
-    if (daysBetween(from, to) > 400) throw invalid('Période limitée à 400 jours.');
+    if (daysBetween(from, to) > maxDays) throw invalid(`Période limitée à ${maxDays} jours.`);
     const s = this.settings();
     return [
       new Date(localToUtcMs(from, s.hours.open, s.timezone)).toISOString(),
@@ -907,6 +908,78 @@ export class Club {
       subscriptions, cards, reservations, charges, payments, balance_due: due,
       wallet: this.walletDTO(m.id),
       renewal: this.renewalStatus(m.id, today),
+    };
+  }
+
+  // The member's statement (relevé de compte) over the business days `from` to `to` (this month by default):
+  // the card's balance at both ends and what moved it, every payment and refund, the bookings and the plan. The
+  // card's movements carry the running balance over the member's whole history, so the first one of the period
+  // starts from what came before it.
+  memberStatement(memberId, from, to) {
+    const m = this.memberRow(memberId);
+    const today = this.bizToday();
+    const end = to ?? today;
+    const start = from ?? `${String(end).slice(0, 8)}01`;
+    const [a, b] = this.periodBounds(start, end, 3660);
+    const balanceBefore = (iso) => this.get(
+      'SELECT COALESCE(SUM(amount), 0) AS n FROM wallet_movements WHERE member_id = ? AND created_at < ?', m.id, iso,
+    ).n;
+    const wallet = this.all(
+      `SELECT x.*, u.name AS by_name FROM (
+         SELECT w.*, SUM(w.amount) OVER (ORDER BY w.id) AS balance_after FROM wallet_movements w WHERE w.member_id = ?
+       ) x LEFT JOIN users u ON u.id = x.created_by WHERE x.created_at >= ? AND x.created_at < ? ORDER BY x.id`, m.id, a, b,
+    ).map((w) => ({
+      id: w.id, kind: w.kind, amount: w.amount, balance_after: w.balance_after, at: w.created_at, by_name: w.by_name ?? null,
+      payment_id: w.payment_id, number: w.payment_id ? formatTicketNumber(w.payment_id) : null, reason: w.reason,
+    }));
+    const payments = this.all(
+      `SELECT p.*, mm.first_name, mm.last_name, mm.member_no, u.name AS created_by_name FROM payments p
+       JOIN members mm ON mm.id = p.member_id LEFT JOIN users u ON u.id = p.created_by
+       WHERE p.member_id = ? AND p.paid_at >= ? AND p.paid_at < ? ORDER BY p.paid_at, p.id`, m.id, a, b,
+    ).map((p) => {
+      const dto = this.paymentDTO(p);
+      return { ...dto, number: formatTicketNumber(p.id), lines: paymentLines(dto) };
+    });
+    const refunds = this.all(
+      `SELECT rf.id, rf.payment_id, rf.account, rf.amount, rf.card_amount, rf.method, rf.reason, rf.created_at,
+         c.label, c.quantity
+       FROM refunds rf JOIN payments p ON p.id = rf.payment_id JOIN charges c ON c.id = rf.charge_id
+       WHERE p.member_id = ? AND rf.created_at >= ? AND rf.created_at < ? ORDER BY rf.created_at, rf.id`, m.id, a, b,
+    ).map((r) => ({
+      id: r.id, payment_id: r.payment_id, number: formatTicketNumber(r.payment_id), account: r.account, amount: r.amount,
+      card_amount: r.card_amount, method: r.method, reason: r.reason, at: r.created_at, label: r.label, quantity: r.quantity,
+    }));
+    // The bookings he holds or joins whose business day falls in the period.
+    const reservations = this.all(`${RES_SELECT} WHERE (r.member_id = ? OR EXISTS (
+      SELECT 1 FROM reservation_attendees ra WHERE ra.reservation_id = r.id AND ra.member_id = ?
+    )) AND r.biz_day >= ? AND r.biz_day <= ? ORDER BY r.start_ms`, m.id, m.id, start, end)
+      .map((r) => this.reservationDTO(r));
+    const subscriptions = this.all(
+      `SELECT s.*, u.name AS created_by_name FROM subscriptions s LEFT JOIN users u ON u.id = s.created_by
+       WHERE s.member_id = ? AND s.start_date <= ? AND s.end_date >= ? ORDER BY s.start_date`, m.id, end, start,
+    ).map((s) => this.subscriptionDTO(s, today));
+    const sumOf = (kind) => wallet.filter((w) => w.kind === kind).reduce((n, w) => n + w.amount, 0);
+    const kept = payments.filter((p) => !p.cancelled_at);
+    const { due } = this.get("SELECT COALESCE(SUM(amount), 0) AS due FROM charges WHERE member_id = ? AND status = 'due'", m.id);
+    return {
+      member: this.memberBase(m),
+      period: { from: start, to: end, start_at: a, end_at: b },
+      issued_at: this.nowIso(),
+      summary: {
+        balance_start: balanceBefore(a),
+        balance_end: balanceBefore(b),
+        recharged: sumOf('recharge'),
+        recharge_cancelled: -sumOf('annulation_recharge'),
+        card_paid: -sumOf('paiement'),
+        card_refunded: sumOf('remboursement'),
+        // Every payment of the period that still stands, the card's part included (it was recharged first).
+        collected: kept.reduce((n, p) => n + p.amount, 0),
+        collected_card: kept.reduce((n, p) => n + (p.card_amount ?? 0), 0),
+        refunded: refunds.reduce((n, r) => n + r.amount, 0),
+        due_now: due,
+      },
+      wallet, payments, refunds, reservations, subscriptions,
+      subscription: this.subscriptionSummary(m.id, today),
     };
   }
 

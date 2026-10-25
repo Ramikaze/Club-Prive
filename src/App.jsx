@@ -13,6 +13,7 @@ import Agenda from './pages/Agenda.jsx';
 import Members from './pages/Members.jsx';
 import Member from './pages/Member.jsx';
 import MemberCard from './pages/MemberCard.jsx';
+import Statement from './pages/Statement.jsx';
 import Reservation from './pages/Reservation.jsx';
 import BookingConfirmation from './pages/BookingConfirmation.jsx';
 import Products from './pages/Products.jsx';
@@ -153,6 +154,7 @@ export default function App() {
             <Route path="agenda" element={<Agenda />} />
             <Route path="membres" element={<Members />} />
             <Route path="membres/:id" element={<Member />} />
+            <Route path="membres/:id/releve" element={<Statement />} />
             <Route path="cartes/:id" element={<MemberCard />} />
             <Route path="reservations/:id" element={<Reservation />} />
             <Route path="reservations/:id/confirmation" element={<BookingConfirmation />} />

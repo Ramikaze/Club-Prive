@@ -867,6 +867,56 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
   transform: translate(-50%, -50%) rotate(-35deg); font-size: 20pt; font-weight: 900; color: rgba(0, 0, 0, 0.16); pointer-events: none;
 }
 
+/* ------------------------------------------------------------------ member statement (relevé de compte) */
+
+/* An A4 page, black on white in both themes: the paper (12 mm of margin, as printed) holds the sheet, which is the
+   element printed and drawn into the PDF. The sheet keeps the width of the printed column (186 mm) on every screen,
+   so the PDF made on a phone is laid out as on a computer: a narrow screen scrolls the paper sideways. */
+.statement-stage { overflow-x: auto; padding: 8px 0 28px; }
+.statement-paper { box-sizing: border-box; width: 210mm; margin: 0 auto; padding: 12mm; background: #fff; box-shadow: var(--shadow-lg); }
+.statement-sheet {
+  position: relative; box-sizing: border-box; width: 186mm; background-color: #fff; background-repeat: repeat; color: #000;
+  font: 9.5pt/1.4 Arial, Helvetica, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; overflow-wrap: anywhere;
+}
+.statement-sheet p, .statement-sheet h2, .statement-sheet h3, .statement-sheet dl { margin: 0; padding: 0; }
+.st-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8mm; padding-bottom: 4mm; border-bottom: 2px solid #000; }
+.st-brand { flex: none; width: 58mm; }
+.st-logo { display: block; width: 52mm; height: auto; color: #000; }
+.st-header { margin-top: 1.5mm; font-size: 8.5pt; white-space: pre-line; }
+.st-ident { flex: 1; min-width: 0; text-align: right; }
+.st-title { display: block; font-size: 15pt; letter-spacing: 0.06em; }
+.st-name { margin: 1mm 0 2mm; font-size: 12pt; font-weight: 700; }
+.st-facts { display: grid; gap: 0.8mm; }
+.st-facts > div { display: flex; justify-content: space-between; gap: 4mm; align-items: baseline; }
+.st-facts dt { flex: none; }
+.st-facts dd { margin: 0; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+.st-ident .st-facts > div { justify-content: flex-end; }
+.st-facts .st-strong { padding-top: 0.8mm; border-top: 1px solid #000; font-size: 10.5pt; }
+.st-facts-wide { max-width: 110mm; margin-bottom: 2mm; }
+.st-section { padding-top: 5mm; }
+.st-section h2 { margin-bottom: 2mm; padding-bottom: 1mm; border-bottom: 1px solid #000; font-size: 11pt; letter-spacing: 0.04em; text-transform: uppercase; break-after: avoid; }
+.st-section h3 { margin: 3mm 0 1mm; font-size: 10pt; break-after: avoid; }
+.st-summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10mm; }
+.st-table { width: 100%; border-collapse: collapse; }
+.st-table th { padding: 1mm 1.5mm; border-bottom: 1.5px solid #000; text-align: left; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.03em; }
+.st-table td { padding: 1.2mm 1.5mm; border-bottom: 0.5px solid #888; vertical-align: top; }
+.st-table thead { display: table-header-group; }
+.st-table tr { break-inside: avoid; }
+.st-table .st-num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.st-nowrap { white-space: nowrap; }
+.st-sub { font-size: 8pt; color: #333; }
+.st-table .is-cancelled .st-amount { text-decoration: line-through; }
+.st-table tr.is-cancelled td { color: #555; }
+.st-empty { padding: 1mm 0; font-style: italic; }
+.st-foot { margin-top: 6mm; padding-top: 2mm; border-top: 1px solid #000; text-align: center; font-size: 8pt; }
+.st-demo { margin: 0 0 4mm; padding: 1.5mm; border: 2px solid #000; text-align: center; font-weight: 800; letter-spacing: 0.06em; }
+.st-demo:last-child { margin: 4mm 0 0; }
+.st-keep { break-inside: avoid; }
+/* The file shown in the share dialog in place of a picture. */
+.pdf-file-box { display: flex; gap: 12px; align-items: flex-start; }
+.pdf-file-box .title { font-weight: 600; overflow-wrap: anywhere; }
+.pdf-file-box .btn { margin-top: 6px; }
+
 /* ------------------------------------------------------------------ member card in 3D (MemberCard3D) */
 
 /* The card keeps its own black and gold in both themes: it is the plastic card, not a surface of the page. Sizes
@@ -964,6 +1014,15 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
   body.print-ticket:not(.ticket-armed) .ticket-unarmed {
     display: block; padding: 10mm 6mm; color: #000; font: 700 11pt/1.4 Arial, Helvetica, sans-serif; text-align: center;
   }
+
+  /* The statement page (body class set by the page, with the A4 @page and its 12 mm margins): only the sheet
+     prints, the margins replacing the paper's, without the demo frame and watermark the shell would draw over it
+     (the sheet carries its own). */
+  body.print-statement main { max-width: none; margin: 0; }
+  body.print-statement .shell.is-demo::before, body.print-statement .demo-watermark { display: none !important; }
+  body.print-statement .statement-stage { overflow: visible; padding: 0; }
+  body.print-statement .statement-paper { width: auto; padding: 0; box-shadow: none; }
+  body.print-statement .statement-sheet { width: auto; }
 }
 
 /* Picture of a ticket before it is shared on WhatsApp. */

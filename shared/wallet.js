@@ -93,6 +93,17 @@ export function bookingWhatsAppText({ clubName, firstName, roomName, day, startT
   ].filter(Boolean).join('\n');
 }
 
+// The message sent with the member's statement (its PDF follows it): the period, from `from` to `to`
+// ('YYYY-MM-DD'), signed by the club's team.
+export function statementWhatsAppText({ clubName, firstName, from, to }) {
+  return [
+    `Bonjour ${clean(firstName)},`,
+    `Voici votre relevé de compte du ${dayText(from)} au ${dayText(to)}.`,
+    'Relevé (ci-dessous)',
+    `Merci de votre confiance. ${signature(clubName)}`,
+  ].join('\n');
+}
+
 // The renewal alert (renewalStatus): `bientot` before the end of the subscription, `bloque` after it, when the
 // card's `balance` does not cover the plan's `price`; it says what is missing.
 export function renewalWhatsAppText({ clubName, firstName, planName, endDate, balance, price, state, currency }) {

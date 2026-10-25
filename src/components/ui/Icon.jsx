@@ -4,7 +4,7 @@ import {
   CreditCard, TriangleAlert, Info, Check, X, Moon, Printer, Download, Clock, Menu, KeyRound, Pencil, List, Receipt,
   Landmark, BookOpen, Lock, LockOpen, FileSpreadsheet, Compass, ArrowLeftRight, Ban, Undo2, Play, CircleStop,
   RotateCcw, UserPlus, HandCoins, Thermometer, Droplets, Archive, ArrowDownToLine, ArrowUpFromLine, Trash2,
-  DoorOpen, Eye, EyeOff, GraduationCap, MessageCircle, Cigarette, Wine, ImagePlus, Copy,
+  DoorOpen, Eye, EyeOff, GraduationCap, MessageCircle, Cigarette, Wine, ImagePlus, Copy, FileText,
 } from 'lucide-react';
 
 const ICONS = {
@@ -16,7 +16,7 @@ const ICONS = {
   ban: Ban, undo: Undo2, play: Play, stop: CircleStop, reset: RotateCcw, 'user-plus': UserPlus,
   cash: HandCoins, humidor: Archive, humidity: Droplets, temperature: Thermometer,
   deposit: ArrowDownToLine, withdraw: ArrowUpFromLine, trash: Trash2, eye: Eye, 'eye-off': EyeOff,
-  demo: GraduationCap, message: MessageCircle, copy: Copy,
+  demo: GraduationCap, message: MessageCircle, copy: Copy, statement: FileText,
   // Product photos: a cigar or a bottle stands in when a product has no picture (lucide has no bottle, the wine
   // glass stands for the drinks); `photo` is the button that adds one.
   cigar: Cigarette, bottle: Wine, photo: ImagePlus,
