@@ -2384,9 +2384,9 @@ export class Club {
   // The time a running session went on past its planned end, recorded when it is finished (the owner's rule:
   // the time credit left on the card runs until the member leaves). Nothing when it ends on time or earlier.
   // Counted to the minute, a minute started counting, and only up to overtimeLimit. The session is lengthened by it, without the overlap and gap checks
-  // of an extension (the people have stayed). It is taken first from the holder's plan credit, and from each
-  // attendee's own as extendReservation does; the rest is paid time, priced by the minute at the booking's
-  // hourly tariff, to the franc: the card pays what it can, the rest is left to collect.
+  // of an extension (the people have stayed). It is taken first from the holder's plan credit only (the owner's
+  // rule: the attendees' credit is left alone); the rest is paid time, priced by the minute at the booking's
+  // hourly tariff, to the franc: the holder's card pays what it can, the rest is left to collect.
   recordOvertime(actor, r) {
     const next = this.get(
       "SELECT MIN(start_ms) AS t FROM reservations WHERE status <> 'annulee' AND COALESCE(room_id, 1) = ? AND start_ms >= ? AND id <> ?",
@@ -2408,16 +2408,6 @@ export class Club {
       newEnd, add, included, paid, amount, this.nowIso(), actor.id, r.id,
     );
     this.creditMove(actor, r.subscription_id, r.id, 'engagement', included, `Dépassement +${fmtDuration(add)}`);
-    for (const att of this.all('SELECT * FROM reservation_attendees WHERE reservation_id = ?', r.id)) {
-      const attSub = this.get('SELECT * FROM subscriptions WHERE id = ?', att.subscription_id);
-      if (attSub && attSub.status === 'active') {
-        const attAdd = Math.min(this.credit(attSub, r.biz_day).available, add);
-        if (attAdd > 0) {
-          this.run('UPDATE reservation_attendees SET included_minutes = included_minutes + ? WHERE id = ?', attAdd, att.id);
-          this.creditMove(actor, att.subscription_id, r.id, 'engagement', attAdd, `Dépassement +${fmtDuration(add)} (présence en salle)`);
-        }
-      }
-    }
     let card = 0;
     if (amount > 0) {
       const line = {

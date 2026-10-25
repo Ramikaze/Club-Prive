@@ -170,15 +170,15 @@ test('dépassement : rien quand la séance se termine avant sa fin prévue', asy
   assert.equal(d.history.some((h) => h.action === 'reservation.depassement'), false);
 });
 
-test('dépassement : le crédit de chaque membre présent est pris aussi', async () => {
+test('dépassement : pris sur le crédit du titulaire seulement, pas sur celui des membres présents', async () => {
   const ivy = await enroll('Ivy');
   const jon = await enroll('Jon');
   const r = await book(ivy, 60, { attendee_ids: [jon.id] });
   const d = await runAndFinish(r, 30 * MIN);
   assert.equal(d.reservation.end_time, '16:30');
   assert.equal(consumed(r.id, subOf(ivy)), 90);
-  assert.equal(consumed(r.id, subOf(jon)), 90);
-  assert.equal(d.reservation.attendees.find((a) => a.member_id === jon.id).included_minutes, 90);
+  assert.equal(consumed(r.id, subOf(jon)), 60);
+  assert.equal(d.reservation.attendees.find((a) => a.member_id === jon.id).included_minutes, 60);
 });
 
 test('dépassement : arrêté à la séance suivante de la salle, la sortie n’échoue pas', async () => {
