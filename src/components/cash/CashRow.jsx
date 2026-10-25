@@ -5,9 +5,10 @@ import { toast } from '../ui/toast.jsx';
 import { api } from '../../lib/api.js';
 import { dayLabel, money } from '../../lib/format.js';
 
-// sign: '+' money in, '−' money out, '' neither (a transfer). A cancelled row is struck through, without colour.
-export function CashRow({ title, meta, note, amount, sign = '', cancelled = false, action }) {
-  const tone = cancelled ? '' : sign === '+' ? 'amount-in' : sign === '−' ? 'amount-out' : '';
+// sign: '+' money in, '−' money out, '' neither (a transfer). A cancelled row is struck through, without colour; a
+// quiet amount (paid with the member's card) is muted: it is listed but adds nothing.
+export function CashRow({ title, meta, note, amount, sign = '', cancelled = false, quiet = false, action }) {
+  const tone = cancelled || quiet ? '' : sign === '+' ? 'amount-in' : sign === '−' ? 'amount-out' : '';
   return (
     <div className={`list-item cash-row${cancelled ? ' is-muted is-cancelled' : ''}`}>
       <div className="grow">
@@ -16,7 +17,7 @@ export function CashRow({ title, meta, note, amount, sign = '', cancelled = fals
         {note && <div className="meta">{note}</div>}
       </div>
       <div className="cash-row-end">
-        <span className={`num cash-amount ${tone}`}><span className={cancelled ? 'strike' : ''}>{sign}{money(amount)}</span></span>
+        <span className={`num cash-amount ${tone}${quiet ? ' is-quiet' : ''}`}><span className={cancelled ? 'strike' : ''}>{sign}{money(amount)}</span></span>
         {action}
       </div>
     </div>

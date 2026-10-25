@@ -19,6 +19,7 @@ import { useBusy, useLoad } from '../lib/hooks.js';
 import { useIsAdmin, useSettings } from '../store/useStore.js';
 import { downloadExcel } from '../utils/exportExcel.js';
 import { isValidDate } from '../../shared/time.js';
+import { CARD_METHOD } from '../../shared/rules.js';
 
 // The presets of the former cash page's links (?p=…&du=…&au=…).
 const LEGACY = { jour: 'today', semaine: 'week', mois: 'month', 'mois-precedent': 'last-month' };
@@ -38,6 +39,11 @@ function useCashPeriod() {
       : period.presets.find((x) => x.key === LEGACY[p]);
     const next = new URLSearchParams(params);
     for (const k of ['p', 'du', 'au']) next.delete(k);
+    // There, « compte » was the sub-account of the exports.
+    if (Object.hasOwn(ACCOUNT_LABEL, next.get('compte') ?? '')) {
+      next.set('sous_compte', next.get('compte'));
+      next.delete('compte');
+    }
     if (range) {
       next.set('from', range.from);
       next.set('to', range.to);
@@ -62,8 +68,9 @@ function AdminCash() {
   const settings = useSettings();
   const period = useCashPeriod();
   const { from, to } = period;
-  const compte = period.params.get('compte');
-  const account = Object.hasOwn(ACCOUNT_LABEL, compte ?? '') ? compte : '';
+  // The sub-account of the CSV exports, and the treasury account the whole page shows (all of them by default).
+  const sub = period.params.get('sous_compte');
+  const account = Object.hasOwn(ACCOUNT_LABEL, sub ?? '') ? sub : '';
   const excel = useBusy();
   const state = useLoad(async () => {
     const [sum, journal, open, ledger, categories, treasury] = await Promise.all([
@@ -77,6 +84,11 @@ function AdminCash() {
     return { sum, journal, open, entries: ledger.entries, categories, treasury };
   }, [from, to]);
   useScrollToBlock(period.params.get('type'), !!state.data);
+
+  const methods = [...new Set([...settings.payment_methods, ...(state.data?.treasury.accounts.map((a) => a.method) ?? [])])]
+    .filter((m) => m !== CARD_METHOD);
+  const compte = period.params.get('compte') ?? '';
+  const method = methods.includes(compte) ? compte : '';
 
   const add = (kind) => openDialog(EntryDialog, { kind, categories: state.data?.categories ?? [], onDone: state.reload });
   const params = { from, to };
@@ -102,20 +114,27 @@ function AdminCash() {
           </>
         )}
       />
-      <div className="toolbar"><PeriodPicker period={period} /></div>
+      <div className="toolbar">
+        <PeriodPicker period={period} />
+        <label className="cash-account"><span className="subtle">Caisse ou compte</span>
+          <select value={method} onChange={(e) => period.setParam('compte', e.target.value)}>
+            <option value="">Toutes</option>
+            {methods.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select></label>
+      </div>
       <Loaded state={state}>{(d) => (
         <div className="cash-page">
-          <CashBalance t={d.treasury} entries={d.entries} journal={d.journal} />
+          <CashBalance t={d.treasury} method={method} entries={d.entries} journal={d.journal} openingBalances={settings.opening_balances} />
           <div className="cash-columns">
             <div className="cash-columns-inner">
-              <ReceiptsBlock journal={d.journal} entries={d.entries} oneDay={oneDay} isAdmin onChange={state.reload} />
-              <ExpensesBlock entries={d.entries} oneDay={oneDay} isAdmin onChange={state.reload} />
+              <ReceiptsBlock journal={d.journal} entries={d.entries} method={method} oneDay={oneDay} isAdmin onChange={state.reload} />
+              <ExpensesBlock entries={d.entries} method={method} oneDay={oneDay} isAdmin onChange={state.reload} />
             </div>
           </div>
           <OpenNotes groups={d.open} onDone={state.reload} allPeriods />
-          <TransfersBlock entries={d.entries} oneDay={oneDay} isAdmin onChange={state.reload} />
+          <TransfersBlock entries={d.entries} method={method} oneDay={oneDay} isAdmin onChange={state.reload} />
           <DetailsAndExports sum={d.sum} from={from} to={to} account={account} currency={settings.currency.label}
-            onAccount={(k) => period.setParam('compte', k)} />
+            onAccount={(k) => period.setParam('sous_compte', k)} />
         </div>
       )}</Loaded>
     </>

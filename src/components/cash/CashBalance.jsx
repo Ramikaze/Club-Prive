@@ -1,29 +1,22 @@
-// « Soldes »: the till over the period, read left to right: the cash fund it started with, the recettes, the
-// dépenses, and what is in it at the end. One account at a time, the cash till first; « Tous » adds them up (a
-// transfer between two of them then cancels out). Transfers are neither recettes nor dépenses: for one account
-// they are shown under the figures, and the closing balance includes them.
-import { useState } from 'react';
+// « Soldes »: the till over the period on the account chosen for the page (or all of them), read left to right:
+// the cash fund it started with, the recettes, the dépenses, and what is in it at the end. Transfers are neither
+// recettes nor dépenses: on all accounts they cancel out; on one account they are shown under the figures, and
+// the closing balance includes them.
 import Icon from '../ui/Icon.jsx';
-import { Segmented } from '../ui/ui.jsx';
 import { tillFigures } from './flows.js';
+import { bizDayOf } from './when.js';
 import { bizToday, dayLabel, money } from '../../lib/format.js';
-import { CASH_METHOD } from '../../../shared/rules.js';
 
-// « +5 000 FCFA » / « −5 000 FCFA ».
-const signed = (v) => `${v < 0 ? '−' : '+'}${money(Math.abs(v))}`;
+// « +5 000 FCFA » / « −5 000 FCFA »; dépenses read as money out, « −0 FCFA » when there are none.
+const signed = (v, out = false) => `${(out ? v >= 0 : v < 0) ? '−' : '+'}${money(Math.abs(v))}`;
 
-export default function CashBalance({ t, entries, journal }) {
-  const [method, setMethod] = useState(t.accounts.some((a) => a.method === CASH_METHOD) ? CASH_METHOD : '');
-  const f = tillFigures(t, method, entries, journal);
+export default function CashBalance({ t, method, entries, journal, openingBalances }) {
+  const f = tillFigures(t, method, { entries, journal, openingBalances, dayOf: bizDayOf });
   const end = t.to >= bizToday() ? 'à ce jour' : `au ${dayLabel(t.to, 'short')}`;
   return (
     <section className="card cash-balance-card" aria-labelledby="caisse-soldes-title">
       <div className="card-head">
-        <h2 id="caisse-soldes-title"><Icon name="wallet" /> Soldes <span className="subtle">{method || 'tous les comptes'}</span></h2>
-        {t.accounts.length > 1 && (
-          <Segmented label="Caisse ou compte" value={method} onChange={setMethod}
-            options={[...t.accounts.map((x) => [x.method, x.method]), ['', 'Tous']]} />
-        )}
+        <h2 id="caisse-soldes-title"><Icon name="wallet" /> Soldes <span className="subtle">{method || 'toutes les caisses et comptes'}</span></h2>
       </div>
       <div className="kpis cash-balance">
         <div className="kpi">
@@ -34,11 +27,11 @@ export default function CashBalance({ t, entries, journal }) {
         <div className="kpi">
           <div className="label">Recettes</div>
           <div className="value amount-in">{signed(f.in)}</div>
-          <div className="hint" title="La part payée avec la carte membre est entrée lors de l’approvisionnement.">argent reçu, remboursements déduits</div>
+          <div className="hint">argent reçu, remboursements déduits</div>
         </div>
         <div className="kpi">
           <div className="label">Dépenses</div>
-          <div className="value amount-out">{f.out < 0 ? '+' : '−'}{money(Math.abs(f.out))}</div>
+          <div className="value amount-out">{signed(f.out, true)}</div>
           <div className="hint">argent sorti</div>
         </div>
         <div className="kpi accent">

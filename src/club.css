@@ -1075,6 +1075,9 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .cash-row .title, .cash-row .meta { overflow-wrap: anywhere; }
 .cash-row-end { flex: none; display: grid; justify-items: end; gap: 2px; }
 .cash-amount { font-weight: 650; white-space: nowrap; }
+.cash-amount.is-quiet { color: var(--text-3); font-weight: 500; }
+.cash-account { display: inline-flex; align-items: center; gap: 6px; }
+.cash-account select { width: auto; }
 .list-item.is-muted { color: var(--text-3); }
 .list-item.is-muted .meta { color: var(--text-3); }
 .list-item.is-muted .strike { text-decoration: line-through; }

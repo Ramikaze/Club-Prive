@@ -3,7 +3,8 @@
 import Icon from '../ui/Icon.jsx';
 import { AccountTag, DemoChip } from '../ui/ui.jsx';
 import { CashRow, EntryCancel, TotalLine, metaLine } from './CashRow.jsx';
-import { byCategory, entryWhen } from './flows.js';
+import { byCategory, expenseTotal, onAccount } from './flows.js';
+import { entryWhen } from './when.js';
 import { money } from '../../lib/format.js';
 
 function EntryTitle({ e }) {
@@ -19,9 +20,9 @@ function EntryTitle({ e }) {
 const cancelNote = (e) => (e.status !== 'active' && e.cancel_reason ? `Annulée par ${e.cancelled_by_name} : ${e.cancel_reason}` : null);
 const newestFirst = (list, oneDay) => list.map((e) => ({ e, w: entryWhen(e, oneDay) })).sort((x, y) => y.w.ms - x.w.ms);
 
-export default function ExpensesBlock({ entries, oneDay, isAdmin, onChange, title = 'Dépenses' }) {
-  const list = entries.filter((e) => e.kind === 'depense');
-  const total = list.filter((e) => e.status === 'active').reduce((s, e) => s + e.amount, 0);
+export default function ExpensesBlock({ entries, method = '', oneDay, isAdmin, onChange, title = 'Dépenses' }) {
+  const list = entries.filter((e) => e.kind === 'depense' && onAccount(method, e.method));
+  const total = expenseTotal(list);
   const cats = byCategory(list);
   const max = cats[0]?.[1] ?? 0;
   return (
@@ -63,8 +64,8 @@ export default function ExpensesBlock({ entries, oneDay, isAdmin, onChange, titl
   );
 }
 
-export function TransfersBlock({ entries, oneDay, isAdmin, onChange }) {
-  const list = entries.filter((e) => e.kind === 'transfert');
+export function TransfersBlock({ entries, method = '', oneDay, isAdmin, onChange }) {
+  const list = entries.filter((e) => e.kind === 'transfert' && (onAccount(method, e.method) || onAccount(method, e.to_method)));
   if (!list.length) return null;
   return (
     <section className="card cash-block" id="caisse-transferts">
