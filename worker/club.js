@@ -1341,7 +1341,7 @@ export class Club {
     const amount = int(input.amount, 'Montant de la recharge', { min: 1, max: 1e13 });
     const method = text(input.method, 'Moyen de paiement', { required: true, max: 40 });
     if (method === CARD_METHOD || !s.payment_methods.includes(method)) throw invalid('Moyen de paiement non configuré.');
-    const reference = text(input.reference, 'Référence', { max: 80 });
+    const reference = null; // Receipts are numbered by the app (the ticket number), never typed by staff.
     this.assertOpen(this.bizToday(), 'Cette recharge');
     const paymentId = this.insert(
       `INSERT INTO payments (member_id, amount, method, reference, paid_at, created_by, ticket_code, kind, label)
@@ -1372,7 +1372,7 @@ export class Club {
     if (reservationId && !this.get('SELECT 1 AS x FROM reservations WHERE id = ? AND member_id = ?', reservationId, m.id)) {
       throw invalid("Cette réservation n'est pas celle de ce membre.");
     }
-    const reference = text(input.reference, 'Référence', { max: 80 });
+    const reference = null; // Receipts are numbered by the app (the ticket number), never typed by staff.
     const cardAmount = Math.min(this.walletBalance(m.id), amount);
     let method = CARD_METHOD;
     if (cardAmount < amount) {
@@ -1906,8 +1906,8 @@ export class Club {
       debut: new Date(p.startMs).toISOString(), duree: p.duration,
       minutes_incluses: p.included, minutes_payantes: p.paid, supplement: p.supplement, acompte: deposit, carte: payWithCard,
     });
-    if (payWithCard) this.insertTimeLinesPaidByCard(actor, line, timeLines, { method: depositMethod, reference: input.deposit_reference });
-    if (paidNow.length) this.recordPayment(actor, { charge_ids: paidNow, method: depositMethod, reference: input.deposit_reference });
+    if (payWithCard) this.insertTimeLinesPaidByCard(actor, line, timeLines, { method: depositMethod, reference: null });
+    if (paidNow.length) this.recordPayment(actor, { charge_ids: paidNow, method: depositMethod, reference: null });
     return this.reservationDetail(id);
   }
 
@@ -2124,7 +2124,7 @@ export class Club {
       const extra = { label: `Prolongation +${fmtDuration(p.add)} (temps supplémentaire)`, unit_price: p.delta };
       if (payWithCard) {
         this.insertTimeLinesPaidByCard(actor, line, [extra], {
-          method: text(input.method, 'Moyen de paiement', { max: 40 }), reference: input.reference,
+          method: text(input.method, 'Moyen de paiement', { max: 40 }), reference: null,
         });
       } else {
         this.insertCharge(actor, { ...line, ...extra });
@@ -2534,7 +2534,7 @@ export class Club {
       method = text(input.method, 'Moyen de paiement', { required: true, max: 40 });
       if (!s.payment_methods.includes(method)) throw invalid('Moyen de paiement non configuré.');
     }
-    const reference = text(input.reference, 'Référence', { max: 80 });
+    const reference = null; // Receipts are numbered by the app (the ticket number), never typed by staff.
     if (!s.demo_mode && charges.some((c) => !c.tariff_validated)) {
       throw conflict('TARIF_NON_VALIDE', 'Une des lignes repose sur un tarif non validé par un administrateur.');
     }
@@ -2581,7 +2581,7 @@ export class Club {
       method = text(input.method, 'Moyen de remboursement', { required: true, max: 40 });
       if (!s.payment_methods.includes(method)) throw invalid('Moyen de paiement non configuré.');
     }
-    const reference = text(input.reference, 'Référence', { max: 80 });
+    const reference = null; // Receipts are numbered by the app (the ticket number), never typed by staff.
     const restock = !!c.product_id && flag(input.restock);
     const refundId = this.writeRefund(actor, c, p, cardPart, { method, reference, reason, restock });
     this.audit(actor, 'ligne.rembourser', c.reservation_id ? 'reservation' : 'member', c.reservation_id ?? c.member_id, {

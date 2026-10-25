@@ -26,7 +26,6 @@ function PaymentDialog({ close, due, memberName, onDone }) {
   const [checked, setChecked] = useState(() => new Set(due.map((c) => c.id)));
   const [picked, setPicked] = useState(null); // null until the manager chooses: the card when it holds money
   const [restMethod, setRestMethod] = useState(methods[0] ?? '');
-  const [reference, setReference] = useState('');
   const memberId = due[0]?.member_id;
   const memberState = useLoad(() => (memberId ? api.get(`/api/members/${memberId}`) : Promise.resolve(null)), [memberId]);
   const balance = memberState.data?.wallet?.balance ?? 0;
@@ -54,8 +53,8 @@ function PaymentDialog({ close, due, memberName, onDone }) {
       const ids = selected.map((c) => c.id);
       if (!ids.length) throw new Error('Cochez au moins une ligne.');
       const body = byCard
-        ? { charge_ids: ids, card: true, method: rest > 0 ? restMethod : undefined, reference }
-        : { charge_ids: ids, method, reference };
+        ? { charge_ids: ids, card: true, method: rest > 0 ? restMethod : undefined }
+        : { charge_ids: ids, method };
       const res = await api.post('/api/payments', body, key);
       close();
       toast(`Encaissement enregistré : ${money(res.payment.amount)}.`);
@@ -100,8 +99,6 @@ function PaymentDialog({ close, due, memberName, onDone }) {
               <select name="rest_method" required value={restMethod} onChange={(e) => setRestMethod(e.target.value)}>
                 {methods.map((x) => <option key={x}>{x}</option>)}</select></label>
           ) : null}
-          <label className="field"><span>Référence (facultatif)</span>
-            <input name="reference" maxLength={80} placeholder="N° de transaction, de reçu…" value={reference} onChange={(e) => setReference(e.target.value)} /></label>
         </div>
         {byCard ? <p className="subtle">Le ticket imprimé est à faire signer par le membre.</p> : null}
         <FormError error={error} />
@@ -130,14 +127,13 @@ function RefundDialog({ close, charge, onDone }) {
   const { busy, error, submit } = useSubmit();
   const [reason, setReason] = useState('');
   const [method, setMethod] = useState(methods[0] ?? '');
-  const [reference, setReference] = useState('');
   const [restock, setRestock] = useState(false);
 
   const onSubmit = (e) => {
     e.preventDefault();
     submit(async () => {
       if (String(reason ?? '').trim().length < 3) throw new Error('Indiquez un motif (3 caractères minimum).');
-      const res = await api.post(`/api/charges/${charge.id}/refund`, { reason, method, reference, restock: Boolean(restock) }, key);
+      const res = await api.post(`/api/charges/${charge.id}/refund`, { reason, method, restock: Boolean(restock) }, key);
       close();
       toast('Remboursement enregistré.');
       onDone?.(res);
@@ -159,8 +155,6 @@ function RefundDialog({ close, charge, onDone }) {
           <label className="field"><span>Moyen de remboursement</span>
             <select name="method" value={method} onChange={(e) => setMethod(e.target.value)}>
               {methods.map((x) => <option key={x}>{x}</option>)}</select></label>
-          <label className="field"><span>Référence (facultatif)</span>
-            <input name="reference" maxLength={80} value={reference} onChange={(e) => setReference(e.target.value)} /></label>
         </div>
         {charge.product_id ? (
           <label className="check"><input type="checkbox" name="restock" value="1" checked={restock} onChange={(e) => setRestock(e.target.checked)} />
@@ -208,7 +202,6 @@ function RechargeDialog({ close, member, onDone }) {
   const navigate = useNavigate();
   const [amountText, setAmountText] = useState('');
   const [method, setMethod] = useState(methods[0] ?? '');
-  const [reference, setReference] = useState('');
   const amount = parseMoney(amountText);
   const balance = member.wallet?.balance ?? 0;
 
@@ -216,7 +209,7 @@ function RechargeDialog({ close, member, onDone }) {
     e.preventDefault();
     submit(async () => {
       if (!amount) throw new Error('Indiquez le montant de la recharge.');
-      const res = await api.post(`/api/members/${member.id}/wallet/recharge`, { amount, method, reference }, key);
+      const res = await api.post(`/api/members/${member.id}/wallet/recharge`, { amount, method }, key);
       close();
       toast(`Carte rechargée de ${money(amount)} : nouveau solde ${money(res.wallet.balance)}.${res.renewed?.length ? ' L’abonnement a été renouvelé sur la carte.' : ''}`);
       onDone?.(res);
@@ -235,13 +228,11 @@ function RechargeDialog({ close, member, onDone }) {
             <select name="method" required value={method} onChange={(e) => setMethod(e.target.value)}>
               {methods.map((x) => <option key={x}>{x}</option>)}</select></label>
         </div>
-        <label className="field"><span>Référence (facultatif)</span>
-          <input name="reference" maxLength={80} placeholder="N° de transaction, de reçu…" value={reference} onChange={(e) => setReference(e.target.value)} /></label>
         <dl className="calc">
           <div><dt>Solde actuel</dt><dd>{money(balance)}</dd></div>
           <div className="total"><dt>Nouveau solde</dt><dd>{money(balance + (amount ?? 0))}</dd></div>
         </dl>
-        <p className="subtle">Le ticket s’ouvre ensuite : imprimez-le pour la signature du membre, puis envoyez-lui le reçu par WhatsApp.</p>
+        <p className="subtle">Le n° de reçu est attribué automatiquement. Le ticket s’ouvre ensuite : imprimez-le pour la signature du membre, puis envoyez-lui le reçu par WhatsApp.</p>
         <FormError error={error} />
         <div className="modal-actions"><button type="button" className="btn" onClick={close}>Annuler</button>
           <button type="submit" className="btn btn-primary" disabled={busy || !amount} aria-busy={busy}>
@@ -265,7 +256,6 @@ function OutsideMealDialog({ close, member, onDone }) {
   const [amountText, setAmountText] = useState('');
   const [label, setLabel] = useState('');
   const [restMethod, setRestMethod] = useState(methods[0] ?? '');
-  const [reference, setReference] = useState('');
   // The member's booking in progress or to come, to tie the meal to it (optional).
   const bookings = (member.reservations ?? []).filter((r) => r.member_id === member.id && ['reservee', 'en_cours'].includes(r.status));
   const [reservationId, setReservationId] = useState(() => String(bookings.find((r) => r.status === 'en_cours')?.id ?? ''));
@@ -280,7 +270,7 @@ function OutsideMealDialog({ close, member, onDone }) {
       if (!amount) throw new Error('Indiquez le montant du repas.');
       if (label.trim().length < 1) throw new Error('Indiquez le restaurant ou le plat.');
       const body = {
-        amount, label, rest_method: rest > 0 ? restMethod : undefined, reference: rest > 0 ? reference : undefined,
+        amount, label, rest_method: rest > 0 ? restMethod : undefined,
         reservation_id: reservationId ? Number(reservationId) : undefined,
       };
       const res = await api.post(`/api/members/${member.id}/outside-meal`, body, key);
@@ -316,8 +306,6 @@ function OutsideMealDialog({ close, member, onDone }) {
             <label className="field"><span>{`Moyen pour le reste (${money(rest)})`}</span>
               <select name="rest_method" required value={restMethod} onChange={(e) => setRestMethod(e.target.value)}>
                 {methods.map((x) => <option key={x}>{x}</option>)}</select></label>
-            <label className="field"><span>Référence (facultatif)</span>
-              <input name="reference" maxLength={80} value={reference} onChange={(e) => setReference(e.target.value)} /></label>
           </div>
         ) : null}
         <FormError error={error} />
