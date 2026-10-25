@@ -2219,18 +2219,9 @@ export class Club {
       if (String(err.message).includes('CHEVAUCHEMENT')) throw this.overlapError(this.overlapping(p.r.end_ms, p.newEnd, p.r.id, p.r.room_id ?? 1), p.r.room_name);
       throw err;
     }
+    // Only the holder's credit and card pay for the extra time (the owner's rule: a room is booked by one member,
+    // and it is on that member's card that it is debited); the attendees' credit is left alone.
     this.creditMove(actor, p.r.subscription_id, p.r.id, 'engagement', p.addIncluded, `Prolongation +${fmtDuration(p.add)}`);
-    for (const att of this.all('SELECT * FROM reservation_attendees WHERE reservation_id = ?', p.r.id)) {
-      const attSub = this.get('SELECT * FROM subscriptions WHERE id = ?', att.subscription_id);
-      if (attSub && attSub.status === 'active') {
-        const attCredit = this.credit(attSub, p.r.biz_day);
-        const attAdd = Math.min(attCredit.available, p.add);
-        if (attAdd > 0) {
-          this.run('UPDATE reservation_attendees SET included_minutes = included_minutes + ? WHERE id = ?', attAdd, att.id);
-          this.creditMove(actor, att.subscription_id, p.r.id, 'engagement', attAdd, `Prolongation +${fmtDuration(p.add)} (présence en salle)`);
-        }
-      }
-    }
     if (p.delta > 0) {
       const line = {
         account: 'reservations', kind: 'temps_supplementaire', member_id: p.r.member_id, reservation_id: p.r.id,

@@ -103,7 +103,9 @@ test('prolongation : disponibilité de chaque participant vérifiée et créneau
 test('crédits des participants : prolongation, retrait, retour et clôture sans double débit', async () => {
   const res = await book({ attendee_ids: [members[1].id] });
   ok(await manager.post(`/api/reservations/${res.id}/extend`, { minutes: 30 }));
-  assert.equal(credit(members[1]).committed, 90);
+  // The extension is the holder's alone: the attendee's credit stays as it was booked.
+  assert.equal(credit(members[0]).committed, 90);
+  assert.equal(credit(members[1]).committed, 60);
   ok(await manager.del(`/api/reservations/${res.id}/attendees/${members[1].id}`));
   assert.equal(credit(members[1]).available, 120);
   const headers = { 'idempotency-key': 'return-to-room-once' };
