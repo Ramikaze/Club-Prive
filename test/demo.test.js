@@ -1,6 +1,7 @@
 // The demo space: a second club (its own database) that copies the real club's configuration and
-// holds only fictitious data. Both clubs are driven here as the Worker will drive them: the real
-// club hands out its configuration (Club.demoConfig), the demo club prepares itself from it.
+// catalogue and starts empty: no member, booking, payment, expense or treasury history. Both clubs are
+// driven here as the Worker will drive them: the real club hands out its configuration
+// (Club.demoConfig), the demo club prepares itself from it.
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { addDays, addMonths } from '../shared/time.js';
@@ -34,7 +35,22 @@ async function clubs({ env = {} } = {}) {
 }
 
 const memberNames = (club) => club.listMembers().map((m) => m.name).sort();
-const FICTITIOUS = ['Client TEST 1', 'Client TEST 2', 'Client TEST 3', 'Client TEST 4', 'Client TEST 5'];
+const count = (club, table) => club.get(`SELECT COUNT(*) AS n FROM ${table}`).n;
+const mark = (club, key) => club.get('SELECT COUNT(*) AS n FROM meta WHERE key = ?', key).n;
+
+// A product of the real club's catalogue, created by its administrator.
+const realProduct = async (admin, fields) => ok(await admin.post('/api/products', {
+  category: 'cigare', price: 12000 * UM, initial_stock: 40, ...fields,
+}));
+
+// The tables that hold what the club does: all empty in a demo space just prepared.
+const ACTIVITY = [
+  'members', 'cards', 'subscriptions', 'reservations', 'reservation_attendees', 'charges', 'payments', 'refunds',
+  'wallet_movements', 'credit_movements', 'ledger_entries', 'closed_periods', 'humidors', 'humidor_readings',
+];
+const assertNoActivity = (club) => {
+  for (const table of ACTIVITY) assert.equal(count(club, table), 0, table);
+};
 
 test('configuration réelle copiée dans la démo', async () => {
   const { real, demo, admin, bundle } = await clubs();
@@ -55,52 +71,63 @@ test('configuration réelle copiée dans la démo', async () => {
   const settings = demo.club.settings();
   assert.equal(settings.club_name, 'Cercle TEST');
   assert.equal(settings.demo_mode, true);
-  assert.notEqual(settings.opening_balances.amounts['Espèces'], 7 * UM); // the demo has its own, fictitious one
+  assert.deepEqual(settings.opening_balances.amounts, {}); // the demo has none: its treasury starts at zero
   const copied = demo.club.plans().find((p) => p.code === 'ANNUELLE');
   assert.equal(copied.price, 120000 * UM);
   assert.equal(copied.price_validated_by_name, 'Propriétaire'); // the validating account was copied too
   assert.deepEqual(demo.club.rooms().map((r) => r.name), ['Salon']);
   assert.deepEqual(demo.club.rooms().map((r) => r.name), real.club.rooms().map((r) => r.name));
+  assert.deepEqual(demo.club.all('SELECT * FROM categories ORDER BY id'), real.club.all('SELECT * FROM categories ORDER BY id'));
 
-  const members = demo.club.listMembers();
-  assert.equal(members.length, 5);
-  assert.ok(members.every((m) => m.is_demo));
+  assert.equal(demo.club.listMembers().length, 0);
+  assert.equal(mark(demo.club, 'demo_empty'), 1);
   assert.equal(real.club.listMembers().length, 0);
   assert.ok(real.club.isEmpty());
 });
 
-test('démo remplie : membres, produits, trésorerie et grand livre cohérents', async () => {
-  const { real, demo } = await clubs();
+test('démo vide : aucun client ni opération, le catalogue réel avec son stock fictif', async () => {
+  const { real, demo, admin } = await clubs();
+  const a = await realProduct(admin, { name: 'Cohiba Siglo I', reference: 'CIG-001' });
+  const b = await realProduct(admin, { name: 'Whisky maison', category: 'bouteille', reference: 'BOU-001', initial_stock: 3 });
   demo.club.prepareDemo(real.club.demoConfig());
 
-  assert.deepEqual(memberNames(demo.club), FICTITIOUS);
-  assert.equal(demo.club.listProducts().length, 7);
+  assertNoActivity(demo.club);
+  // The real products only, under their ids, 10 each whatever the real stock, and nothing fictitious.
+  const products = demo.club.listProducts({ includeInactive: true });
+  assert.deepEqual(products.map((p) => p.id).sort((x, y) => x - y), [a.id, b.id]);
+  assert.ok(products.every((p) => !p.is_demo && p.stock_qty === 10));
+  // The only stock movements are the opening ones that explain that stock.
+  assert.deepEqual(
+    demo.club.all('SELECT product_id, kind, quantity FROM stock_movements ORDER BY product_id').map((m) => ({ ...m })),
+    [{ product_id: a.id, kind: 'stock_initial', quantity: 10 }, { product_id: b.id, kind: 'stock_initial', quantity: 10 }],
+  );
+  // The treasury starts at zero: no opening balance, no movement.
   const today = demo.club.bizToday();
   const treasury = demo.club.treasury(today, today);
-  assert.ok(treasury.accounts.every((a) => a.closing >= 0), JSON.stringify(treasury.accounts));
-  assert.ok(treasury.total.closing > 0);
-  const book = demo.club.ledgerBook({ from: addMonths(today, -3), to: today });
-  assert.ok(book.rows.some((r) => r.type === 'depense') && book.rows.some((r) => r.type === 'encaissement'));
-  assert.equal(book.closing, treasury.total.closing);
+  assert.equal(treasury.total.closing, 0);
+  assert.ok(treasury.accounts.every((acc) => acc.closing === 0), JSON.stringify(treasury.accounts));
+  // The real club keeps its own stock.
+  assert.equal(real.club.listProducts().find((p) => p.id === a.id).stock_qty, 40);
 });
 
 test('un seul remplissage : les appels suivants suivent les comptes, pas les réglages', async () => {
   const { real, demo, admin } = await clubs();
   ok(await admin.put('/api/settings', { club_name: 'Premier nom' }));
   demo.club.prepareDemo(real.club.demoConfig());
-  const ids = demo.club.listMembers().map((m) => m.id);
-  assert.equal(ids.length, 5);
+  const actor = demo.club.userRow(real.club.userByLogin('proprietaire').id);
+  const trial = demo.club.tx(() => demo.club.createMember(actor, { first_name: 'Essai', last_name: 'Membre', phone: '+000 000000' }));
 
-  // The real club moves on: a renamed and deactivated account, a new account, a new club name.
+  // The real club moves on: a renamed and deactivated account, a new account, a new club name, a new product.
   const manager = real.club.userByLogin('gerant');
   ok(await admin.put(`/api/users/${manager.id}`, { name: 'Gérante', active: false }));
   ok(await admin.post('/api/users', { login: 'stagiaire', name: 'Stagiaire', role: 'gerant', password: 'mot-de-passe-stagiaire' }));
   ok(await admin.put('/api/settings', { club_name: 'Second nom' }));
+  await realProduct(admin, { name: 'Tout nouveau', reference: 'CIG-009' });
   demo.club.prepareDemo(real.club.demoConfig());
 
-  // Not filled a second time, and the settings are those copied at the first preparation.
-  assert.deepEqual(demo.club.listMembers().map((m) => m.id), ids);
-  assert.equal(demo.club.listProducts().length, 7);
+  // Not emptied a second time, and the settings and the catalogue are those copied at the first preparation.
+  assert.deepEqual(demo.club.listMembers().map((m) => m.id), [trial.id]);
+  assert.equal(demo.club.listProducts().length, 0);
   assert.equal(demo.club.settings().club_name, 'Premier nom');
   // The accounts follow at once.
   const renamed = demo.club.userRow(manager.id);
@@ -110,80 +137,86 @@ test('un seul remplissage : les appels suivants suivent les comptes, pas les ré
   assert.equal(demo.club.userRow(added.id).login, `u${added.id}`);
 });
 
-// The demo space prepared from a real club that its administrator has set up in an unusual way.
-async function preparedWith(configure) {
-  const spaces = await clubs();
-  await configure(spaces);
-  spaces.demo.club.prepareDemo(spaces.real.club.demoConfig());
-  return spaces;
-}
+test('formules : la copie est fidèle, une formule retirée de la vente le reste en démo', async () => {
+  const { real, demo, admin, bundle } = await clubs();
+  const monthly = bundle.plans.find((p) => p.code === 'MENSUELLE');
+  ok(await admin.put(`/api/plans/${monthly.id}`, { active: false }));
+  demo.club.prepareDemo(real.club.demoConfig());
 
-test('réglages inhabituels : pas d’« Espèces », formule annuelle sans prix, une seule salle', async () => {
-  const { demo } = await preparedWith(async ({ admin, bundle }) => {
-    ok(await admin.put('/api/settings', { payment_methods: ['Carte bancaire'] }));
-    assert.equal(bundle.plans.find((p) => p.code === 'ANNUELLE').price, null);
-    assert.equal(bundle.rooms.length, 1);
-  });
-
-  assert.equal(demo.club.listMembers().length, 5);
-  assert.deepEqual(demo.club.all('SELECT DISTINCT method FROM payments').map((r) => r.method), ['Carte bancaire']);
+  const pick = (plans) => plans.map((p) => [p.id, p.code, p.price, p.active]).sort();
+  assert.deepEqual(pick(demo.club.plans()), pick(real.club.plans()));
+  assert.equal(demo.club.plans().find((p) => p.code === 'MENSUELLE').active, false);
+  assert.equal(demo.club.plans().find((p) => p.code === 'ANNUELLE').active, true);
 });
 
-test('réglages inhabituels : créneaux d’une heure', async () => {
-  const { demo } = await preparedWith(async ({ admin }) => {
-    ok(await admin.put('/api/settings', { booking: { slot_min: 60, min_duration_min: 60, weekend_min_duration_min: 120, extension_step_min: 60 } }));
-  });
+test('une démo remplie à l’ancienne (données fictives) est vidée à la requête suivante, les comptes restent', async () => {
+  const { real, demo, admin } = await clubs();
+  const cohiba = await realProduct(admin, { name: 'Cohiba Siglo I', reference: 'CIG-001' });
+  const asAdmin = inDemo(demo, await contextOf(real, admin));
 
-  assert.equal(demo.club.listMembers().length, 5);
-  const durations = demo.club.all('SELECT duration_min FROM reservations').map((r) => r.duration_min);
-  assert.ok(durations.length > 0);
-  assert.ok(durations.every((d) => d % 60 === 0), durations.join(' '));
+  // The space as the old version left it: trials, a recharge, a fictitious product and opening balance, the old mark.
+  const trial = ok(await asAdmin.post('/api/members', TRIAL));
+  ok(await asAdmin.post(`/api/members/${trial.id}/wallet/recharge`, { amount: 50000 * UM, method: 'Espèces' }));
+  const author = demo.club.get('SELECT * FROM users WHERE id = ?', DEMO_AUTHOR_ID);
+  demo.club.tx(() => demo.club.createProduct(author, {
+    category: 'cigare', name: 'Robusto (démo)', reference: 'CIG-DEMO-01', price: 10000 * UM, initial_stock: 30,
+  }, { demo: true }));
+  demo.club.tx(() => demo.club.updateSettings(author, {
+    opening_balances: { date: demo.club.bizToday(), amounts: { 'Espèces': 150000 * UM } },
+  }));
+  demo.db.run("DELETE FROM meta WHERE key = 'demo_empty'");
+  demo.db.run("INSERT INTO meta (key, value) VALUES ('demo_seeded', ?)", new Date().toISOString());
+  assert.equal(count(demo.club, 'payments'), 1);
+  const accounts = demo.club.all('SELECT * FROM users ORDER BY id');
+
+  // The next request finds no `demo_empty` mark: the space is emptied, then the configuration copied again.
+  assert.deepEqual(ok(await asAdmin.get('/api/members')), []);
+  assertNoActivity(demo.club);
+  assert.deepEqual(demo.club.listProducts({ includeInactive: true }).map((p) => [p.id, p.stock_qty, p.is_demo]), [[cohiba.id, 10, false]]);
+  assert.deepEqual(demo.club.settings().opening_balances.amounts, {});
+  assert.equal(mark(demo.club, 'demo_seeded'), 0);
+  assert.equal(mark(demo.club, 'demo_empty'), 1);
+  assert.deepEqual(demo.club.all('SELECT * FROM users ORDER BY id'), accounts); // the accounts are kept as they were
+
+  // Once only: a trial made now stays.
+  ok(await asAdmin.post('/api/members', TRIAL));
+  assert.equal(ok(await asAdmin.get('/api/members')).length, 1);
 });
 
-test('réglages inhabituels : petite salle', async () => {
-  const { demo } = await preparedWith(async ({ admin, bundle }) => {
-    ok(await admin.put(`/api/rooms/${bundle.rooms[0].id}`, { capacity: 2 }));
-  });
+test('de la base vide à la fin : client avec carte, recharge, réservation, consommation, encaissement', async () => {
+  const { real, demo, admin } = await clubs();
+  const cohiba = await realProduct(admin, { name: 'Cohiba Siglo I', reference: 'CIG-001' });
+  const asAdmin = inDemo(demo, await contextOf(real, admin));
 
-  assert.equal(demo.club.listMembers().length, 5);
-  const parties = demo.club.all('SELECT party_size FROM reservations').map((r) => r.party_size);
-  assert.ok(parties.length > 0);
-  assert.ok(parties.every((n) => n <= 2), parties.join(' '));
-});
+  // A new client has his virtual card at once.
+  const member = ok(await asAdmin.post('/api/members', TRIAL));
+  assert.deepEqual(member.cards.map((c) => c.kind), ['virtuelle']);
+  // The card is recharged in cash.
+  const recharged = ok(await asAdmin.post(`/api/members/${member.id}/wallet/recharge`, { amount: 100000 * UM, method: 'Espèces' }));
+  assert.equal(recharged.wallet.balance, 100000 * UM);
+  // The room booked for tomorrow, paid with the card (no plan: the whole time is paid).
+  const roomId = ok(await asAdmin.get('/api/rooms'))[0].id;
+  const tomorrow = addDays(demo.club.bizToday(), 1);
+  const booked = ok(await asAdmin.post('/api/reservations', {
+    member_id: member.id, room_id: roomId, date: tomorrow, start_time: '15:00', duration_min: 120, pay_with_card: true,
+  }));
+  const timePaid = booked.charges.filter((c) => c.kind === 'temps_supplementaire').reduce((sum, c) => sum + c.amount, 0);
+  assert.ok(timePaid > 0);
+  assert.equal(booked.reservation.due_amount, 0);
+  assert.equal(demo.club.walletBalance(member.id), 100000 * UM - timePaid);
+  // Two cigars of the copied catalogue, then the note paid in cash.
+  const served = ok(await asAdmin.post(`/api/reservations/${booked.reservation.id}/items`, { product_id: cohiba.id, quantity: 2 }));
+  const due = served.charges.filter((c) => c.status === 'due');
+  assert.deepEqual(due.map((c) => c.amount), [2 * 12000 * UM]);
+  const paid = ok(await asAdmin.post('/api/payments', { charge_ids: due.map((c) => c.id), method: 'Espèces' }));
+  assert.equal(paid.payment.amount, 2 * 12000 * UM);
+  assert.equal(demo.club.listProducts().find((p) => p.id === cohiba.id).stock_qty, 8);
+  assert.equal(count(demo.club, 'payments'), 3); // the recharge, the room by the card, the cigars in cash
 
-// Two history bookings of the seed sit 3 h 30 apart in the room (yesterday 15:00-17:30 and 21:00-22:00): a gap
-// beyond that refuses the second, and the demo must still open and reset, with the club's rule kept.
-for (const gap of [211, 240]) {
-  test(`réglages inhabituels : battement de ${gap} minutes`, async () => {
-    const { real, demo } = await preparedWith(async (spaces) => {
-      ok(await spaces.admin.put('/api/settings', { booking: { ...spaces.bundle.settings.booking, gap_min: gap } }));
-      assert.equal(spaces.real.club.settings().booking.gap_min, gap);
-    });
-
-    assert.equal(demo.club.listMembers().length, 5);
-    assert.equal(demo.club.settings().booking.gap_min, gap);
-    // What the seed could book keeps the rule: no two bookings of a room closer than the gap.
-    const booked = demo.club.all("SELECT room_id, start_ms, end_ms FROM reservations WHERE status <> 'annulee' ORDER BY room_id, start_ms");
-    assert.ok(booked.length > 0);
-    for (let i = 1; i < booked.length; i += 1) {
-      if (booked[i].room_id === booked[i - 1].room_id) assert.ok(booked[i].start_ms - booked[i - 1].end_ms >= gap * 60000, `réservation ${i}`);
-    }
-    // The reset fills the space again from the same settings, and works too.
-    const actor = demo.club.userRow(real.club.userByLogin('proprietaire').id);
-    demo.club.resetDemo(real.club.demoConfig(), actor);
-    assert.equal(demo.club.listMembers().length, 5);
-  });
-}
-
-test('réglages inhabituels : formules retirées de la vente', async () => {
-  const { demo } = await preparedWith(async ({ admin, bundle }) => {
-    for (const plan of bundle.plans) ok(await admin.put(`/api/plans/${plan.id}`, { active: false }));
-  });
-
-  assert.equal(demo.club.listMembers().length, 5);
-  // The copy stays faithful: the demo does not offer them either.
-  assert.ok(demo.club.plans().length > 0);
-  assert.ok(demo.club.plans().every((p) => !p.active));
+  // None of it reached the real club.
+  assert.equal(real.club.listMembers().length, 0);
+  assert.equal(count(real.club, 'payments'), 0);
+  assert.equal(real.club.listProducts().find((p) => p.id === cohiba.id).stock_qty, 40);
 });
 
 test('remise à neuf : les essais disparaissent, la configuration est recopiée', async () => {
@@ -191,45 +224,55 @@ test('remise à neuf : les essais disparaissent, la configuration est recopiée'
   demo.club.prepareDemo(real.club.demoConfig());
   const actor = demo.club.userRow(real.club.userByLogin('proprietaire').id);
   demo.club.tx(() => demo.club.createMember(actor, { first_name: 'Essai', last_name: 'Membre', phone: '+000 000000' }));
-  assert.ok(memberNames(demo.club).includes('Essai MEMBRE'));
-  assert.equal(demo.club.listMembers().length, 6);
+  assert.deepEqual(memberNames(demo.club), ['Essai MEMBRE']);
 
   ok(await admin.put('/api/settings', { club_name: 'Nom actuel' }));
+  const cohiba = await realProduct(admin, { name: 'Cohiba Siglo I', reference: 'CIG-001' });
   demo.club.resetDemo(real.club.demoConfig(), actor);
 
-  assert.ok(!memberNames(demo.club).includes('Essai MEMBRE'));
-  assert.deepEqual(memberNames(demo.club), FICTITIOUS);
+  assertNoActivity(demo.club);
   assert.equal(demo.club.settings().club_name, 'Nom actuel');
-  const entry = demo.club.auditLog().find((a) => a.action === 'demo.remettre_a_neuf');
-  assert.equal(entry.user_id, actor.id);
-  // The space is marked as filled again: a plain preparation leaves it alone, and it can be reset again.
+  assert.deepEqual(demo.club.listProducts().map((p) => [p.id, p.stock_qty]), [[cohiba.id, 10]]);
+  const entries = demo.club.auditLog();
+  assert.deepEqual(entries.map((a) => a.action).filter((a) => a === 'demo.remettre_a_neuf'), ['demo.remettre_a_neuf']);
+  assert.equal(entries.find((a) => a.action === 'demo.remettre_a_neuf').user_id, actor.id);
+  // The space is marked as prepared again: a plain preparation leaves it alone, and it can be reset again.
+  assert.equal(mark(demo.club, 'demo_empty'), 1);
+  demo.club.tx(() => demo.club.createMember(actor, { first_name: 'Essai', last_name: 'Membre', phone: '+000 000000' }));
   demo.club.prepareDemo(real.club.demoConfig());
-  assert.equal(demo.club.listMembers().length, 5);
+  assert.equal(demo.club.listMembers().length, 1);
   demo.club.resetDemo(real.club.demoConfig(), actor);
-  assert.equal(demo.club.listMembers().length, 5);
+  assert.equal(demo.club.listMembers().length, 0);
 });
 
-test('un remplissage ou une remise à neuf qui échoue ne laisse rien derrière lui', async () => {
+// A configuration the copy cannot take: a second room without a name (the column is NOT NULL). The first
+// room has gone in by the time it fails.
+const brokenConfig = (config) => ({ ...config, rooms: [...config.rooms, { ...config.rooms[0], id: 999, name: null }] });
+
+test('une préparation ou une remise à neuf qui échoue ne laisse rien derrière elle', async () => {
   const { real, demo, admin } = await clubs();
   ok(await admin.put('/api/settings', { club_name: 'Cercle TEST' }));
-  const broken = { ...real.club.demoConfig(), plans: [] }; // the seed finds no plan to sell
+  await realProduct(admin, { name: 'Cohiba Siglo I', reference: 'CIG-001' });
+  const broken = brokenConfig(real.club.demoConfig());
 
   assert.throws(() => demo.club.prepareDemo(broken));
   assert.equal(demo.club.settings().club_name, 'Limen'); // nothing copied...
   assert.equal(demo.club.plans().length, 2); // ...the plans it had are still there...
-  assert.equal(demo.club.listMembers().length, 0); // ...nothing seeded...
-  assert.equal(demo.club.get("SELECT COUNT(*) AS n FROM meta WHERE key = 'demo_seeded'").n, 0); // ...and no mark.
-  demo.club.prepareDemo(real.club.demoConfig()); // the next try fills it, once
-  assert.equal(demo.club.listMembers().length, 5);
+  assert.equal(count(demo.club, 'products'), 0); // ...no product, no stock...
+  assert.equal(count(demo.club, 'stock_movements'), 0);
+  assert.equal(demo.club.hasUsers(), false); // ...no account mirrored...
+  assert.equal(mark(demo.club, 'demo_empty'), 0); // ...and no mark.
+  demo.club.prepareDemo(real.club.demoConfig()); // the next try prepares it, once
   assert.equal(demo.club.settings().club_name, 'Cercle TEST');
+  assert.equal(count(demo.club, 'products'), 1);
 
-  // A failed reset keeps the trials made in the space.
+  // A failed reset keeps the trials made in the space, and its mark.
   const actor = demo.club.userRow(real.club.userByLogin('proprietaire').id);
   demo.club.tx(() => demo.club.createMember(actor, { first_name: 'Essai', last_name: 'Membre', phone: '+000 000000' }));
   assert.throws(() => demo.club.resetDemo(broken, actor));
-  assert.ok(memberNames(demo.club).includes('Essai MEMBRE'));
-  assert.equal(demo.club.listMembers().length, 6);
-  assert.equal(demo.club.get("SELECT COUNT(*) AS n FROM meta WHERE key = 'demo_seeded'").n, 1);
+  assert.deepEqual(memberNames(demo.club), ['Essai MEMBRE']);
+  assert.equal(mark(demo.club, 'demo_empty'), 1);
+  assert.equal(demo.club.auditLog().some((a) => a.action === 'demo.remettre_a_neuf'), false);
 });
 
 test('jamais sur le vrai club', async () => {
@@ -250,11 +293,13 @@ test('jamais sur le vrai club', async () => {
   assert.deepEqual(memberNames(real.club), ['Vrai MEMBRE']);
   await new Client(real).login('proprietaire', PROPRIO);
   assert.equal(real.club.userByLogin('gerant').name, 'Gérant');
-  assert.equal(real.club.get("SELECT COUNT(*) AS n FROM meta WHERE key = 'demo_seeded'").n, 0);
+  assert.equal(mark(real.club, 'demo_empty'), 0);
+  assert.equal(mark(real.club, 'demo_seeded'), 0);
 });
 
 test('comptes de la démo : copies sans mot de passe, auteur fictif', async () => {
-  const { real, demo } = await clubs();
+  const { real, demo, admin } = await clubs();
+  await realProduct(admin, { name: 'Cohiba Siglo I', reference: 'CIG-001' });
   // An account that already sits in the demo database under a real account's id (id 1) is taken over.
   await demo.addUser('ancien', 'Ancien compte', 'admin', PROPRIO);
   demo.club.prepareDemo(real.club.demoConfig());
@@ -273,14 +318,15 @@ test('comptes de la démo : copies sans mot de passe, auteur fictif', async () =
     assert.equal((await visitor.post('/api/login', { login, password: '!' })).status, 401, login);
   }
 
-  // The fictitious author owns every fictitious record.
+  // The fictitious author owns what the preparation writes: the copied products and their opening stock.
   assert.equal(DEMO_AUTHOR_ID, 0);
   const author = demo.club.get('SELECT * FROM users WHERE id = ?', DEMO_AUTHOR_ID);
   assert.equal(author.login, 'auteur.demo.0');
   assert.equal(author.name, 'Démonstration');
   assert.equal(author.role, 'admin');
   assert.equal(author.password_hash, '!');
-  assert.deepEqual(demo.club.all('SELECT DISTINCT created_by FROM members').map((r) => r.created_by), [DEMO_AUTHOR_ID]);
+  assert.deepEqual(demo.club.all('SELECT DISTINCT created_by FROM products').map((r) => r.created_by), [DEMO_AUTHOR_ID]);
+  assert.deepEqual(demo.club.all('SELECT DISTINCT created_by FROM stock_movements').map((r) => r.created_by), [DEMO_AUTHOR_ID]);
 });
 
 test('configuration envoyée à la démo : les comptes ne portent que leur identité', async () => {
@@ -343,12 +389,12 @@ test('une écriture faite dans la démo reste dans la démo', async () => {
   const auditBefore = real.club.all('SELECT * FROM audit_log');
   const asAdmin = inDemo(demo, await contextOf(real, admin));
 
-  // The first request prepares the space (5 fictitious members), then creates a sixth.
+  // The first request prepares the space (empty), then creates its first member.
   const created = ok(await asAdmin.post('/api/members', TRIAL));
   assert.equal(created.name, 'Essai GÉRANT');
-  assert.deepEqual(memberNames(demo.club), [...FICTITIOUS, 'Essai GÉRANT'].sort());
+  assert.deepEqual(memberNames(demo.club), ['Essai GÉRANT']);
   assert.equal(demo.club.memberRow(created.id).created_by, bundle.user.id);
-  assert.equal(ok(await asAdmin.get('/api/members')).length, 6);
+  assert.equal(ok(await asAdmin.get('/api/members')).length, 1);
 
   assert.deepEqual(memberNames(real.club), []);
   assert.ok(real.club.isEmpty());
@@ -360,6 +406,7 @@ test('en démo, la gestion des comptes est refusée, comptes et mots de passe in
   const manager = await managerOf(real);
   const managerId = real.club.userByLogin('gerant').id;
   const accountsBefore = real.club.listUsers();
+  ok(await inDemo(demo, await contextOf(real, admin)).post('/api/members', TRIAL)); // a trial, to see it is not wiped
   const attempts = [
     ['GET', '/api/users'],
     ['POST', '/api/users', { login: 'intrus', name: 'Intrus', role: 'admin', password: 'mot-de-passe-intrus' }],
@@ -386,7 +433,7 @@ test('en démo, la gestion des comptes est refusée, comptes et mots de passe in
   assert.equal(demo.club.get("SELECT COUNT(*) AS n FROM users WHERE login = 'intrus'").n, 0);
   assert.equal(demo.club.userRow(managerId).active, 1);
   assert.equal(demo.club.userRow(managerId).password_hash, '!');
-  assert.equal(demo.club.listMembers().length, 5);
+  assert.equal(demo.club.listMembers().length, 1);
 });
 
 test('« Remettre la démo à neuf » : réservé aux administrateurs, absent du vrai club', async () => {
@@ -394,17 +441,17 @@ test('« Remettre la démo à neuf » : réservé aux administrateurs, absent du
   const asAdmin = inDemo(demo, await contextOf(real, admin));
   const asManager = inDemo(demo, await contextOf(real, await managerOf(real)));
   ok(await asAdmin.post('/api/members', TRIAL));
-  assert.equal(demo.club.listMembers().length, 6);
+  assert.equal(demo.club.listMembers().length, 1);
 
   // The manager is turned away and the trials stay.
   assert.equal((await asManager.post('/api/demo/reset', {})).status, 403);
-  assert.equal(demo.club.listMembers().length, 6);
+  assert.equal(demo.club.listMembers().length, 1);
 
-  // The administrator gets the original space back, with the real club's settings as they are now.
+  // The administrator gets an empty space back, with the real club's settings as they are now.
   ok(await admin.put('/api/settings', { club_name: 'Nom actuel' }));
   const refreshed = inDemo(demo, await contextOf(real, admin));
   const reset = ok(await refreshed.post('/api/demo/reset', {}));
-  assert.deepEqual(memberNames(demo.club), FICTITIOUS);
+  assert.deepEqual(memberNames(demo.club), []);
   assert.equal(reset.demo, true);
   assert.equal(reset.settings.club_name, 'Nom actuel');
   assert.equal(reset.user.name, 'Propriétaire');
@@ -532,7 +579,7 @@ test('en démo, le contrôle CSRF et l’idempotence sont ceux du vrai club', as
 
   assert.equal((await asAdmin.post('/api/members', TRIAL, { origin: 'http://autre-site.test' })).status, 403);
   assert.equal((await asAdmin.post('/api/members', TRIAL, { 'content-type': 'text/plain' })).status, 415);
-  assert.equal(demo.club.listMembers().length, 5);
+  assert.equal(demo.club.listMembers().length, 0);
 
   // The same key twice: one member, and the second answer is the first one replayed.
   const key = { 'idempotency-key': 'cle-demo-0001' };
@@ -542,7 +589,7 @@ test('en démo, le contrôle CSRF et l’idempotence sont ceux du vrai club', as
   assert.equal(second.status, 200);
   assert.equal(second.headers.get('idempotent-replayed'), 'true');
   assert.deepEqual(second.data, first.data);
-  assert.equal(demo.club.listMembers().length, 6);
+  assert.equal(demo.club.listMembers().length, 1);
 });
 
 test('en démo, un compte inconnu de la configuration reçoit une erreur, pas une exception', async () => {
@@ -554,19 +601,27 @@ test('en démo, un compte inconnu de la configuration reçoit une erreur, pas un
   assert.equal(stranger.data.error.code, 'INTROUVABLE');
 });
 
-test('en démo, un remplissage refusé répond par son erreur, pas par une exception', async () => {
+test('en démo, une préparation en échec répond par son erreur, pas par une exception', async () => {
   const { real, demo, admin } = await clubs();
-  // A space that holds a record but was never filled: the filling will not mix it with fictitious ones.
+  const ctx = await contextOf(real, admin);
+
+  const refused = await inDemo(demo, { ...ctx, config: brokenConfig(ctx.config) }).get('/api/me');
+  assert.equal(refused.status, 409);
+  assert.equal(refused.data.error.code, 'CONTRAINTE');
+  assert.equal(demo.club.hasUsers(), false);
+  assert.equal(mark(demo.club, 'demo_empty'), 0);
+});
+
+test('en démo, un enregistrement resté dans un espace jamais préparé est effacé à la préparation', async () => {
+  const { real, demo, admin } = await clubs();
   demo.db.run(
     "INSERT INTO members (member_no, first_name, last_name, phone, created_at) VALUES ('M-0001', 'Resté', 'Là', '+242 06 000 0000', ?)",
     new Date().toISOString(),
   );
 
-  const refused = await inDemo(demo, await contextOf(real, admin)).get('/api/me');
-  assert.equal(refused.status, 409);
-  assert.equal(refused.data.error.code, 'DONNEES_EXISTANTES');
-  assert.deepEqual(memberNames(demo.club), ['Resté Là']);
-  assert.equal(demo.club.get("SELECT COUNT(*) AS n FROM meta WHERE key = 'demo_seeded'").n, 0);
+  assert.deepEqual(ok(await inDemo(demo, await contextOf(real, admin)).get('/api/members')), []);
+  assert.deepEqual(memberNames(demo.club), []);
+  assert.equal(mark(demo.club, 'demo_empty'), 1);
 });
 
 test('chaque point d’entrée refuse l’autre espace', async () => {
@@ -694,7 +749,7 @@ test('aiguillage : avec l’en-tête démo on est dans la démo, sans lui dans l
   const created = ok(await inTheDemo.post('/api/members', TRIAL));
   assert.equal(created.name, 'Essai GÉRANT');
   const names = (members) => members.map((m) => m.name).sort();
-  assert.deepEqual(names(ok(await inTheDemo.get('/api/members'))), [...FICTITIOUS, 'Essai GÉRANT'].sort());
+  assert.deepEqual(names(ok(await inTheDemo.get('/api/members'))), ['Essai GÉRANT']);
   // The same session without the header, or with any other value, is the real club's: no member there.
   assert.deepEqual(ok(await manager.get('/api/members')), []);
   assert.deepEqual(ok(await manager.call('GET', '/api/members', undefined, { 'x-club-espace': 'reel' })), []);

@@ -8,7 +8,6 @@ import { searchable, smartFilter } from '../shared/search.js';
 import { text, int, toId, flag, frDate } from './validate.js';
 import { ledgerMethods, DEFAULT_CATEGORIES, OUTSIDE_MEAL_CATEGORY } from './ledger.js';
 import { loungeMethods } from './lounge.js';
-import { seedDemo } from './seed.js';
 import {
   newTicketCode, formatTicketNumber, normalizeTicketCode, memberInitials, paymentLines, TICKET_CODE_LENGTH,
 } from '../shared/ticket.js';
@@ -3498,17 +3497,23 @@ export class Club {
     }
   }
 
-  // Gets the demo space ready for a request. The first time (no `demo_seeded` mark) it copies the
-  // real club's configuration and catalogue and fills the space with fictitious data, all in one
-  // transaction. After that only the accounts are mirrored again, so a new, renamed or deactivated
-  // account is followed at once, while the settings and the catalogue stay as copied until the next reset.
+  // Gets the demo space ready for a request. The first time (no `demo_empty` mark) it empties the space,
+  // then copies the real club's configuration and catalogue (with its fictitious stock, so that the staff
+  // can sell at once), all in one transaction: the space starts as an empty club, with no member, booking,
+  // payment, expense or treasury history, so that a trial runs from the very beginning. A space filled the
+  // old way with fictitious data (the `demo_seeded` mark) has no `demo_empty` mark: it is emptied the same
+  // way at its next request. After that only the accounts are mirrored again, so a new, renamed or
+  // deactivated account is followed at once, while the settings and the catalogue stay as copied until
+  // the next reset.
   prepareDemo(config) {
     this.assertDemo();
     this.tx(() => {
-      // First, whatever the case: the rows copied below refer to these accounts.
+      // First, whatever the case: the rows copied below refer to these accounts, which the wipe leaves alone.
       this.mirrorUsers(config.users);
-      if (this.get("SELECT 1 AS x FROM meta WHERE key = 'demo_seeded'")) return;
-      // Nothing refers to these tables yet: the space is new, or resetDemo has just emptied it.
+      if (this.get("SELECT 1 AS x FROM meta WHERE key = 'demo_empty'")) return;
+      for (const table of WIPE_ORDER) this.run(`DELETE FROM ${table}`);
+      this.run("DELETE FROM meta WHERE key = 'demo_seeded'");
+      // Nothing refers to these tables any more: the wipe has just removed every record.
       this.replaceRows('settings', config.settings);
       this.replaceRows('plans', config.plans);
       this.replaceRows('rooms', config.rooms);
@@ -3519,24 +3524,18 @@ export class Club {
         DEMO_AUTHOR_ID, this.nowIso(),
       );
       this.cachedSettings = null;
-      // The seed sells both plans, even if the real club has stopped offering one of them: that choice
-      // is put back once the data is in.
-      const withdrawn = config.plans.filter((p) => !p.active);
-      this.run('UPDATE plans SET active = 1');
-      seedDemo(this, { actor: this.get('SELECT * FROM users WHERE id = ?', DEMO_AUTHOR_ID), catalogue: config.products ?? [] });
-      for (const p of withdrawn) this.run('UPDATE plans SET active = 0 WHERE id = ?', p.id);
-      this.run("INSERT INTO meta (key, value) VALUES ('demo_seeded', ?)", this.nowIso());
+      this.copyCatalogue(config.products ?? [], this.get('SELECT * FROM users WHERE id = ?', DEMO_AUTHOR_ID));
+      this.run("INSERT INTO meta (key, value) VALUES ('demo_empty', ?)", this.nowIso());
     });
   }
 
-  // Empties the demo space and fills it again from the real club's current configuration. The wipe
-  // and the refill commit together or not at all. The journal entry is written last: the wipe
-  // empties the journal.
+  // Empties the demo space and starts it again from the real club's current configuration (prepareDemo
+  // does the wipe once the mark is gone). The wipe and the copy commit together or not at all. The
+  // journal entry is written last: the wipe empties the journal.
   resetDemo(config, actor) {
     this.assertDemo();
     this.tx(() => {
-      for (const table of WIPE_ORDER) this.run(`DELETE FROM ${table}`);
-      this.run("DELETE FROM meta WHERE key = 'demo_seeded'");
+      this.run("DELETE FROM meta WHERE key = 'demo_empty'");
       this.prepareDemo(config);
       this.audit(actor, 'demo.remettre_a_neuf', null, null, null);
     });

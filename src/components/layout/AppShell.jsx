@@ -178,7 +178,7 @@ export default function AppShell() {
         </header>
         {demo && (
           <div className="banner banner-demo" role="note">
-            <span>MODE DÉMO — données fictives, rien n'est réel</span>
+            <span>MODE DÉMO — base d'essai, rien n'est réel</span>
             <button type="button" className="btn btn-sm" onClick={leaveDemo}>Quitter</button>
           </div>
         )}

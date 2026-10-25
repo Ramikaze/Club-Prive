@@ -55,7 +55,7 @@ export default function SharePdfDialog({ close, file, text, title, digits, demo 
   return (
     <Modal title={title} size="wide" onClose={close}>
       <div className="form-grid">
-        {demo ? <Notice kind="info">Démo : le relevé porte « DÉMO — SANS VALEUR » et les données sont fictives.</Notice> : null}
+        {demo ? <Notice kind="info">Démo : le relevé porte « DÉMO — SANS VALEUR » : rien n'est réel.</Notice> : null}
         <p className="muted">{useShare
           ? 'Touchez « Envoyer sur WhatsApp », choisissez WhatsApp puis le client : le PDF et le message partent ensemble.'
           : '« Envoyer sur WhatsApp » télécharge le PDF et ouvre la conversation avec le message écrit. Dans WhatsApp : 1. Entrée pour envoyer le message ; 2. glissez le PDF téléchargé dans la conversation (ou trombone → Document), puis Entrée.'}</p>

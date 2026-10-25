@@ -586,13 +586,13 @@ function DataSection({ onReset }) {
   );
 }
 
-// Demo space only, in place of DataSection. The server empties the demo, fills it again with fictitious
-// data from the real club's current settings and catalogue and answers with the new bundle.
+// Demo space only, in place of DataSection. The server empties the demo, copies again the real club's current
+// settings, rooms, plans and catalogue (with a fictitious stock) and answers with the new bundle.
 function DemoResetSection({ applyBundle }) {
   const reset = () => actionDialog({
     title: 'Remettre la démo à neuf',
     danger: true, // it wipes everybody's trials: a red confirm button, like « Effacer toutes les données »
-    message: 'Toutes les données de la démo seront remplacées par des données fictives neuves, avec les réglages et le catalogue actuels du vrai club.',
+    message: 'La démo sera vidée : sans clients ni opérations, avec les réglages, salles, formules et le catalogue actuels du vrai club (stock fictif de 10 par article).',
     confirmLabel: 'Remettre à neuf',
     run: async () => {
       applyBundle(await api.post('/api/demo/reset', {}));
@@ -604,7 +604,7 @@ function DemoResetSection({ applyBundle }) {
       <div className="card-head"><h2>Espace démo</h2></div>
       <div className="stack">
         <p>La démo est un espace d’entraînement partagé : chacun y retrouve les essais des autres, et rien de ce qui s’y fait ne touche le vrai club.
-          {' '}Pour repartir de zéro, remettez-la à neuf.</p>
+          {' '}Pour repartir d’une base vide, remettez-la à neuf.</p>
         <div className="row">
           <button type="button" className="btn btn-primary" onClick={reset}><Icon name="reset" /> Remettre la démo à neuf</button>
         </div>
