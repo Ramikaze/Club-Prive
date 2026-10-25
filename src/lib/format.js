@@ -13,7 +13,8 @@ export function money(minor) {
   if (minor == null) return '—';
   const { label, decimals } = settings().currency;
   const n = new Intl.NumberFormat('fr-FR', { minimumFractionDigits: decimals, maximumFractionDigits: Math.max(decimals, minor % 100 ? 2 : 0) });
-  return `${n.format(minor / 100)} ${label}`;
+  // A no-break space: the currency never wraps below its amount in a narrow column.
+  return `${n.format(minor / 100)} ${label}`;
 }
 
 // '25 000' or '25000,50' -> 2500050 (hundredths). Returns null when not a valid amount.
