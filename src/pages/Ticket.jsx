@@ -15,7 +15,6 @@ import { api } from '../lib/api.js';
 import { dateTime, money } from '../lib/format.js';
 import { useLoad } from '../lib/hooks.js';
 import { useStore } from '../store/useStore.js';
-import { DemoMessageDialog } from '../dialogs/reservationDialogs.jsx';
 import { paymentLines, ticketVerifyUrl, ticketWhatsAppText } from '../../shared/ticket.js';
 import { mealWhatsAppText, rechargeWhatsAppText } from '../../shared/wallet.js';
 import { waDigits, waLink } from '../../shared/whatsapp.js';
@@ -85,31 +84,63 @@ function whatsAppText(ticket, copyNo) {
   });
 }
 
-// The picture of the ticket, ready to go: a phone or a tablet shares it straight to WhatsApp (the member is then
-// picked there), a computer downloads it to attach in WhatsApp. Sharing needs its own click: a browser refuses a
-// share started after the image was drawn and the copy recorded.
-function ShareImageDialog({ close, file, text }) {
+// The ticket for WhatsApp: its picture (with the QR code) and the written message, together. A phone or a tablet
+// shares both at once (WhatsApp, then the member); a computer opens the member's chat with the message and
+// downloads the picture to attach. Each way needs its own click: a browser refuses a share or a new tab started
+// after the picture was drawn and the copy recorded. The demo shows them and sends nothing.
+function ShareTicketDialog({ close, file, text, title, digits, demo }) {
   const [url] = useState(() => URL.createObjectURL(file));
   useEffect(() => () => URL.revokeObjectURL(url), [url]);
-  const canShare = typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] });
+  const canShare = typeof navigator.canShare === 'function' && navigator.canShare({ files: [file], text });
+  // A computer cannot hand a file to WhatsApp: the picture is copied, then pasted (Cmd/Ctrl + V) in the chat.
+  const canCopy = !canShare && typeof window.ClipboardItem === 'function' && Boolean(navigator.clipboard?.write);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.write([new window.ClipboardItem({ 'image/png': file })]);
+      toast('Ticket copié : dans la conversation WhatsApp, collez-le (Cmd + V ou Ctrl + V) avec le message.');
+    } catch {
+      toast('La copie a échoué : utilisez « Télécharger le ticket ».', 'error');
+    }
+  };
   const share = async () => {
     try {
       await navigator.share({ files: [file], text });
       close();
     } catch (e) {
-      if (e?.name !== 'AbortError') toast('Le partage a échoué : téléchargez l’image et joignez-la dans WhatsApp.', 'error');
+      if (e?.name !== 'AbortError') toast('Le partage a échoué : téléchargez l’image et ouvrez WhatsApp avec le message.', 'error');
     }
   };
+  const copyText = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('Message copié.');
+    } catch {
+      toast('La copie du message a échoué.', 'error');
+    }
+  };
+  // The member's chat with the message written; without a usable number (or in the demo), WhatsApp opens with the
+  // message and lets the contact be chosen.
+  const waHref = !demo && digits ? waLink(digits, text) : `https://wa.me/?text=${encodeURIComponent(text)}`;
   return (
-    <Modal title="Image du ticket" onClose={close}>
+    <Modal title={title} onClose={close}>
       <div className="form-grid">
+        {demo ? <Notice kind="info">Démo : le ticket porte « DÉMO — SANS VALEUR » et les données sont fictives.</Notice> : null}
         <p className="muted">{canShare
-          ? 'Touchez « Partager », choisissez WhatsApp puis le client : l’image et le message partent ensemble.'
-          : 'Téléchargez l’image, puis joignez-la au client dans WhatsApp (trombone, puis Photos ou Document).'}</p>
+            ? 'Touchez « Partager sur WhatsApp », choisissez WhatsApp puis le client : le ticket et le message partent ensemble.'
+            : canCopy
+              ? '1. « Copier le ticket ». 2. « Ouvrir WhatsApp avec le message ». 3. Dans la conversation, collez le ticket (Cmd + V ou Ctrl + V) : il part avec le message.'
+              : 'Ouvrez WhatsApp avec le message, puis joignez le ticket téléchargé (trombone, puis Photos ou Document).'}</p>
         <img src={url} alt={`Ticket ${file.name}`} className="ticket-image-preview" />
+        <div className="wa-message-box">
+          <blockquote className="wa-message">{text}</blockquote>
+          <button type="button" className="btn btn-sm btn-ghost wa-copy" onClick={copyText} title="Copier le message" aria-label="Copier le message">
+            <Icon name="copy" /></button>
+        </div>
         <div className="modal-actions">
-          <a className="btn" href={url} download={file.name}><Icon name="download" /> Télécharger l’image</a>
-          {canShare ? <button type="button" className="btn btn-primary" onClick={share}><Icon name="message" /> Partager</button> : null}
+          <a className="btn btn-ghost" href={url} download={file.name}><Icon name="download" /> Télécharger le ticket</a>
+          {canCopy ? <button type="button" className="btn" onClick={copy}><Icon name="receipt" /> Copier le ticket</button> : null}
+          <a className="btn" href={waHref} target="_blank" rel="noopener noreferrer"><Icon name="message" /> Ouvrir WhatsApp avec le message</a>
+          {canShare ? <button type="button" className="btn btn-primary" onClick={share}><Icon name="message" /> Partager sur WhatsApp</button> : null}
         </div>
       </div>
     </Modal>
@@ -213,38 +244,9 @@ function TicketPage({ data, reload }) {
     }
   });
 
-  const sendWhatsApp = () => {
-    if (ticket.demo) {
-      // The demo shows the message and sends nothing, records nothing.
-      openDialog(DemoMessageDialog, { text: whatsAppText(ticket, sheet.copyNo), title: isMemberMessage(ticket) ? MESSAGE_TITLE[ticket.kind] : 'Ticket par WhatsApp' });
-      return;
-    }
-    if (!digits || working.current) return;
-    // The tab opens now, on the click, because a browser refuses a tab opened after a network call; it goes to
-    // WhatsApp once the server has recorded the copy.
-    const tab = window.open('', '_blank');
-    if (!tab) {
-      toast('Le navigateur a bloqué l’ouverture de WhatsApp. Autorisez les fenêtres pour ce site, puis réessayez.', 'error');
-      return;
-    }
-    tab.opener = null;
-    run('whatsapp', async () => {
-      try {
-        const out = await api.post(`/api/payments/${ticket.id}/ticket-events`, { kind: 'whatsapp' });
-        tab.location.href = waLink(digits, whatsAppText(ticket, out.copy_no));
-        setLast({ kind: 'whatsapp', copyNo: out.copy_no });
-        setSheet(next(out.copy_no + 1));
-        if (events) reload();
-      } catch (e) {
-        tab.close();
-        throw e;
-      }
-    });
-  };
-
-  // The picture of the ticket for WhatsApp: the copy is recorded first (as a WhatsApp copy, with its number on the
-  // picture), then the sheet is drawn to a PNG with its QR code. The demo records nothing.
-  const sendImage = () => run('image', async () => {
+  // WhatsApp: the copy is recorded first (its number goes on the picture), then the sheet is drawn to a PNG with
+  // its QR code, and the picture and the written message are offered together. The demo records nothing.
+  const sendWhatsApp = () => run('whatsapp', async () => {
     let copyNo = sheet.copyNo;
     if (!ticket.demo) {
       const out = await api.post(`/api/payments/${ticket.id}/ticket-events`, { kind: 'whatsapp' });
@@ -259,7 +261,10 @@ function TicketPage({ data, reload }) {
       setSheet(next(copyNo + 1));
       if (events) reload();
     }
-    openDialog(ShareImageDialog, { file, text: whatsAppText(ticket, copyNo) });
+    openDialog(ShareTicketDialog, {
+      file, text: whatsAppText(ticket, copyNo), digits, demo: ticket.demo,
+      title: isMemberMessage(ticket) ? MESSAGE_TITLE[ticket.kind] : 'Ticket par WhatsApp',
+    });
   });
 
   return (
@@ -272,10 +277,8 @@ function TicketPage({ data, reload }) {
             <>
               <button type="button" className="btn btn-primary" onClick={print} disabled={busy !== null} aria-busy={busy === 'impression'}>
                 <Icon name="printer" /> Imprimer</button>
-              <button type="button" className="btn" onClick={sendWhatsApp} disabled={busy !== null || (!ticket.demo && !digits)} aria-busy={busy === 'whatsapp'}>
+              <button type="button" className="btn" onClick={sendWhatsApp} disabled={busy !== null} aria-busy={busy === 'whatsapp'}>
                 <Icon name="message" /> {isMemberMessage(ticket) ? MESSAGE_BUTTON[ticket.kind] : 'Envoyer par WhatsApp'}</button>
-              <button type="button" className="btn" onClick={sendImage} disabled={busy !== null} aria-busy={busy === 'image'}>
-                <Icon name="download" /> Image du ticket</button>
               <Link className="btn" to="/caisse"><Icon name="left" /> Retour à la caisse</Link>
               <Link className="btn" to={`/membres/${ticket.member_id}`}><Icon name="users" /> Fiche du membre</Link>
             </>

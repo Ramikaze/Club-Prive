@@ -38,7 +38,8 @@ export default function TicketSheet({ ticket, copyNo, printedBy, printedAt }) {
 
       <header className="ts-head">
         <BrandLogo className="ts-logo" />
-        <h2 className="ts-club">{ticket.club_name}</h2>
+        {/* The logo already names the club: its name is kept for screen readers only. */}
+        <h2 className="sr-only">{ticket.club_name}</h2>
         {header && <p className="ts-header">{header}</p>}
       </header>
 
