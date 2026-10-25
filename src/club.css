@@ -962,3 +962,6 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
     display: block; padding: 10mm 6mm; color: #000; font: 700 11pt/1.4 Arial, Helvetica, sans-serif; text-align: center;
   }
 }
+
+/* Picture of a ticket before it is shared on WhatsApp. */
+.ticket-image-preview { display: block; max-width: 100%; max-height: 55vh; margin: 0 auto; border: 1px solid var(--border); border-radius: 6px; background: #fff; }

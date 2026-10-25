@@ -15,25 +15,34 @@ function instantText(iso, timezone) {
   return `${dayText(p.date)} à ${p.time}`;
 }
 
+// The ticket's number, and the link anyone can open to check that it is genuine (absent in the demo).
+const ticketLines = (number, verifyUrl) => [
+  number ? `Ticket ${clean(number)}` : '',
+  verifyUrl ? `Vérifier le ticket : ${verifyUrl}` : '',
+];
+
 // The message of an outside meal: what was ordered, when, the card's part, the rest paid at the till if any,
-// and the new balance.
-export function mealWhatsAppText({ clubName, firstName, label, amount, cardAmount, balance, at, timezone, currency }) {
+// the new balance, then the ticket's number and verification link.
+export function mealWhatsAppText({ clubName, firstName, label, amount, cardAmount, balance, at, timezone, currency, number, verifyUrl }) {
   const money = (n) => formatMoney(n, currency);
   const head = `Votre repas « ${clean(label)} » du ${instantText(at, timezone)} (${money(amount)})`;
   const body = cardAmount >= amount
     ? `${head} a été payé par votre carte membre : nouveau solde ${money(balance)}.`
     : `${head} : ${money(cardAmount)} payés par votre carte membre, ${money(amount - cardAmount)} réglés à la caisse. Nouveau solde ${money(balance)}.`;
-  return [clean(clubName), `Bonjour ${clean(firstName)},`, body, 'Bon appétit !'].filter(Boolean).join('\n');
+  return [clean(clubName), `Bonjour ${clean(firstName)},`, body, ...ticketLines(number, verifyUrl), 'Bon appétit !']
+    .filter(Boolean).join('\n');
 }
 
-// The receipt of a recharge: the amount, the new balance and when. `at` is the payment's instant, shown in
-// the club's `timezone`; `currency` is the club's (formatMoney's default otherwise).
-export function rechargeWhatsAppText({ clubName, firstName, amount, balance, at, timezone, currency }) {
+// The receipt of a recharge: the amount, the new balance and when, then the ticket's number and verification
+// link. `at` is the payment's instant, shown in the club's `timezone`; `currency` is the club's (formatMoney's
+// default otherwise).
+export function rechargeWhatsAppText({ clubName, firstName, amount, balance, at, timezone, currency, number, verifyUrl }) {
   const money = (n) => formatMoney(n, currency);
   return [
     clean(clubName),
     `Bonjour ${clean(firstName)},`,
     `Votre carte membre a été rechargée de ${money(amount)} le ${instantText(at, timezone)} : nouveau solde ${money(balance)}.`,
+    ...ticketLines(number, verifyUrl),
     'Merci de votre confiance.',
   ].filter(Boolean).join('\n');
 }

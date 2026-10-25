@@ -162,6 +162,17 @@ test('mealWhatsAppText : repas, part carte, reste éventuel et nouveau solde', (
     `Votre repas « Le Gourmet, poulet braisé » du 24/10/2026 à 20:41 (${m(18500)}) : ${m(10000)} payés par votre carte membre, ${m(8500)} réglés à la caisse. Nouveau solde ${m(0)}.`);
 });
 
+test('messages de la carte : numéro du ticket et lien de vérification', () => {
+  const base = { clubName: 'Limen', firstName: 'Jean', at: '2026-10-24T19:41:00.000Z', timezone: 'Africa/Brazzaville' };
+  const url = 'https://club.test/#/ticket/12/ABCDEFGHJKMN';
+  const recharge = rechargeWhatsAppText({ ...base, amount: 100, balance: 100, number: 'T-000012', verifyUrl: url }).split('\n');
+  assert.deepEqual(recharge.slice(3), ['Ticket T-000012', `Vérifier le ticket : ${url}`, 'Merci de votre confiance.']);
+  const meal = mealWhatsAppText({ ...base, label: 'Le Gourmet', amount: 100, cardAmount: 100, balance: 0, number: 'T-000013', verifyUrl: url }).split('\n');
+  assert.deepEqual(meal.slice(3), ['Ticket T-000013', `Vérifier le ticket : ${url}`, 'Bon appétit !']);
+  // The demo has no verification link: only the number.
+  assert.ok(!rechargeWhatsAppText({ ...base, amount: 100, balance: 100, number: 'T-000012' }).includes('Vérifier'));
+});
+
 test('rechargeWhatsAppText : montant, nouveau solde et date', () => {
   const text = rechargeWhatsAppText({
     clubName: 'THE LIMEN · Club privé', firstName: 'Jean', amount: 100000 * 100, balance: 100000 * 100,
