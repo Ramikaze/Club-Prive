@@ -5,6 +5,8 @@ import { toast } from '../components/ui/toast.jsx';
 import { actionDialog } from '../components/ui/Modal.jsx';
 import { api, newKey } from '../lib/api.js';
 import MemberCard3D from '../components/ui/MemberCard3D.jsx';
+import SessionTimer, { isRunning } from '../components/ui/SessionTimer.jsx';
+import EndingSoonNotice from '../components/ui/EndingSoonNotice.jsx';
 import { money, fmtDuration, dayLabel, dateTime, dayMonth, paymentPurpose, paymentMethodText } from '../lib/format.js';
 import { useLoad } from '../lib/hooks.js';
 import { useIsAdmin } from '../store/useStore.js';
@@ -269,6 +271,18 @@ function MemberDetail({ m, reload }) {
           </Notice>
         </div>
       )}
+
+      {/* The member is in a room right now (holder or guest): the same countdown as on Salles and the booking. */}
+      {m.reservations.filter(isRunning).map((r) => (
+        <section className="card session-timer-block" key={r.id}>
+          <div className="card-head">
+            <h2>En salle : {r.room_name}</h2>
+            <Link className="btn btn-sm" to={`/reservations/${r.id}`}>Réservation n° {r.id}</Link>
+          </div>
+          <SessionTimer reservation={r} />
+          <EndingSoonNotice reservation={r} onExtended={reload} />
+        </section>
+      ))}
 
       <div className="grid-2">
         <CardTile m={m} current={current} summary={summary} reload={reload} book={book} />
