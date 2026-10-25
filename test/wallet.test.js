@@ -1133,3 +1133,40 @@ test('carte dès la création : un nouveau membre a une carte virtuelle active, 
   assert.equal(zoe.cards[0].kind, 'virtuelle');
   assert.equal(zoe.cards[0].status, 'active');
 });
+
+// ---------------------------------------------------------------------------- plan paid at activation
+
+test('formule encaissée dès l’activation : carte d’abord, reste par un moyen, ou espèces seules', async () => {
+  ok(await admin.put(`/api/plans/${planId('MENSUELLE')}`, { price: 50000 * UM, price_validated: true }));
+  const activate = (memberId, payment) => manager.post(`/api/members/${memberId}/subscriptions`, { plan_id: planId('MENSUELLE'), start_date: today, payment });
+  const dueOf = async (memberId) => ok(await manager.get(`/api/members/${memberId}`)).charges.filter((c) => c.status === 'due');
+
+  // The card covers part of it: the rest goes through cash, one payment, nothing left at the till.
+  const mixed = await newMember('Mixte');
+  ok(await recharge(mixed.id, { amount: 36500 * UM, method: 'Espèces' }));
+  const r1 = ok(await activate(mixed.id, { card: true, method: 'Espèces' }));
+  assert.equal(r1.payment.amount, 50000 * UM);
+  assert.equal(r1.payment.card_amount, 36500 * UM);
+  assert.equal(r1.payment.method, 'Espèces');
+  assert.equal(balance(mixed.id), 0);
+  assert.deepEqual(await dueOf(mixed.id), []);
+
+  // Cash only, the card left alone.
+  const cashOnly = await newMember('Especes');
+  ok(await recharge(cashOnly.id, { amount: 10000 * UM, method: 'Espèces' }));
+  const r2 = ok(await activate(cashOnly.id, { method: 'Espèces' }));
+  assert.equal(r2.payment.card_amount, 0);
+  assert.equal(balance(cashOnly.id), 10000 * UM);
+  assert.deepEqual(await dueOf(cashOnly.id), []);
+
+  // A refused payment (no method for the rest) leaves no plan behind.
+  const short = await newMember('Court');
+  refused(await activate(short.id, { card: true }), 400);
+  assert.equal(subscriptionsOf(short.id).length, 0);
+
+  // Without `payment`, the line waits at the till as before.
+  const later = await newMember('Plustard');
+  const r3 = ok(await activate(later.id, undefined));
+  assert.equal(r3.payment, null);
+  assert.equal((await dueOf(later.id)).length, 1);
+});

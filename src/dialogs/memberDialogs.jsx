@@ -9,6 +9,8 @@ import { toast } from '../components/ui/toast.jsx';
 import { Notice, FormError } from '../components/ui/ui.jsx';
 import { useSubmit } from '../lib/hooks.js';
 import { addDays, addMonths } from '../../shared/time.js';
+import { CARD_METHOD } from '../../shared/rules.js';
+import { useNavigate } from 'react-router-dom';
 
 const planLabel = (p) => {
   const price = p.price == null ? 'prix non défini' : money(p.price);
@@ -36,8 +38,14 @@ function MemberDialog({ close, member, onDone }) {
     notes: member?.notes ?? '',
     plan_id: '',
     start_date: bizToday(),
+    method: '',
   }));
   const field = (name) => ({ name, value: v[name], onChange: (e) => setV((prev) => ({ ...prev, [name]: e.target.value })) });
+  // A plan chosen here is paid at once: a new member's card is empty, so a method is asked for.
+  const methods = useSettings().payment_methods;
+  const plan = plans.find((p) => p.id === Number(v.plan_id));
+  const planPrice = plan?.price ?? 0;
+  const navigate = useNavigate();
 
   const onSubmit = (e) => {
     e.preventDefault();
@@ -52,16 +60,22 @@ function MemberDialog({ close, member, onDone }) {
       }
       const created = await api.post('/api/members', body, key);
       let result = created;
+      let payment = null;
       if (v.plan_id) {
         try {
-          result = (await api.post(`/api/members/${created.id}/subscriptions`, { plan_id: Number(v.plan_id), start_date: v.start_date }, subKey)).member;
+          const res = await api.post(`/api/members/${created.id}/subscriptions`, {
+            plan_id: Number(v.plan_id), start_date: v.start_date, payment: planPrice > 0 ? { method: v.method || methods[0] } : undefined,
+          }, subKey);
+          result = res.member;
+          payment = res.payment;
         } catch (err) {
           toast(`Membre créé, mais formule non activée : ${err.message}`, 'error');
         }
       }
       close();
-      toast(`Membre ${created.member_no} créé.`);
+      toast(payment ? `Membre ${created.member_no} créé, formule encaissée : ${money(payment.amount)}.` : `Membre ${created.member_no} créé.`);
       onDone?.(result);
+      if (payment) navigate(`/caisse/ticket/${payment.id}`);
     });
   };
 
@@ -82,7 +96,16 @@ function MemberDialog({ close, member, onDone }) {
             <label className="field"><span>Formule</span><select {...field('plan_id')}><option value="">— Plus tard —</option>
               {plans.map((p) => <option key={p.id} value={p.id}>{planLabel(p)}</option>)}</select></label>
             <label className="field"><span>Début de validité</span><input type="date" {...field('start_date')} /></label>
-          </div></fieldset>
+          </div>
+          {planPrice > 0 ? (
+            <div className="form-row">
+              <label className="field"><span>{`Paiement de la formule (${money(planPrice)})`}</span>
+                <select name="method" value={v.method || methods[0] || ''} onChange={(e) => setV((prev) => ({ ...prev, method: e.target.value }))}>
+                  {methods.map((x) => <option key={x}>{x}</option>)}</select>
+                <span className="help">Encaissée à la création ; le ticket s’ouvre ensuite.</span></label>
+            </div>
+          ) : null}
+          </fieldset>
         )}
         <FormError error={error} />
         <div className="modal-actions"><button type="button" className="btn" onClick={close}>Annuler</button>
@@ -116,17 +139,38 @@ function SubscriptionDialog({ close, member, onDone }) {
     if (plans.some((x) => x.id === Number(nextPlan)) && nextStart) setShown({ planId: nextPlan, startDate: nextStart });
   };
 
+  // The plan is paid as it is activated, like the payment dialog: the member card first when it holds money,
+  // then a method for what it does not cover.
+  const methods = settings.payment_methods;
+  const balance = member.wallet?.balance ?? 0;
+  const [picked, setPicked] = useState(null);
+  const [restMethod, setRestMethod] = useState(methods[0] ?? '');
+  const method = picked ?? (balance > 0 ? CARD_METHOD : (methods[0] ?? ''));
+  const byCard = method === CARD_METHOD;
+  const navigate = useNavigate();
+
+  const p = plans.find((x) => x.id === Number(shown.planId));
+  const price = p?.price ?? 0;
+  const cardPart = byCard ? Math.min(balance, price) : 0;
+  const rest = price - cardPart;
+
   const onSubmit = (e) => {
     e.preventDefault();
     submit(async () => {
-      const res = await api.post(`/api/members/${member.id}/subscriptions`, { plan_id: Number(planId), start_date: startDate }, key);
+      const payment = byCard ? { card: true, method: rest > 0 ? restMethod : undefined } : { method };
+      const res = await api.post(`/api/members/${member.id}/subscriptions`, { plan_id: Number(planId), start_date: startDate, payment }, key);
       close();
-      toast(res.charge_id ? 'Formule activée : la ligne d’abonnement est à encaisser.' : 'Formule activée.');
+      if (res.payment) {
+        toast(`Formule activée et encaissée : ${money(res.payment.amount)}.`);
+        // The receipt is the next thing the manager needs (to print, have it signed, send on WhatsApp).
+        navigate(`/caisse/ticket/${res.payment.id}`);
+      } else {
+        toast('Formule activée.');
+      }
       onDone?.(res.member);
     });
   };
 
-  const p = plans.find((x) => x.id === Number(shown.planId));
   let info = null;
   if (p && shown.startDate) {
     const end = addDays(addMonths(shown.startDate, p.duration_months), -1);
@@ -156,9 +200,26 @@ function SubscriptionDialog({ close, member, onDone }) {
             <input type="date" name="start_date" value={startDate} onChange={(e) => change(planId, e.target.value)} required /></label>
         </div>
         <div id="sub-info">{info}</div>
+        {price > 0 ? (
+          <>
+            <div className="form-row">
+              <label className="field"><span>Paiement</span>
+                <select name="method" required value={method} onChange={(e) => setPicked(e.target.value)}>
+                  {balance > 0 ? <option value={CARD_METHOD}>{`${CARD_METHOD} (${money(balance)} disponibles)`}</option> : null}
+                  {methods.map((x) => <option key={x}>{x}</option>)}</select></label>
+              {byCard && rest > 0 ? (
+                <label className="field"><span>{`Moyen pour le reste (${money(rest)})`}</span>
+                  <select name="rest_method" required value={restMethod} onChange={(e) => setRestMethod(e.target.value)}>
+                    {methods.map((x) => <option key={x}>{x}</option>)}</select></label>
+              ) : null}
+            </div>
+            {byCard ? <p className="subtle">{`Carte membre : ${money(cardPart)}${rest > 0 ? ` · reste ${money(rest)}` : ''}. Le ticket imprimé est à faire signer par le membre.`}</p> : null}
+          </>
+        ) : null}
         <FormError error={error} />
         <div className="modal-actions"><button type="button" className="btn" onClick={close}>Annuler</button>
-          <button type="submit" className="btn btn-primary" disabled={busy} aria-busy={busy}>{renewing ? 'Renouveler' : 'Activer'}</button></div>
+          <button type="submit" className="btn btn-primary" disabled={busy} aria-busy={busy}>
+            {`${renewing ? 'Renouveler' : 'Activer'}${price > 0 ? ` et encaisser ${money(price)}` : ''}`}</button></div>
       </form>
     </Modal>
   );
