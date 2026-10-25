@@ -99,16 +99,41 @@ function NowLine({ day, slotH, now, settings }) {
   return <div className="now-line" style={{ top: `${((rel - w.open) / settings.booking.slot_min) * slotH}px` }} aria-hidden="true" />;
 }
 
+// On a computer or a tablet the whole business day fits the screen under the page header, so nothing has to be
+// scrolled to see a time; on a phone the slots keep their full height (a finger needs it) and the page scrolls.
+const FIT_MIN_WIDTH = 768;
+const FIT_MIN_SLOT_H = 12;
+const LEGEND_SPACE = 110; // the legend, the empty-day hint and the page margin under the grid
+function useFitSlotHeight(ref, slotCount) {
+  const [slotH, setSlotH] = useState(DAY_SLOT_H);
+  useEffect(() => {
+    const measure = () => {
+      const el = ref.current;
+      if (!el || window.innerWidth < FIT_MIN_WIDTH) return setSlotH(DAY_SLOT_H);
+      const top = el.getBoundingClientRect().top + window.scrollY;
+      const room = window.innerHeight - top - LEGEND_SPACE;
+      setSlotH(Math.max(FIT_MIN_SLOT_H, Math.min(DAY_SLOT_H, Math.floor(room / slotCount))));
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [ref, slotCount]);
+  return slotH;
+}
+
 function DayView({ day, list, now, settings, maxRooms, onSlot }) {
   const active = list.filter((r) => r.status !== 'annulee');
   const cancelled = list.filter((r) => r.status === 'annulee');
+  const w = win();
+  const grid = useRef(null);
+  const slotH = useFitSlotHeight(grid, (w.maxEnd - w.open) / settings.booking.slot_min);
   return (
     <>
       <section className="card agenda-card">
-        <div className="tl" style={{ '--slot-h': `${DAY_SLOT_H}px` }}>
+        <div className="tl" ref={grid} style={{ '--slot-h': `${slotH}px` }}>
           {slots(day, active, { now, settings, maxRooms, onSlot })}
-          <div className="tl-events">{active.map((r) => <Event key={r.id} r={r} day={day} slotH={DAY_SLOT_H} compact={false} settings={settings} />)}</div>
-          <NowLine day={day} slotH={DAY_SLOT_H} now={now} settings={settings} />
+          <div className="tl-events">{active.map((r) => <Event key={r.id} r={r} day={day} slotH={slotH} compact={slotH < 24} settings={settings} />)}</div>
+          <NowLine day={day} slotH={slotH} now={now} settings={settings} />
         </div>
         <div className="legend">
           <span><i style={{ background: 'var(--info-soft)', borderLeft: '3px solid var(--info)' }} /> Réservée</span>
@@ -298,7 +323,8 @@ export default function Agenda() {
 
   const shown = state.data;
   useEffect(() => {
-    if (shown && view === 'jour' && date === bizToday()) {
+    // Only a phone scrolls to the current time: elsewhere the whole day is on screen with the header above it.
+    if (shown && view === 'jour' && date === bizToday() && window.innerWidth < FIT_MIN_WIDTH) {
       document.querySelector('.now-line')?.scrollIntoView({ block: 'center', behavior: 'instant' });
     }
   }, [shown]); // eslint-disable-line react-hooks/exhaustive-deps
