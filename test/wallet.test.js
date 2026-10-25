@@ -591,18 +591,22 @@ test('repas extérieur en partie : la carte paie son solde, le reste par un autr
   assert.equal(await bookClosing(), afterwards.total.closing);
 });
 
-test('repas extérieur : montant nul ou négatif, moyen du livreur inconnu, membre désactivé sont refusés', async () => {
+test('repas extérieur : montant nul ou négatif, membre désactivé refusés ; le livreur toujours payé en espèces', async () => {
   const member = await newMember('Karim');
   ok(await recharge(member.id, { amount: 20000 * UM, method: 'Espèces' }));
   const payments = server.club.get('SELECT COUNT(*) AS n FROM payments').n;
   for (const amount of [0, -1000 * UM, 1.5, 'abc', null]) {
     refused(await outside(member.id, { amount, label: 'Test', courier_method: 'Espèces' }), 400);
   }
-  refused(await outside(member.id, { amount: 1000 * UM, label: 'Test', courier_method: CARD_METHOD }), 400);
-  refused(await outside(member.id, { amount: 1000 * UM, label: 'Test' }), 400);
+  // The courier is always paid in cash from the till, whatever the request says.
+  const viaMomo = ok(await outside(member.id, { amount: 1000 * UM, label: 'Test', courier_method: 'MTN MoMo' })).payment;
+  assert.equal(server.club.get('SELECT method FROM ledger_entries WHERE reference = ?', `ENC-${viaMomo.id}`).method, 'Espèces');
+  const noCourier = ok(await outside(member.id, { amount: 1000 * UM, label: 'Test' })).payment;
+  assert.equal(server.club.get('SELECT method FROM ledger_entries WHERE reference = ?', `ENC-${noCourier.id}`).method, 'Espèces');
   refused(await outside(member.id, { amount: 1000 * UM, courier_method: 'Espèces' }), 400);
-  assert.equal(server.club.get('SELECT COUNT(*) AS n FROM payments').n, payments);
-  assert.equal(balance(member.id), 20000 * UM);
+  // Only the two meals above were recorded, each paid by the card.
+  assert.equal(server.club.get('SELECT COUNT(*) AS n FROM payments').n, payments + 2);
+  assert.equal(balance(member.id), 18000 * UM);
   ok(await manager.post(`/api/members/${member.id}/deactivate`, { reason: 'Parti du club' }));
   refused(await outside(member.id, { amount: 1000 * UM, label: 'Test', courier_method: 'Espèces' }), 409, 'MEMBRE_DESACTIVE');
 });

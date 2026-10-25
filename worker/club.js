@@ -20,7 +20,7 @@ import {
 import {
   ACCOUNTS, ACCOUNT_LABELS, bookingWindow, validateHours, placeInWindow, supplementAmount, supplementDetail, fmtDuration,
   isWeekend, minDurationFor, DEPOSIT_FROM, depositFor, formatMoney, CARD_METHOD, RENEWAL_WARNING_DAYS, RENEWAL_GRACE_DAYS,
-  formatFirstName, formatLastName,
+  formatFirstName, formatLastName, CASH_METHOD,
 } from '../shared/rules.js';
 import { waDigits } from '../shared/whatsapp.js';
 
@@ -1366,8 +1366,8 @@ export class Club {
     this.assertMemberActive(m, 'de commander un repas');
     const amount = int(input.amount, 'Montant du repas', { min: 1, max: 1e13 });
     const label = text(input.label, 'Restaurant ou plat', { required: true, max: 100 });
-    const courier = text(input.courier_method, 'Livreur payé depuis', { required: true, max: 40 });
-    if (courier === CARD_METHOD || !s.payment_methods.includes(courier)) throw invalid('Moyen de paiement du livreur non configuré.');
+    // The courier is always paid in cash from the till (owner's rule), whatever the request says.
+    const courier = CASH_METHOD;
     const reservationId = input.reservation_id ? toId(input.reservation_id, 'Réservation') : null;
     if (reservationId && !this.get('SELECT 1 AS x FROM reservations WHERE id = ? AND member_id = ?', reservationId, m.id)) {
       throw invalid("Cette réservation n'est pas celle de ce membre.");

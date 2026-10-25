@@ -6,7 +6,7 @@ import {
   TICKET_ALPHABET, TICKET_CODE_LENGTH, newTicketCode, formatTicketNumber, formatTicketCode,
   normalizeTicketCode, memberInitials, ticketVerifyUrl, ticketWhatsAppText, paymentLines, RECHARGE_LINE_LABEL,
 } from '../shared/ticket.js';
-import { rechargeWhatsAppText, renewalWhatsAppText } from '../shared/wallet.js';
+import { mealWhatsAppText, rechargeWhatsAppText, renewalWhatsAppText } from '../shared/wallet.js';
 import { formatMoney } from '../shared/rules.js';
 
 // A generator that hands out the given bytes in order, then zeros.
@@ -144,6 +144,22 @@ test('ticketWhatsAppText : part de la carte, reste, solde, crédit temps et annu
   assert.ok(cash.includes('Payé : Espèces'));
   assert.ok(!cash.includes('Solde carte'));
   assert.ok(ticketWhatsAppText({ ...base, cancelledAt: '2026-10-25T09:00:00' }).includes('Annulé le DT(2026-10-25T09:00:00)'));
+});
+
+test('mealWhatsAppText : repas, part carte, reste éventuel et nouveau solde', () => {
+  const base = {
+    clubName: 'THE LIMEN · Club privé', firstName: 'Jean', label: 'Le Gourmet, poulet braisé',
+    at: '2026-10-24T19:41:00.000Z', timezone: 'Africa/Brazzaville',
+  };
+  const m = (n) => formatMoney(n * 100);
+  assert.equal(mealWhatsAppText({ ...base, amount: 18500 * 100, cardAmount: 18500 * 100, balance: 31500 * 100 }), [
+    'THE LIMEN · Club privé',
+    'Bonjour Jean,',
+    `Votre repas « Le Gourmet, poulet braisé » du 24/10/2026 à 20:41 (${m(18500)}) a été payé par votre carte membre : nouveau solde ${m(31500)}.`,
+    'Bon appétit !',
+  ].join('\n'));
+  assert.equal(mealWhatsAppText({ ...base, amount: 18500 * 100, cardAmount: 10000 * 100, balance: 0 }).split('\n')[2],
+    `Votre repas « Le Gourmet, poulet braisé » du 24/10/2026 à 20:41 (${m(18500)}) : ${m(10000)} payés par votre carte membre, ${m(8500)} réglés à la caisse. Nouveau solde ${m(0)}.`);
 });
 
 test('rechargeWhatsAppText : montant, nouveau solde et date', () => {
