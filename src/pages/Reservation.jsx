@@ -5,15 +5,18 @@ import { AccountTag, Chip, Empty, FormError, Loaded, Notice, PageHead, Segmented
 import { toast } from '../components/ui/toast.jsx';
 import { actionDialog } from '../components/ui/Modal.jsx';
 import SessionTimer, { isRunning } from '../components/ui/SessionTimer.jsx';
-import ConsumptionBreakdown, { ConsumerPicker, consumptionOf } from '../components/ui/ConsumptionBreakdown.jsx';
+import SessionConsumptions, {
+  PayNowChoice, consumptionOf, payNowBody, cardShort, servedToast,
+} from '../components/ui/SessionConsumptions.jsx';
 import { api, newKey } from '../lib/api.js';
 import { money, fmtDuration, dayLabel, dateTime, ACCOUNT_LABEL, paymentMethodText } from '../lib/format.js';
 import { ACTION_LABELS, auditSummary } from '../lib/audit.js';
 import { useBusy, useLoad } from '../lib/hooks.js';
 import { useIsAdmin, useRooms } from '../store/useStore.js';
+import { partyLabel } from '../../shared/rules.js';
 import {
   openExtendDialog, openCancelReservationDialog, openPaymentDialog, openRefundDialog, cancelChargeDialog, supplementText, canRefund,
-  quickChangeRoom, openAddAttendeeDialog, quickRemoveAttendee,
+  quickChangeRoom,
 } from '../dialogs/index.js';
 
 const CAT_FILTERS = [['tous', 'Tous'], ['cigare', 'Cigares'], ['bouteille', 'Bouteilles']];
@@ -24,15 +27,9 @@ function ReservationDetail({ d, products, reload }) {
   const activeRooms = rooms.filter((rm) => rm.active || rm.id === d.reservation.room_id);
   const r = d.reservation;
   const sub = d.subscription;
-  const attendees = r.attendees ?? [{
-    member_id: r.member_id,
-    name: r.member_name,
-    member_no: r.member_no,
-    is_primary: true,
-  }];
   const itemKey = useRef(newKey());
   const [catFilter, setCatFilter] = useState('tous');
-  const [consumer, setConsumer] = useState(null);
+  const [payWith, setPayWith] = useState(''); // '' = on the note, paid at the end
   const [addingId, setAddingId] = useState(null);
   const [itemError, setItemError] = useState(null);
   const start = useBusy();
@@ -67,7 +64,7 @@ function ReservationDetail({ d, products, reload }) {
 
   const onFinish = () => actionDialog({
     title: 'Terminer la réservation',
-    message: `Le crédit engagé du titulaire sera compté comme consommé ; les membres présents ne sont pas débités.${dueTotal ? ` Il reste ${money(dueTotal)} à encaisser sur la note.` : ''}`,
+    message: `Le crédit engagé du titulaire sera compté comme consommé.${dueTotal ? ` Il reste ${money(dueTotal)} à encaisser sur la note.` : ''}`,
     confirmLabel: 'Terminer',
     run: async () => {
       await api.post(`/api/reservations/${r.id}/finish`, {});
@@ -83,18 +80,21 @@ function ReservationDetail({ d, products, reload }) {
   const onExtend = () => openExtendDialog(r, reload, extension);
   const extendButton = canExtend ? <button type="button" className="btn" onClick={onExtend}>Prolonger</button> : null;
 
-  const forMember = attendees.find((a) => a.member_id === consumer) ?? attendees[0];
-
   const onQuickAddProduct = async (product) => {
-    setAddingId(product.id);
     setItemError(null);
+    if (cardShort(payWith, product.price, d.card_balance ?? 0)) {
+      setItemError(`Crédit CFA insuffisant sur la carte : ${money(d.card_balance ?? 0)} pour ${money(product.price)}.`);
+      return;
+    }
+    setAddingId(product.id);
     try {
-      await api.post(`/api/reservations/${r.id}/items`, { product_id: product.id, quantity: 1, consumer_member_id: forMember?.member_id }, itemKey.current);
+      const res = await api.post(`/api/reservations/${r.id}/items`, { product_id: product.id, quantity: 1, ...payNowBody(payWith) }, itemKey.current);
       itemKey.current = newKey();
-      toast(`${product.name} ajouté pour ${forMember?.name ?? r.member_name}.`);
+      servedToast(product, res, `${product.name} ajouté à la note.`);
+      setPayWith('');
       reload();
     } catch (err) {
-      setItemError(err);
+      setItemError(err.message);
     } finally {
       setAddingId(null);
     }
@@ -106,7 +106,7 @@ function ReservationDetail({ d, products, reload }) {
         title={r.member_name}
         lead={(
           <>
-            <span className="chip">{r.room_name || 'Salon Principal'}</span> · {attendees.length} membre(s) · {dayLabel(r.biz_day, 'title')} · {r.start_time} → {r.end_time}{nextDay} · {fmtDuration(r.duration_min)} <Chip group="res" value={r.status} />
+            <span className="chip">{r.room_name || 'Salon Principal'}</span> · {partyLabel(r.party_size)} · {dayLabel(r.biz_day, 'title')} · {r.start_time} → {r.end_time}{nextDay} · {fmtDuration(r.duration_min)} <Chip group="res" value={r.status} />
             {r.off_hours ? <>{' '}<span className="chip chip-bronze">hors horaires</span></> : null}
             {r.deposit_amount ? <>{' '}<span className="chip chip-bronze">{`acompte ${money(r.deposit_amount)}`}</span></> : null}
           </>
@@ -151,47 +151,20 @@ function ReservationDetail({ d, products, reload }) {
                 style={{ width: 'auto', minHeight: 36, maxWidth: '100%', minWidth: 0 }}
               >
                 {activeRooms.map((rm) => (
-                  <option key={rm.id} value={rm.id}>{`${rm.name} (${rm.capacity} membres max.)`}</option>
+                  <option key={rm.id} value={rm.id}>{`${rm.name} (${rm.capacity} personnes max.)`}</option>
                 ))}
               </select>
             ) : <span>{r.room_name}</span>}
           </div>
-          <div className="row" style={{ gap: 10 }}>
-            <span><strong>Membres présents ({attendees.length}/{r.room_capacity ?? 8})</strong> — seul le titulaire est débité</span>
-            {editableOccupancy && Math.max(r.party_size, attendees.length) < (r.room_capacity ?? 8) ? (
-              <button type="button" className="btn btn-sm" onClick={() => openAddAttendeeDialog(r, reload)}>
-                <Icon name="plus" /> Ajouter un membre présent
-              </button>
-            ) : null}
+          <div className="party-line">
+            <strong>{partyLabel(r.party_size)}</strong>
+            <span className="chip chip-bronze">
+              <Link to={`/membres/${r.member_id}`} style={{ color: 'inherit', textDecoration: 'none' }}>{r.member_name}</Link>
+              <span style={{ opacity: 0.85, fontWeight: 400 }}>&nbsp;({r.card_code || r.member_no})</span>
+            </span>
           </div>
         </div>
-        <div className="attendee-chips" style={{ marginTop: 10 }}>
-          {attendees.map((att) => (
-            <span
-              key={att.member_id}
-              className={`chip ${att.is_primary ? 'chip-bronze' : 'chip-ok'}`}
-              style={{ gap: 6 }}
-            >
-              <Link to={`/membres/${att.member_id}`} style={{ color: 'inherit', textDecoration: 'none' }}>
-                {att.name}
-              </Link>
-              <span style={{ opacity: 0.85, fontWeight: 400 }}>
-                ({att.card_code || att.member_no})
-              </span>
-              {editableOccupancy && !att.is_primary ? (
-                <button
-                  type="button"
-                  className="chip-remove-btn"
-                  onClick={() => quickRemoveAttendee(r, att, reload)}
-                  aria-label={`Retirer ${att.name} de la salle`}
-                >
-                  ×
-                </button>
-              ) : null}
-            </span>
-          ))}
-        </div>
-        {r.party_size > attendees.length && <p className="subtle">{r.party_size - attendees.length} invité(s) accompagnant le client.</p>}
+        <p className="subtle" style={{ marginTop: 8 }}>Seul membre de la séance, le titulaire paie le temps et les consommations de ses invités.</p>
       </section>
 
       <div className="grid-2">
@@ -226,7 +199,7 @@ function ReservationDetail({ d, products, reload }) {
               <Segmented value={catFilter} options={CAT_FILTERS} label="Catégorie" onChange={setCatFilter} />
             </div>
             <FormError error={itemError} />
-            <ConsumerPicker attendees={attendees} value={forMember?.member_id} onChange={setConsumer} />
+            <PayNowChoice value={payWith} onChange={setPayWith} cardBalance={d.card_balance ?? 0} />
             <div className="quick-product-grid">
               {activeProducts.map((p) => {
                 const out = p.stock_qty <= 0;
@@ -256,8 +229,8 @@ function ReservationDetail({ d, products, reload }) {
         ) : null}
 
         <section className="card">
-          <div className="card-head"><h2>Consommations par membre</h2></div>
-          <ConsumptionBreakdown attendees={attendees} lines={consumptionOf(d.charges)} />
+          <div className="card-head"><h2>Consommations de la séance</h2></div>
+          <SessionConsumptions lines={consumptionOf(d.charges)} />
         </section>
 
         <section className="card">

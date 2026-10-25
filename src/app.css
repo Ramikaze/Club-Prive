@@ -510,15 +510,8 @@
 }
 
 .reservation-room-control { min-width: 0; max-width: 100%; }
-.attendee-chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.attendee-chips .chip { max-width: 100%; white-space: normal; flex-wrap: wrap; overflow-wrap: anywhere; }
-.chip-remove-btn {
-  display: inline-grid; place-items: center; flex: none; width: 28px; height: 28px;
-  border: 1px solid currentColor; border-radius: 50%; background: transparent;
-  color: inherit; font: inherit; font-size: 1rem; cursor: pointer;
-}
-.chip-remove-btn:hover { background: var(--surface); }
-.chip-remove-btn:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.party-line { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.party-line .chip { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .btn[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; box-shadow: none; filter: saturate(0.4); }
 .btn[aria-disabled="true"]:hover { transform: none; }
 
@@ -721,26 +714,16 @@
 .session-inline.is-over { color: var(--danger); font-weight: 600; }
 @media (prefers-reduced-motion: reduce) { .session-timer-track span { transition: none; } }
 
-/* ------------------------------------------------------------------ room consumption, member by member */
+/* ------------------------------------------------------------------ session consumption */
 
 .conso { display: grid; gap: 10px; }
-.conso-member {
-  display: grid; gap: 8px; padding: 10px 12px;
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
-}
-.conso-member-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.conso-member-name { font-weight: 600; }
-.conso-member-total { margin-left: auto; font-weight: 650; font-variant-numeric: tabular-nums; }
 .conso-part { display: grid; gap: 3px; }
 .conso-part-head { display: flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 0.8rem; font-weight: 600; }
 .conso-line, .conso-subtotal { display: flex; justify-content: space-between; gap: 12px; font-size: 0.9rem; }
 .conso-line .num, .conso-subtotal .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .conso-paid { color: var(--ok); font-size: 0.82rem; }
 .conso-subtotal { border-top: 1px dashed var(--border); padding-top: 4px; color: var(--text-2); font-weight: 600; }
-.conso-member .subtle { margin: 0; }
-
-.member-choice { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.member-choice .btn[aria-pressed="true"] { background: var(--bronze); border-color: var(--bronze); color: var(--on-bronze); }
+.pay-now-choice { margin: 4px 0 10px; }
 
 /* ------------------------------------------------------------------ live rooms (dashboard)
    One tile per room, read top to bottom: name and status, who is in it and when, the timer, what was served,

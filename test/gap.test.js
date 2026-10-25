@@ -474,9 +474,9 @@ test('fenêtre : la suivante est celle de la même salle, une réservation annul
   assert.deepEqual([w.possible, w.max_minutes, w.until_time], [true, 150, '18:30']); // 19:00 less the half hour
 });
 
-test('fenêtre : un membre de la séance déjà inscrit à une autre séance', async () => {
-  const first = await book({ start_time: '14:00', duration_min: 120, attendee_ids: [members[2].id] }); // Alice and Camille, 14:00-16:00
-  await book({ member_id: members[2].id, room_id: rooms[1].id, start_time: '17:00', duration_min: 60 }); // Camille elsewhere, 17:00-18:00
+test('fenêtre : le titulaire de la séance déjà inscrit à une autre séance', async () => {
+  const first = await book({ start_time: '14:00', duration_min: 120 }); // Alice, 14:00-16:00
+  await book({ member_id: members[0].id, room_id: rooms[1].id, start_time: '17:00', duration_min: 60 }); // Alice elsewhere, 17:00-18:00
   // Nothing is asked between two sessions of one person: she is free until 17:00.
   const w = windowOf(first.id);
   assert.deepEqual([w.possible, w.max_minutes, w.until_time, w.reason, w.next], [true, 60, '17:00', null, null]);
@@ -622,38 +622,35 @@ test("fenêtre et prolongation d'accord", async () => {
       expect: { max: 690, until: '02:30', nextDay: true, code: 'FERMETURE' },
     },
     {
-      name: 'un membre inscrit ailleurs plus tard',
+      name: 'le titulaire inscrit ailleurs plus tard',
       build: async (room) => {
-        const guest = await enroll('Cam');
-        const session = await sessionIn(room, 'Zoé', '14:00', 120, { attendee_ids: [guest.id] });
-        await book({ room_id: (await newRoom()).id, member_id: guest.id, start_time: '17:00', duration_min: 60 });
+        const session = await sessionIn(room, 'Zoé', '14:00', 120);
+        await book({ room_id: (await newRoom()).id, member_id: session.member_id, start_time: '17:00', duration_min: 60 });
         return session;
       },
       expect: { max: 60, until: '17:00', code: 'MEMBRE_OCCUPE' },
     },
     {
-      name: 'un membre inscrit ailleurs tout de suite',
+      name: 'le titulaire inscrit ailleurs tout de suite',
       build: async (room) => {
-        const guest = await enroll('Cam');
-        const session = await sessionIn(room, 'Zoé', '14:00', 120, { attendee_ids: [guest.id] });
-        await book({ room_id: (await newRoom()).id, member_id: guest.id, start_time: '16:00', duration_min: 60 });
+        const session = await sessionIn(room, 'Zoé', '14:00', 120);
+        await book({ room_id: (await newRoom()).id, member_id: session.member_id, start_time: '16:00', duration_min: 60 });
         return session;
       },
       expect: {
-        max: 0, code: 'MEMBRE_OCCUPE', reason: 'Prolongation impossible : Cam TEST est déjà inscrit à une autre séance à 16:00.',
+        max: 0, code: 'MEMBRE_OCCUPE', reason: 'Prolongation impossible : Zoé TEST est déjà inscrit à une autre séance à 16:00.',
       },
     },
     {
-      name: 'un membre inscrit ailleurs et une suivante : la plus courte prolongation parle',
+      name: 'le titulaire inscrit ailleurs et une suivante : la plus courte prolongation parle',
       build: async (room) => {
-        const guest = await enroll('Cam');
-        const session = await sessionIn(room, 'Zoé', '14:00', 120, { attendee_ids: [guest.id] });
-        await book({ room_id: (await newRoom()).id, member_id: guest.id, start_time: '16:00', duration_min: 60 });
+        const session = await sessionIn(room, 'Zoé', '14:00', 120);
+        await book({ room_id: (await newRoom()).id, member_id: session.member_id, start_time: '16:00', duration_min: 60 });
         await sessionIn(room, 'Yann', '16:30', 60); // the half hour is also too close to this one, but the server says the member first
         return session;
       },
       expect: {
-        max: 0, code: 'MEMBRE_OCCUPE', reason: 'Prolongation impossible : Cam TEST est déjà inscrit à une autre séance à 16:00.',
+        max: 0, code: 'MEMBRE_OCCUPE', reason: 'Prolongation impossible : Zoé TEST est déjà inscrit à une autre séance à 16:00.',
       },
     },
     {
@@ -803,7 +800,7 @@ test('recherche bornée : une réservation de 24 heures à la borne est toujours
   const room = rooms[0].id;
   const memberCode = (start, end) => {
     try {
-      club.ensureMembersAvailable([members[0].id], start, end);
+      club.ensureMemberAvailable(members[0].id, start, end);
       return null;
     } catch (err) {
       return err.code;

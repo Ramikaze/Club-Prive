@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { api, qs } from '../lib/api.js';
 import { useLoad } from '../lib/hooks.js';
 import { money, fmtDuration, dayLabel, win, bizToday, parts, relLabel, tz, STATUS } from '../lib/format.js';
+import { partyLabel } from '../../shared/rules.js';
 import { useSettings, useRooms } from '../store/useStore.js';
 import Icon from '../components/ui/Icon.jsx';
 import { Chip, Empty, Loaded, PageHead } from '../components/ui/ui.jsx';
@@ -37,7 +38,7 @@ function Event({ r, day, slotH, compact, settings, from = win().open }) {
   const top = ((s - from) / slot) * slotH;
   const height = Math.max(((e - s) / slot) * slotH - 2, compact ? 14 : 22);
   const roomText = r.room_name || 'Salon';
-  const label = `${r.member_name} (${roomText}, ${r.party_size || 1} pers.), ${r.start_time} à ${r.end_time}, ${STATUS.res[r.status][0]}`;
+  const label = `${r.member_name} (${roomText}, ${partyLabel(r.party_size).toLowerCase()}), ${r.start_time} à ${r.end_time}, ${STATUS.res[r.status][0]}`;
   return (
     <Link
       className={`ev ${r.status} ${r.off_hours ? 'off-hours' : ''}`}
@@ -137,7 +138,7 @@ function DayPanel({ active }) {
               <div className="grow">
                 <div className="title">{r.member_name}</div>
                 <div className="meta">
-                  {r.room_name || 'Salon'} · {r.party_size || 1} pers.
+                  {r.room_name || 'Salon'} · {partyLabel(r.party_size)}
                   {r.items_summary ? ` · ${r.items_summary}` : ''}
                   {r.due_amount ? ` · reste ${money(r.due_amount)}` : ''}
                 </div>
@@ -281,10 +282,10 @@ function ListView({ list, onReload }) {
                   {r.status === 'reservee' || r.status === 'en_cours' ? (
                     <div className="party-stepper party-stepper-inline">
                       <button type="button" className="btn btn-sm btn-ghost" onClick={() => quickUpdatePartySize(r, (r.party_size || 1) - 1, onReload)} disabled={(r.party_size || 1) <= 1}>−</button>
-                      <span className="party-badge">{r.party_size || 1} pers.</span>
+                      <span className="party-badge">{partyLabel(r.party_size)}</span>
                       <button type="button" className="btn btn-sm btn-ghost" onClick={() => quickUpdatePartySize(r, (r.party_size || 1) + 1, onReload)}>+</button>
                     </div>
-                  ) : `${r.party_size || 1} pers.`}
+                  ) : partyLabel(r.party_size)}
                 </td>
                 <td data-label="Statut"><Chip group="res" value={r.status} /></td>
                 <td data-label="Reste dû" className="num">{r.due_amount ? money(r.due_amount) : '—'}</td>

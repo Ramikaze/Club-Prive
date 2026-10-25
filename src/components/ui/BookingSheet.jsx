@@ -3,6 +3,7 @@
 // is no QR code; in the demo the sheet carries the watermark. `detail` is the server's reservationDetail.
 import BrandLogo from './BrandLogo.jsx';
 import { STATUS, fmtDuration, money } from '../../lib/format.js';
+import { partyLabel } from '../../../shared/rules.js';
 import { weekdayDayText } from '../../../shared/wallet.js';
 
 // What the note of the booking adds up to, over all its accounts (room, drinks, cigars).
@@ -43,7 +44,7 @@ export default function BookingSheet({ detail, settings, demo }) {
         <div><dt>Jour</dt><dd>{weekdayDayText(r.start_date)}</dd></div>
         <div><dt>Horaire</dt><dd>{r.start_time} – {r.end_time}{nextDay}</dd></div>
         <div><dt>Durée</dt><dd>{fmtDuration(r.duration_min)}</dd></div>
-        <div><dt>Personnes</dt><dd>{people} pers.</dd></div>
+        <div><dt>Personnes</dt><dd>{`${people} pers. (${partyLabel(people).toLowerCase()})`}</dd></div>
       </dl>
 
       {(r.included_minutes > 0 || r.paid_minutes > 0) && (

@@ -5,20 +5,19 @@ import { Empty, FormError, Loaded, PageHead, Segmented } from '../components/ui/
 import { Modal, actionDialog, openDialog } from '../components/ui/Modal.jsx';
 import SessionTimer from '../components/ui/SessionTimer.jsx';
 import EndingSoonNotice from '../components/ui/EndingSoonNotice.jsx';
-import ConsumptionBreakdown from '../components/ui/ConsumptionBreakdown.jsx';
+import SessionConsumptions from '../components/ui/SessionConsumptions.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import { api, newKey } from '../lib/api.js';
 import { dayLabel, fmtDuration, money } from '../lib/format.js';
 import { useLoad, useSubmit } from '../lib/hooks.js';
 import { useIsAdmin, useStore } from '../store/useStore.js';
+import { partyLabel } from '../../shared/rules.js';
 import {
-  openAddAttendeeDialog,
   openBookingDialog,
   openConsumptionDialog,
   openExtendDialog,
   openQuickPayReservation,
   quickFinishReservation,
-  quickRemoveAttendee,
   quickStartReservation,
 } from '../dialogs/index.js';
 
@@ -92,14 +91,6 @@ export function openRoomDialog(room, onDone) {
 function RoomCard({ room, bizDay, canManage, canDelete, onReload }) {
   const r = room.current;
   const occupied = Boolean(r);
-  const attendees = r?.attendees ?? (r ? [{
-    member_id: r.member_id,
-    name: r.member_name,
-    member_no: r.member_no,
-    is_primary: true,
-  }] : []);
-  const occupancy = Math.max(r?.party_size ?? 0, attendees.length);
-  const atCapacity = occupancy >= room.capacity;
   // What the server says about extending this session. "Prolonger" is offered only when it can be (the
   // reason is shown instead); a session sent without the window keeps the button, and the server decides.
   const extension = r?.extension_window;
@@ -162,62 +153,25 @@ function RoomCard({ room, bizDay, canManage, canDelete, onReload }) {
                   {r.status === 'reservee' ? ' · arrivée à confirmer' : ' · séance en cours'}
                 </div>
               </div>
-              <button
-                type="button"
-                className="btn btn-sm"
-                disabled={atCapacity}
-                onClick={() => openAddAttendeeDialog(r, onReload)}
-                title={atCapacity ? `Capacité maximale atteinte (${room.capacity} personnes)` : 'Ajouter un membre présent (seul le titulaire est débité)'}
-              >
-                <Icon name="plus" /> Membre ({occupancy}/{room.capacity})
-              </button>
             </div>
 
             <SessionTimer reservation={r} compact />
 
-            <div>
-              <div className="subtle" style={{ fontSize: '0.76rem', marginBottom: 5 }}>
-                Membres présents dans la salle :
-              </div>
-              <div className="attendee-chips">
-                {attendees.map((att) => (
-                  <span
-                    key={att.member_id}
-                    className={`chip ${att.is_primary ? 'chip-bronze' : 'chip-ok'}`}
-                    style={{ gap: 6 }}
-                  >
-                    <Link to={`/membres/${att.member_id}`} style={{ color: 'inherit', textDecoration: 'none' }}>
-                      {att.name}
-                    </Link>
-                    <span style={{ opacity: 0.8, fontWeight: 400 }}>
-                      ({att.card_code || att.member_no})
-                    </span>
-                    {!att.is_primary && (
-                      <button
-                        type="button"
-                        className="chip-remove-btn"
-                        onClick={() => quickRemoveAttendee(r, att, onReload)}
-                        aria-label={`Retirer ${att.name} de la salle`}
-                        title={`Retirer ${att.name} de la salle`}
-                      >
-                        ×
-                      </button>
-                    )}
-                  </span>
-                ))}
-              </div>
-              {occupancy > attendees.length && <p className="subtle">{occupancy - attendees.length} personne(s) non identifiée(s) (réservation antérieure à la règle « membres uniquement »).</p>}
+            {/* The holder is the session's only member; the others are guests, paid for by the holder. */}
+            <div className="party-line">
+              <span className="chip chip-bronze">{partyLabel(r.party_size)}</span>
+              <span className="subtle">{`carte ${r.card_code || r.member_no}`}</span>
             </div>
           </div>
 
           <div className="room-conso-box">
             <div className="row" style={{ justifyContent: 'space-between', marginBottom: 4 }}>
-              <span className="subtle">Consommations par membre</span>
+              <span className="subtle">Consommations de la séance</span>
               <span className="num">
                 {r.due_amount > 0 ? <strong>À régler : {money(r.due_amount)}</strong> : <span className="chip chip-ok">Note à jour</span>}
               </span>
             </div>
-            <ConsumptionBreakdown attendees={attendees} lines={r.consumptions ?? []} />
+            <SessionConsumptions lines={r.consumptions ?? []} />
           </div>
 
           <div className="room-card-actions">
@@ -255,7 +209,7 @@ function RoomCard({ room, bizDay, canManage, canDelete, onReload }) {
                 <div style={{ marginTop: 2 }}>
                   <strong>{room.next.biz_day === bizDay ? '' : `${dayLabel(room.next.biz_day, 'short')} `}{room.next.start_time} – {room.next.end_time}</strong>
                   {' · '}
-                  <Link to={`/reservations/${room.next.id}`}>{room.next.member_name}</Link> ({room.next.party_size || 1} membre(s))
+                  <Link to={`/reservations/${room.next.id}`}>{room.next.member_name}</Link> ({partyLabel(room.next.party_size)})
                 </div>
               </div>
             ) : (
@@ -317,7 +271,7 @@ export default function Rooms() {
           <>
             <PageHead
               title="Salles & Salons"
-              lead={`${freeCount} salle(s) disponible(s) sur ${roomsStatus.length}${occupiedCount > 0 ? ` · ${occupiedCount} occupée(s) (${totalGuestsNow} membre(s) présent(s))` : ''}`}
+              lead={`${freeCount} salle(s) disponible(s) sur ${roomsStatus.length}${occupiedCount > 0 ? ` · ${occupiedCount} occupée(s) (${totalGuestsNow} personne(s) présente(s))` : ''}`}
               actions={(
                 <>
                   {admin && (

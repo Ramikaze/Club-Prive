@@ -8,11 +8,13 @@ import { openDialog, Modal, actionDialog } from '../components/ui/Modal.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import Icon from '../components/ui/Icon.jsx';
 import { AccountTag, Chip, Hypothesis, Loaded, Notice, FormError } from '../components/ui/ui.jsx';
-import ConsumptionBreakdown, { ConsumerPicker, consumptionOf } from '../components/ui/ConsumptionBreakdown.jsx';
+import SessionConsumptions, {
+  PayNowChoice, consumptionOf, payNowBody, cardShort, servedToast,
+} from '../components/ui/SessionConsumptions.jsx';
 import { useLoad, useSubmit } from '../lib/hooks.js';
 import { openPaymentDialog } from './moneyDialogs.jsx';
 import { daysBetween, parseHHMM } from '../../shared/time.js';
-import { minDurationFor, supplementDetail } from '../../shared/rules.js';
+import { minDurationFor, supplementDetail, partyLabel } from '../../shared/rules.js';
 import { waDigits, waLink } from '../../shared/whatsapp.js';
 
 export function supplementText(paid, tariff) {
@@ -48,8 +50,8 @@ const creditLine = (summary) => (summary?.credit
   ? ` · crédit disponible ${fmtDuration(summary.credit.available)}` : '');
 
 // Whether a member may take the room. With `card`, the booking member who has no plan, or no time left on it,
-// may still book: the time is then paid with the card's money (`cardOnly`). The members he brings along are
-// never debited: see attendeeEligibility.
+// may still book: the time is then paid with the card's money (`cardOnly`). He is the session's only member:
+// the people he brings along are guests, counted by the party size.
 export function memberRoomEligibility(m, { card = false } = {}) {
   if (!m) return { ok: false, reason: 'Membre inconnu' };
   if (m.active === false) return { ok: false, reason: 'Membre désactivé' };
@@ -61,16 +63,6 @@ export function memberRoomEligibility(m, { card = false } = {}) {
   else if (avail <= 0) reason = 'Crédit épuisé (0 min)';
   if (!reason) return { ok: true, available: avail };
   return card ? { ok: true, available: 0, cardOnly: true, reason } : { ok: false, reason };
-}
-
-// Whether a member may be present in someone else's room: only the holder is debited, so an attendee needs
-// neither a plan nor credit, only to be active and to have a card that is not deactivated (the server checks the
-// same).
-export function attendeeEligibility(m) {
-  if (!m) return { ok: false, reason: 'Membre inconnu' };
-  if (m.active === false) return { ok: false, reason: 'Membre désactivé' };
-  if (m.cards_deactivated) return { ok: false, reason: 'Carte désactivée' };
-  return { ok: true };
 }
 
 const conflictText = (conflicts) => conflicts.map((c) => `${c.member_name} (${c.start_time} – ${c.end_time})`).join(', ');
@@ -117,7 +109,7 @@ function QuotePanel({ q, now, card }) {
   return (
     <>
       <dl className="calc">
-        {q.room ? <div><dt>Salle</dt><dd>{`${q.room.name} · ${q.party_size} pers. (capacité ${q.room.capacity} pers.)`}</dd></div> : null}
+        {q.room ? <div><dt>Salle</dt><dd>{`${q.room.name} · ${partyLabel(q.party_size)} (capacité ${q.room.capacity} pers.)`}</dd></div> : null}
         <div><dt>Horaire</dt><dd>{`${dayLabel(q.biz_day, 'medium')} · ${q.start_time} → ${q.end_time}${q.end_next_day ? ' (lendemain)' : ''}`}</dd></div>
         <div><dt>Durée</dt><dd>{fmtDuration(q.duration_min)}</dd></div>
         {q.subscription ? (
@@ -127,12 +119,6 @@ function QuotePanel({ q, now, card }) {
             <div><dt>Heures incluses utilisées (titulaire)</dt><dd>{fmtDuration(q.included_minutes)}</dd></div>
           </>
         ) : <div><dt>Formule (titulaire)</dt><dd>Aucune formule : tout le temps est payant</dd></div>}
-        {q.extra_attendees?.length ? (
-          <div>
-            <dt>Membres présents ({q.extra_attendees.length})</dt>
-            <dd>{`${q.extra_attendees.map((a) => a.name).join(' · ')} (non débités)`}</dd>
-          </div>
-        ) : null}
         <div><dt>Temps payant</dt><dd>{supplementText(q.paid_minutes, q.tariff)}
           {q.paid_minutes && !q.tariff.validated
             ? <>{' '}<Hypothesis title="Tarif annoncé dans les messages audio, non encore validé par un administrateur." label="tarif à valider" /></>
@@ -206,12 +192,11 @@ function BookingDialog({ close, preset, onDone }) {
 
   const payload = () => {
     const v = latest.current;
-    // Only the booking member is recorded; the people they bring along are counted, not named.
+    // The holder is the session's only member; the guests they bring along are counted, not named.
     return {
       member_id: v.member?.id,
       room_id: Number(v.roomId),
       party_size: Number(v.partySize),
-      attendee_ids: [],
       // Paid with the card, a member whose time is used up still books: the card pays the whole time.
       require_credit: !v.payWithCard,
       pay_with_card: Boolean(v.payWithCard),
@@ -362,7 +347,7 @@ function BookingDialog({ close, preset, onDone }) {
       // click away in the toast (members installed in the room right now have nothing to be told). The dialog
       // closes as it always did; the booking's page keeps a « Confirmation » button to the same page.
       const confirmation = detail.reservation.status === 'reservee' ? confirmationToastAction(detail) : null;
-      toast(`${detail.reservation.status === 'en_cours' ? 'Membres installés' : 'Réservation confirmée'} : ${detail.reservation.member_name} (${detail.reservation.room_name}, ${detail.reservation.party_size} membre(s)).`, 'ok', confirmation);
+      toast(`${detail.reservation.status === 'en_cours' ? 'Membre installé' : 'Réservation confirmée'} : ${detail.reservation.member_name} (${detail.reservation.room_name}, ${partyLabel(detail.reservation.party_size)}).`, 'ok', confirmation);
       onDone?.(detail);
     });
   };
@@ -393,7 +378,7 @@ function BookingDialog({ close, preset, onDone }) {
   };
 
   return (
-    <Modal title={startNow ? 'Installer des membres dans une salle' : 'Nouvelle réservation'} size="wide" onClose={close}>
+    <Modal title={startNow ? 'Installer un membre dans une salle' : 'Nouvelle réservation'} size="wide" onClose={close}>
       <form className="form-grid" onSubmit={onSubmit} noValidate>
         <fieldset><legend>Membre titulaire</legend><div id="bk-member">
           {member ? (
@@ -467,12 +452,13 @@ function BookingDialog({ close, preset, onDone }) {
             })}
           </div>
 
-          <label className="field" style={{ marginTop: 12 }}><span>Nombre de personnes (client inclus)</span>
+          <label className="field" style={{ marginTop: 12 }}><span>Nombre de personnes (titulaire inclus)</span>
             <select name="party_size" value={partySize} onChange={onPartySize}>
               {Array.from({ length: roomCapacity }, (_, i) => i + 1).map((n) => (
-                <option key={n} value={n}>{n === 1 ? '1 — le client seul' : `${n} — le client + ${n - 1} invité${n > 2 ? 's' : ''}`}</option>
+                <option key={n} value={n}>{`${n} — ${partyLabel(n).toLowerCase()}`}</option>
               ))}
             </select>
+            <span className="help">Un seul membre par séance, le titulaire : les autres personnes sont ses invités, et il paie pour eux.</span>
           </label>
 
           {date === bizToday() ? (
@@ -574,113 +560,6 @@ export function sendWhatsAppText(phone, text, { title, demo = useStore.getState(
 export function confirmationToastAction(detail) {
   const id = detail.reservation.id;
   return { label: 'Confirmation', icon: 'receipt', onClick: () => { window.location.hash = `#/reservations/${id}/confirmation`; } };
-}
-
-// ---------------------------------------------------------------- add/remove member in room
-
-function AddAttendeeDialog({ close, r, onDone }) {
-  const state = useLoad(() => api.get('/api/members'), []);
-  const [q, setQ] = useState('');
-  const { busy, error, submit } = useSubmit();
-
-  const presentIds = new Set((r.attendees ?? [{ member_id: r.member_id }]).map((a) => a.member_id));
-
-  const addMember = (m) => {
-    const elig = attendeeEligibility(m);
-    if (!elig.ok) {
-      toast(`Accès refusé pour ${m.name} : ${elig.reason}.`, 'error');
-      return;
-    }
-    submit(async () => {
-      const res = await api.post(`/api/reservations/${r.id}/attendees`, { member_id: m.id }, newKey());
-      close();
-      toast(`${m.name} ajouté(e) dans ${r.room_name}.`);
-      onDone?.(res);
-    });
-  };
-
-  return (
-    <Modal title={`Ajouter un membre dans ${r.room_name ?? 'la salle'}`} size="wide" onClose={close}>
-      <Loaded state={state}>{(members) => {
-        const norm = q.trim().toLowerCase();
-        const filtered = members.filter((m) => {
-          if (presentIds.has(m.id)) return false;
-          if (!norm) return true;
-          return (
-            m.name.toLowerCase().includes(norm)
-            || m.member_no.toLowerCase().includes(norm)
-            || (m.card_code && m.card_code.toLowerCase().includes(norm))
-            || (m.phone && m.phone.toLowerCase().includes(norm))
-          );
-        });
-        // Show eligible members first
-        filtered.sort((a, b) => Number(attendeeEligibility(b).ok) - Number(attendeeEligibility(a).ok));
-
-        return (
-          <div className="form-grid">
-            <Notice kind="info">
-              Seul le titulaire de la réservation est débité : les membres présents n’utilisent ni leur formule ni leur carte. Un membre dont la carte est désactivée ne peut pas entrer.
-            </Notice>
-            <div className="search">
-              <Icon name="search" />
-              <input
-                type="search"
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Rechercher par nom, n° de membre, code de carte ou scan QR…"
-                aria-label="Rechercher un membre à ajouter dans la salle"
-                autoFocus
-              />
-            </div>
-            <FormError error={error} />
-            <div className="list" style={{ maxHeight: 340, overflowY: 'auto' }}>
-              {filtered.length ? filtered.map((m) => {
-                const elig = attendeeEligibility(m);
-                return (
-                  <button
-                    key={m.id}
-                    type="button"
-                    className="list-item"
-                    aria-disabled={!elig.ok || busy}
-                    style={elig.ok ? undefined : { opacity: 0.55 }}
-                    onClick={() => addMember(m)}
-                  >
-                    <div className="grow">
-                      <div className="title">
-                        <strong>{m.name}</strong> <span className="subtle">{m.member_no}{m.card_code ? ` · carte ${m.card_code}` : ''}</span>
-                      </div>
-                    </div>
-                    {elig.ok ? (
-                      <span className="chip chip-ok">+ Faire entrer</span>
-                    ) : (
-                      <span className="chip chip-danger">{elig.reason}</span>
-                    )}
-                  </button>
-                );
-              }) : <p className="subtle">Aucun membre correspondant.</p>}
-            </div>
-            <div className="modal-actions">
-              <button type="button" className="btn" onClick={close}>Fermer</button>
-            </div>
-          </div>
-        );
-      }}</Loaded>
-    </Modal>
-  );
-}
-
-export function openAddAttendeeDialog(r, onDone) {
-  openDialog(AddAttendeeDialog, { r, onDone });
-}
-
-export async function quickRemoveAttendee(r, att, onDone) {
-  try {
-    const res = await api.del(`/api/reservations/${r.id}/attendees/${att.member_id}`, {}, newKey());
-    toast(`${att.name} retiré(e) de ${r.room_name}.`);
-    onDone?.(res);
-  } catch (e) {
-    toast(e.message, 'error');
-  }
 }
 
 // ---------------------------------------------------------------- extension
@@ -853,15 +732,20 @@ function ConsumptionDialog({ close, reservationId, memberName, roomName, onDone 
   ]), [reservationId]);
   const [addingId, setAddingId] = useState(null);
   const [error, setError] = useState(null);
-  const [consumer, setConsumer] = useState(null);
+  const [payWith, setPayWith] = useState(''); // '' = on the note, paid at the end
 
-  const addProduct = async (p, forMember) => {
+  const addProduct = async (p, cardBalance) => {
     if (addingId) return;
-    setAddingId(p.id);
     setError(null);
+    if (cardShort(payWith, p.price, cardBalance)) {
+      setError(`Crédit CFA insuffisant sur la carte : ${money(cardBalance)} pour ${money(p.price)}.`);
+      return;
+    }
+    setAddingId(p.id);
     try {
-      await api.post(`/api/reservations/${reservationId}/items`, { product_id: p.id, quantity: 1, consumer_member_id: forMember.member_id }, newKey());
-      toast(`+1 ${p.name} pour ${forMember.name}.`);
+      const res = await api.post(`/api/reservations/${reservationId}/items`, { product_id: p.id, quantity: 1, ...payNowBody(payWith) }, newKey());
+      servedToast(p, res, `+1 ${p.name} sur la note.`);
+      setPayWith('');
       state.reload();
       onDone?.();
     } catch (e) {
@@ -876,13 +760,11 @@ function ConsumptionDialog({ close, reservationId, memberName, roomName, onDone 
       <Loaded state={state}>{([detail, products]) => {
         const due = detail.charges.filter((c) => c.status === 'due');
         const dueTotal = due.reduce((sum, c) => sum + c.amount, 0);
-        const attendees = detail.reservation.attendees ?? [];
-        const forMember = attendees.find((a) => a.member_id === consumer) ?? attendees[0]
-          ?? { member_id: detail.reservation.member_id, name: detail.reservation.member_name };
+        const cardBalance = detail.card_balance ?? 0;
         return (
           <div className="form-grid">
-            <p className="subtle">Choisissez le membre, puis touchez une bouteille ou un cigare pour l’ajouter immédiatement (+1). La note reste au nom du titulaire.</p>
-            <ConsumerPicker attendees={attendees} value={forMember.member_id} onChange={setConsumer} />
+            <p className="subtle">Touchez une bouteille ou un cigare pour l’ajouter immédiatement (+1). Tout ce qui est servi est au nom du titulaire, invités compris : sur la note, ou payé tout de suite.</p>
+            <PayNowChoice value={payWith} onChange={setPayWith} cardBalance={cardBalance} />
             {PRODUCT_GROUPS.map(([cat, label]) => {
               const items = products.filter((p) => p.category === cat);
               return (
@@ -899,7 +781,7 @@ function ConsumptionDialog({ close, reservationId, memberName, roomName, onDone 
                             type="button"
                             className="quick-product-btn"
                             disabled={out || Boolean(addingId)}
-                            onClick={() => addProduct(p, forMember)}
+                            onClick={() => addProduct(p, cardBalance)}
                           >
                             <div className="quick-product-top">
                               <strong>{p.name}</strong>
@@ -920,10 +802,10 @@ function ConsumptionDialog({ close, reservationId, memberName, roomName, onDone 
             <FormError error={error} />
             <div className="card" style={{ padding: '12px 14px', background: 'var(--surface-2)' }}>
               <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
-                <strong>Consommations par membre ({detail.reservation.room_name})</strong>
+                <strong>Consommations de la séance ({detail.reservation.room_name})</strong>
                 <span className="num">Reste à payer sur la note : <strong>{money(dueTotal)}</strong></span>
               </div>
-              <ConsumptionBreakdown attendees={attendees} lines={consumptionOf(detail.charges)} />
+              <SessionConsumptions lines={consumptionOf(detail.charges)} />
             </div>
             <div className="modal-actions">
               <button type="button" className="btn" onClick={close}>Fermer</button>
@@ -989,7 +871,7 @@ export async function quickUpdatePartySize(r, nextCount, onDone) {
   const clamped = Math.max(1, Math.min(50, Number(nextCount) || 1));
   try {
     const res = await api.put(`/api/reservations/${r.id}/occupancy`, { party_size: clamped });
-    toast(`${clamped} personne(s) présente(s) dans ${res.reservation.room_name}.`);
+    toast(`${partyLabel(clamped)} dans ${res.reservation.room_name}.`);
     onDone?.(res);
   } catch (e) {
     toast(e.message, 'error');

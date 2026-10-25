@@ -46,7 +46,7 @@ Ouvrir ensuite `http://localhost:5173`. Les appels `/api` sont transmis au serve
 
 ## Fonctionnalités
 
-- **Membres et cartes** : fiches, cartes physiques ou virtuelles avec QR code et logo The Limen, formules, renouvellements, crédit individuel et historique des séances comme titulaire ou accompagnant.
+- **Membres et cartes** : fiches, cartes physiques ou virtuelles avec QR code et logo The Limen, formules, renouvellements, crédit individuel et historique des séances dont il est le titulaire.
 - **Salles et salons** : capacités, disponibilités, participants, installation, consommations, fermeture temporaire et réouverture.
 - **Agenda** : vues jour, semaine et liste, devis, arrivées, prolongations, annulations et protection contre les chevauchements de salles et de membres.
 - **Cave** : plusieurs caves, seuils d’humidité et de température propres à chaque cave, fréquence des contrôles, relevés manuels horodatés, graphiques et journal exportable.
@@ -71,9 +71,11 @@ Les seuils sont choisis par l’administrateur et sont obligatoires lors de la c
 
 Le club n’a pas d’horaires d’ouverture : la salle se réserve à toute heure, de jour comme de nuit, sans autorisation particulière. Une séance dure au plus 24 heures. La journée commence à l’heure réglée dans les paramètres (06:00 par défaut) : une séance commencée avant cette heure compte, pour l’agenda et la caisse, dans la journée de la veille. Une réservation dure au moins une heure, deux heures le vendredi et le samedi à partir de 18 h, nuit comprise.
 
-Chaque réservation dispose d’un titulaire et peut accueillir plusieurs membres, avec un engagement de crédit propre à chacun. Les prolongations engagent le crédit disponible des participants ; la clôture le consomme, tandis que l’annulation ou le retrait d’un accompagnant libère son engagement. Les suppléments et consommations restent facturés au titulaire. Un abonnement rattaché à une séance active, même comme accompagnant, ne peut pas être annulé.
+Une séance n’accueille qu’un seul membre : son titulaire. Il peut venir avec des invités, qui ne sont pas membres ; le nombre de personnes (titulaire compris) est indiqué à la réservation et affiché « Titulaire + N invité(s) ». Ajouter un autre membre à une réservation ou à une séance en cours est refusé (« Une séance n’accueille qu’un seul membre : le titulaire ; les autres personnes sont des invités. »). Le titulaire paie toute la séance : son crédit temps et sa carte payent la réservation, les prolongations et le dépassement, et tout ce qui est servi dans la salle, invités compris, est à son nom. Un abonnement rattaché à une séance active ne peut pas être annulé.
 
-L’effectif total, invités compris, respecte la capacité de la salle lors d’une création, d’un ajout de membre ou d’un transfert. Aucun membre ne peut participer à deux réservations qui se chevauchent, quelle que soit la salle. Une séance terminée conserve son effectif et sa salle.
+Une bouteille ou un cigare servi en séance va par défaut sur la note (« À la note »), réglée à la fin avec le reste. Le gérant peut aussi choisir « Payer maintenant » au moment de servir : en espèces (proposées en premier), par un autre moyen de paiement, ou avec la carte membre du titulaire si elle contient assez de crédit. Le produit est alors encaissé tout de suite, et un message propose d’ouvrir son ticket sans quitter la séance.
+
+L’effectif total, invités compris, respecte la capacité de la salle lors d’une création, d’une modification ou d’un transfert. Un membre ne peut pas être titulaire de deux réservations qui se chevauchent, quelle que soit la salle. Une séance terminée conserve son effectif et sa salle.
 
 Deux réservations d’une même salle sont séparées d’au moins 30 minutes, le temps de remettre la salle en état : une réservation, une prolongation ou un changement de salle qui laisserait moins de temps avec une autre réservation de la même salle est refusé. Ces minutes ne sont ni facturées ni retirées des heures de l’abonnement. La durée se règle dans Paramètres, onglet « Club & Horaires », champ « Battement entre deux réservations » (de 0 à 240 minutes ; 0 désactive la règle) ; les réservations déjà enregistrées sont conservées telles quelles, même collées. Quinze minutes avant la fin d’une séance en cours, une alerte orange apparaît sur la page Salles et sur l’Accueil : elle invite le gérant à proposer une prolongation au client et lui dit si elle est possible et jusqu’à quelle heure, ou pourquoi elle ne l’est pas (par exemple parce que la séance suivante est déjà réservée).
 
