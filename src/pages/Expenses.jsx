@@ -209,7 +209,7 @@ export default function Expenses() {
     <>
       <CashTabs />
       <PageHead
-        title={isAdmin ? 'Dépenses & mouvements' : 'Dépenses du jour'}
+        title={isAdmin ? 'Recettes & dépenses' : 'Dépenses du jour'}
         lead={isAdmin
           ? 'Dépenses, entrées diverses et transferts entre caisses et comptes.'
           : 'Achats et factures réglés aujourd’hui depuis la caisse ou un compte.'}

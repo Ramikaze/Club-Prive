@@ -189,7 +189,7 @@ export function CashTabs() {
       label="Rubriques Caisse"
       items={[
         ['/caisse', 'Encaissements & Notes', 'wallet'],
-        ['/depenses', 'Dépenses & Mouvements', 'receipt'],
+        ['/depenses', 'Recettes & Dépenses', 'receipt'],
       ]}
     />
   );
