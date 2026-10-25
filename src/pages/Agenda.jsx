@@ -30,12 +30,11 @@ function slotStartMs(day, rel) {
   return localToUtcMs(rel >= 1440 ? addDays(day, 1) : day, fmtHHMM(rel % 1440), tz());
 }
 
-function Event({ r, day, slotH, compact, settings }) {
-  const w = win();
+function Event({ r, day, slotH, compact, settings, from = win().open }) {
   const slot = settings.booking.slot_min;
   const s = relOf(day, r.start_ms);
   const e = relOf(day, r.end_ms);
-  const top = ((s - w.open) / slot) * slotH;
+  const top = ((s - from) / slot) * slotH;
   const height = Math.max(((e - s) / slot) * slotH - 2, compact ? 14 : 22);
   const roomText = r.room_name || 'Salon';
   const label = `${r.member_name} (${roomText}, ${r.party_size || 1} pers.), ${r.start_time} à ${r.end_time}, ${STATUS.res[r.status][0]}`;
@@ -59,13 +58,29 @@ function Event({ r, day, slotH, compact, settings }) {
   );
 }
 
-function slots(day, reservations, { compact = false, now, settings, maxRooms = 1, onSlot }) {
+// The hours the agenda shows: 07:00 to 02:30 the next morning (the club's evenings), widened to the slot when
+// a booking starts earlier or ends later, never beyond the business day. `days` are [day, its bookings].
+const VIEW_FROM = 7 * 60;
+const VIEW_TO = 26 * 60 + 30;
+function viewRange(days, slot) {
   const w = win();
+  let from = VIEW_FROM;
+  let to = VIEW_TO;
+  for (const [day, reservations] of days) {
+    for (const r of reservations) {
+      from = Math.min(from, relOf(day, r.start_ms));
+      to = Math.max(to, relOf(day, r.end_ms));
+    }
+  }
+  return { from: Math.max(w.open, Math.floor(from / slot) * slot), to: Math.min(w.maxEnd, Math.ceil(to / slot) * slot) };
+}
+
+function slots(day, reservations, { compact = false, now, settings, maxRooms = 1, onSlot, from = win().open, to = win().maxEnd }) {
   const slot = settings.booking.slot_min;
   const busy = reservations.map((r) => [relOf(day, r.start_ms), relOf(day, r.end_ms)]);
   const rows = [];
-  // The whole business day, every slot bookable: the club has no opening hours.
-  for (let rel = w.open; rel < w.maxEnd; rel += slot) {
+  // Every shown slot is bookable: the club has no opening hours.
+  for (let rel = from; rel < to; rel += slot) {
     const busyCount = busy.filter(([a, b]) => a <= rel && rel < b).length;
     const occupied = busyCount >= maxRooms;
     const past = slotStartMs(day, rel) + slot * 60000 <= now;
@@ -91,12 +106,49 @@ function slots(day, reservations, { compact = false, now, settings, maxRooms = 1
   return rows;
 }
 
-function NowLine({ day, slotH, now, settings }) {
+function NowLine({ day, slotH, now, settings, from = win().open, to = win().maxEnd }) {
   if (day !== bizToday()) return null;
-  const w = win();
   const rel = relOf(day, now);
-  if (rel < w.open || rel > w.maxEnd) return null;
-  return <div className="now-line" style={{ top: `${((rel - w.open) / settings.booking.slot_min) * slotH}px` }} aria-hidden="true" />;
+  if (rel < from || rel > to) return null;
+  return <div className="now-line" style={{ top: `${((rel - from) / settings.booking.slot_min) * slotH}px` }} aria-hidden="true" />;
+}
+
+// Beside the day's timeline: what the day holds at a glance, then each booking with who, where, how many,
+// what was taken and what is left to pay.
+function DayPanel({ active }) {
+  const sorted = [...active].sort((a, b) => a.start_ms - b.start_ms);
+  const minutes = sorted.reduce((sum, r) => sum + r.duration_min, 0);
+  const people = sorted.reduce((sum, r) => sum + (r.party_size || 1), 0);
+  const due = sorted.reduce((sum, r) => sum + (r.due_amount || 0), 0);
+  return (
+    <aside className="card day-panel" aria-label="Réservations du jour">
+      <div className="card-head"><h2>Réservations du jour</h2></div>
+      <dl className="calc">
+        <div><dt>Réservations</dt><dd>{sorted.length}</dd></div>
+        <div><dt>Temps réservé</dt><dd>{fmtDuration(minutes)}</dd></div>
+        <div><dt>Personnes attendues</dt><dd>{people}</dd></div>
+        <div className="total"><dt>Reste à encaisser</dt><dd>{money(due)}</dd></div>
+      </dl>
+      {sorted.length ? (
+        <div className="list section-gap">
+          {sorted.map((r) => (
+            <Link key={r.id} className="list-item" to={`/reservations/${r.id}`}>
+              <span className="time">{r.start_time} – {r.end_time}</span>
+              <div className="grow">
+                <div className="title">{r.member_name}</div>
+                <div className="meta">
+                  {r.room_name || 'Salon'} · {r.party_size || 1} pers.
+                  {r.items_summary ? ` · ${r.items_summary}` : ''}
+                  {r.due_amount ? ` · reste ${money(r.due_amount)}` : ''}
+                </div>
+              </div>
+              <Chip group="res" value={r.status} />
+            </Link>
+          ))}
+        </div>
+      ) : <Empty icon="calendar">Aucune réservation ce jour.</Empty>}
+    </aside>
+  );
 }
 
 // On a computer or a tablet the whole business day fits the screen under the page header, so nothing has to be
@@ -124,16 +176,18 @@ function useFitSlotHeight(ref, slotCount) {
 function DayView({ day, list, now, settings, maxRooms, onSlot }) {
   const active = list.filter((r) => r.status !== 'annulee');
   const cancelled = list.filter((r) => r.status === 'annulee');
-  const w = win();
+  const slot = settings.booking.slot_min;
+  const { from, to } = viewRange([[day, active]], slot);
   const grid = useRef(null);
-  const slotH = useFitSlotHeight(grid, (w.maxEnd - w.open) / settings.booking.slot_min);
+  const slotH = useFitSlotHeight(grid, (to - from) / slot);
   return (
     <>
+      <div className="day-layout">
       <section className="card agenda-card">
         <div className="tl" ref={grid} style={{ '--slot-h': `${slotH}px` }}>
-          {slots(day, active, { now, settings, maxRooms, onSlot })}
-          <div className="tl-events">{active.map((r) => <Event key={r.id} r={r} day={day} slotH={slotH} compact={slotH < 24} settings={settings} />)}</div>
-          <NowLine day={day} slotH={slotH} now={now} settings={settings} />
+          {slots(day, active, { now, settings, maxRooms, onSlot, from, to })}
+          <div className="tl-events">{active.map((r) => <Event key={r.id} r={r} day={day} slotH={slotH} compact={slotH < 24} settings={settings} from={from} />)}</div>
+          <NowLine day={day} slotH={slotH} now={now} settings={settings} from={from} to={to} />
         </div>
         <div className="legend">
           <span><i style={{ background: 'var(--info-soft)', borderLeft: '3px solid var(--info)' }} /> Réservée</span>
@@ -141,6 +195,8 @@ function DayView({ day, list, now, settings, maxRooms, onSlot }) {
           <span><i style={{ background: 'var(--surface-3)', borderLeft: '3px solid var(--text-3)' }} /> Terminée</span>
         </div>
       </section>
+      <DayPanel active={active} />
+      </div>
       {cancelled.length > 0 && (
         <section className="card section-gap">
           <div className="card-head"><h2>Annulées ce jour</h2></div>
@@ -161,10 +217,11 @@ function DayView({ day, list, now, settings, maxRooms, onSlot }) {
 
 function WeekView({ from, list, now, settings, maxRooms, onSlot }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(from, i));
-  const w = win();
   const slot = settings.booking.slot_min;
+  const activeOf = (d) => list.filter((r) => r.biz_day === d && r.status !== 'annulee');
+  const range = viewRange(days.map((d) => [d, activeOf(d)]), slot);
   const labels = [];
-  for (let rel = w.open; rel < w.maxEnd; rel += slot) labels.push(<div key={rel} className="lbl">{rel % 60 === 0 ? relLabel(rel) : ''}</div>);
+  for (let rel = range.from; rel < range.to; rel += slot) labels.push(<div key={rel} className="lbl">{rel % 60 === 0 ? relLabel(rel) : ''}</div>);
   const today = bizToday();
   return (
     <section className="card agenda-card">
@@ -180,12 +237,12 @@ function WeekView({ from, list, now, settings, maxRooms, onSlot }) {
           ))}
           <div className="week-labels">{labels}</div>
           {days.map((d) => {
-            const items = list.filter((r) => r.biz_day === d && r.status !== 'annulee');
+            const items = activeOf(d);
             return (
               <div key={d} className="week-col" style={{ '--slot-h': `${WEEK_SLOT_H}px` }}>
-                {slots(d, items, { compact: true, now, settings, maxRooms, onSlot })}
-                {items.map((r) => <Event key={r.id} r={r} day={d} slotH={WEEK_SLOT_H} compact settings={settings} />)}
-                <NowLine day={d} slotH={WEEK_SLOT_H} now={now} settings={settings} />
+                {slots(d, items, { compact: true, now, settings, maxRooms, onSlot, ...range })}
+                {items.map((r) => <Event key={r.id} r={r} day={d} slotH={WEEK_SLOT_H} compact settings={settings} from={range.from} />)}
+                <NowLine day={d} slotH={WEEK_SLOT_H} now={now} settings={settings} {...range} />
               </div>
             );
           })}
@@ -283,6 +340,11 @@ export default function Agenda() {
   // Data from a previous period is never drawn on the new one.
   const state = loaded.data && loaded.data.url !== url ? { ...loaded, data: undefined, error: null } : loaded;
   const step = view === 'semaine' ? 7 : view === 'liste' ? daysBetween(from, to) + 1 : 1;
+  // The middle button names what is shown: « Aujourd’hui », or the day (or days) the arrows moved to.
+  const today = bizToday();
+  const showsToday = view === 'jour' ? date === today : from <= today && today <= to;
+  const shownLabel = showsToday ? 'Aujourd’hui'
+    : view === 'jour' ? dayLabel(date, 'medium') : `${dayLabel(from, 'medium')} – ${dayLabel(to, 'medium')}`;
   const periodLabel = view === 'jour'
     ? dayLabel(date, 'title')
     : `Du ${dayLabel(from, 'medium')} au ${dayLabel(to, 'medium')}`;
@@ -365,7 +427,8 @@ export default function Agenda() {
         </div>
         <div className="date-nav">
           <button type="button" className="btn btn-sm" onClick={() => setQuery({ vue: view, date: addDays(date, -step), au: listTo(-step), statut: status, salle: roomId })} aria-label="Période précédente"><Icon name="left" /></button>
-          <button type="button" className="btn btn-sm" onClick={() => setQuery({ vue: view, date: bizToday(), au: view === 'liste' ? addDays(bizToday(), step - 1) : '', statut: status, salle: roomId })}>Aujourd’hui</button>
+          <button type="button" className="btn btn-sm" onClick={() => setQuery({ vue: view, date: bizToday(), au: view === 'liste' ? addDays(bizToday(), step - 1) : '', statut: status, salle: roomId })}
+            title={showsToday ? undefined : 'Revenir à aujourd’hui'}>{shownLabel}</button>
           <button type="button" className="btn btn-sm" onClick={() => setQuery({ vue: view, date: addDays(date, step), au: listTo(step), statut: status, salle: roomId })} aria-label="Période suivante"><Icon name="right" /></button>
           <label className="date-range-field"><span>Du</span>
             <input key={`du-${from}`} ref={dateInput} type="date" defaultValue={from} aria-label="Premier jour" className="btn-sm" style={{ minHeight: '36px' }} /></label>
