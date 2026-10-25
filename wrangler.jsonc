@@ -22,6 +22,8 @@
     { "tag": "v1", "new_sqlite_classes": ["ClubDO"] },
     { "tag": "v2", "new_sqlite_classes": ["DemoDO"] }
   ],
+  // The daily automatic renewals (worker/index.js, scheduled): 05:00 UTC is 06:00 in Brazzaville.
+  "triggers": { "crons": ["0 5 * * *"] },
   "observability": { "enabled": true }
   // Secret (not in this file): SETUP_TOKEN, the installation code for the first administrator.
   //   npx wrangler secret put SETUP_TOKEN

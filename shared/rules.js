@@ -8,6 +8,11 @@ export const ACCOUNT_LABELS = { reservations: 'Réservations', alcool: 'Alcool',
 // money came into the till when the card was recharged, so a payment by card is no cash inflow.
 export const CARD_METHOD = 'Carte membre';
 
+// A subscription renews itself from the card's CFA credit. The member is warned this many days before its end
+// when the credit will not cover the price, and a recharge still renews it up to this many days after the end.
+export const RENEWAL_WARNING_DAYS = 3;
+export const RENEWAL_GRACE_DAYS = 30;
+
 // The club has no opening hours: it opens whenever the room is booked, day or night. A business
 // day still starts at `hours.open` (06:00 by default) for the agenda and the books, so a session
 // started before that time counts in the previous day, like a late evening. The window is that

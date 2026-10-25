@@ -17,8 +17,9 @@ import {
 } from '../shared/time.js';
 import {
   ACCOUNTS, ACCOUNT_LABELS, bookingWindow, validateHours, placeInWindow, supplementAmount, supplementDetail, fmtDuration,
-  isWeekend, minDurationFor, DEPOSIT_FROM, depositFor, formatMoney, CARD_METHOD,
+  isWeekend, minDurationFor, DEPOSIT_FROM, depositFor, formatMoney, CARD_METHOD, RENEWAL_WARNING_DAYS, RENEWAL_GRACE_DAYS,
 } from '../shared/rules.js';
+import { waDigits } from '../shared/whatsapp.js';
 
 export const RES_STATUS = { reservee: 'Réservée', en_cours: 'En cours', terminee: 'Terminée', annulee: 'Annulée' };
 export const CHARGE_STATUS = { due: 'À encaisser', payee: 'Encaissée', annulee: 'Annulée', remboursee: 'Remboursée' };
@@ -54,6 +55,10 @@ const DEMO_CATALOGUE_STOCK = 10;
 // The fictitious author of the demo space's records: an administrator account of the demo database
 // only. Real accounts start at id 1, so it never stands for one of them.
 export const DEMO_AUTHOR_ID = 0;
+
+// The author of what the club does on its own (the automatic renewal): no account, so every row it writes has a
+// NULL author.
+export const SYSTEM_ACTOR = { id: null, name: 'Renouvellement automatique', role: 'admin' };
 
 export function defaultSettings() {
   return {
@@ -887,6 +892,7 @@ export class Club {
         && (subscription.credit?.available ?? 0) > 0,
       subscriptions, cards, reservations, charges, payments, balance_due: due,
       wallet: this.walletDTO(m.id),
+      renewal: this.renewalStatus(m.id, today),
     };
   }
 
@@ -1058,6 +1064,74 @@ export class Club {
     );
     this.audit(actor, 'abonnement.annuler', 'member', sub.member_id, { subscription_id: sub.id, motif: reason });
     return this.memberDetail(sub.member_id);
+  }
+
+  // What the automatic renewal would take over for a member: the latest subscription and its plan at today's price.
+  // Null when there is nothing to renew: no subscription, the latest one cancelled (cancelling stops the renewals),
+  // or a plan that could not be activated now (inactive, price undefined, or not validated outside the demo).
+  renewalBase(memberId) {
+    const sub = this.get('SELECT * FROM subscriptions WHERE member_id = ? ORDER BY start_date DESC, id DESC LIMIT 1', memberId);
+    if (!sub || sub.status !== 'active') return null;
+    const plan = this.get('SELECT * FROM plans WHERE id = ?', sub.plan_id);
+    if (!plan?.active || plan.price == null || (!plan.price_validated && !this.settings().demo_mode)) return null;
+    return { sub, plan };
+  }
+
+  // The renewal alert of a member, or null: 'bientot' when the subscription ends within RENEWAL_WARNING_DAYS and the
+  // card's credit will not cover the price, 'bloque' when it ended at most RENEWAL_GRACE_DAYS ago and the credit still
+  // does not (a recharge of `missing` renews it). Enough credit means no alert: the next run renews it.
+  renewalStatus(memberId, today = this.bizToday()) {
+    const m = this.memberRow(memberId);
+    const base = m.active !== 0 ? this.renewalBase(m.id) : null;
+    if (!base) return null;
+    const { sub, plan } = base;
+    const balance = this.walletBalance(m.id);
+    if (balance >= plan.price) return null;
+    const ended = sub.end_date < today;
+    const days = ended ? daysBetween(sub.end_date, today) : daysBetween(today, sub.end_date);
+    if (days > (ended ? RENEWAL_GRACE_DAYS : RENEWAL_WARNING_DAYS)) return null;
+    return {
+      state: ended ? 'bloque' : 'bientot', plan_name: plan.name, price: plan.price, balance,
+      missing: plan.price - balance, end_date: sub.end_date,
+    };
+  }
+
+  // Renews from the card's credit, with no one at the till, the subscriptions that ended before `today` (at most
+  // RENEWAL_GRACE_DAYS ago) of every active member, or of `memberId` alone: same plan, today's price, starting
+  // today, which is the day after the end when the run is on time, else the day of the recharge that makes it
+  // possible (the member does not pay for the days without a subscription). Not enough credit: nothing is taken,
+  // the member is in `blocked`. Run by the scheduled task, after a recharge and when the home page loads; running
+  // it again changes nothing, since a renewed member's latest subscription no longer ends before today.
+  runRenewals(today = this.bizToday(), memberId = null) {
+    const result = { renewed: [], blocked: [] };
+    // A closed month takes no card movement: the renewals wait until it is reopened.
+    if (this.get('SELECT 1 AS x FROM closed_periods WHERE month = ?', this.bizToday().slice(0, 7))) return result;
+    const members = memberId != null ? [this.memberRow(memberId)] : this.all(
+      `SELECT DISTINCT m.* FROM members m JOIN subscriptions s ON s.member_id = m.id
+       WHERE m.active = 1 AND s.status = 'active' AND s.end_date < ? AND s.end_date >= ? ORDER BY m.id`,
+      today, addDays(today, -RENEWAL_GRACE_DAYS),
+    );
+    for (const m of members) {
+      const base = m.active !== 0 ? this.renewalBase(m.id) : null;
+      if (!base) continue;
+      const { sub, plan } = base;
+      if (sub.end_date >= today || daysBetween(sub.end_date, today) > RENEWAL_GRACE_DAYS) continue;
+      if (this.walletBalance(m.id) < plan.price) {
+        result.blocked.push(m.id);
+        continue;
+      }
+      const renewal = this.activateSubscription(SYSTEM_ACTOR, m.id, { plan_id: plan.id, start_date: today });
+      let paymentId = null;
+      if (renewal.charge_id) {
+        paymentId = this.recordPayment(SYSTEM_ACTOR, { charge_ids: [renewal.charge_id], card: true }).payment.id;
+      }
+      this.audit(SYSTEM_ACTOR, 'abonnement.renouveler_auto', 'member', m.id, {
+        subscription_id: renewal.subscription_id, formule: plan.name, debut: renewal.start_date, fin: renewal.end_date,
+        prix: plan.price, payment_id: paymentId, solde: this.walletBalance(m.id),
+      });
+      result.renewed.push(renewal.subscription_id);
+    }
+    return result;
   }
 
   adjustCredit(actor, subId, input) {
@@ -1246,11 +1320,12 @@ export class Club {
       m.id, amount, method, reference, this.nowIso(), actor.id, this.freshTicketCode(), 'Recharge de la carte membre',
     );
     this.walletMove(actor, m.id, 'recharge', amount, { paymentId });
-    const wallet = this.walletDTO(m.id);
     this.audit(actor, 'carte.recharger', 'member', m.id, {
-      payment_id: paymentId, montant: amount, moyen: method, reference, solde: wallet.balance,
+      payment_id: paymentId, montant: amount, moyen: method, reference, solde: this.walletBalance(m.id),
     });
-    return { payment: this.paymentDTO(this.paymentRow(paymentId)), wallet };
+    // A subscription waiting for credit renews as soon as the recharge covers it, starting today.
+    const { renewed } = this.runRenewals(this.bizToday(), m.id);
+    return { payment: this.paymentDTO(this.paymentRow(paymentId)), wallet: this.walletDTO(m.id), renewed };
   }
 
   // A meal the member orders from an outside restaurant: the club pays the courier from the till (an expense
@@ -2904,10 +2979,13 @@ export class Club {
 
   // ---------------------------------------------------------------- dashboard & finance
 
+  // Writes (the renewals due today), so its caller wraps it in a transaction like any write.
   dashboard(actor) {
     const s = this.settings();
     const now = this.nowMs();
     const today = this.bizToday();
+    // The demo space has no scheduled task: the first home page of the day renews what is due, to the same effect.
+    this.runRenewals(today);
     const todayList = this.listReservations({ from: today, to: today });
     const current = this.all(
       `${RES_SELECT} WHERE r.status = 'en_cours' OR (r.status = 'reservee' AND r.start_ms <= ? AND r.end_ms > ?) ORDER BY r.start_ms`,
@@ -2946,6 +3024,17 @@ export class Club {
          AND NOT EXISTS (SELECT 1 FROM subscriptions n WHERE n.member_id = s.member_id AND n.status = 'active' AND n.start_date > s.end_date)
        ORDER BY s.end_date DESC`, today, addDays(today, -30),
     ).map((x) => ({ ...x, member_name: `${x.first_name} ${x.last_name}`, days_since: daysBetween(x.end_date, today) }));
+    const renewalAlerts = this.all(
+      `SELECT DISTINCT m.* FROM members m JOIN subscriptions s ON s.member_id = m.id
+       WHERE m.active = 1 AND s.status = 'active' AND s.end_date >= ? AND s.end_date <= ? ORDER BY m.last_name, m.first_name`,
+      addDays(today, -RENEWAL_GRACE_DAYS), addDays(today, RENEWAL_WARNING_DAYS),
+    ).flatMap((m) => {
+      const status = this.renewalStatus(m.id, today);
+      return status ? [{
+        member_id: m.id, member_name: `${m.first_name} ${m.last_name}`, first_name: m.first_name, phone: m.phone,
+        phone_ok: waDigits(m.phone) !== null, ...status,
+      }] : [];
+    });
     const stockAlerts = this.all(`${PRODUCT_SELECT} WHERE p.active = 1 AND p.stock_qty <= p.low_stock_threshold ORDER BY p.stock_qty, p.name`)
       .map((p) => this.productDTO(p));
     const { due } = this.get("SELECT COALESCE(SUM(amount), 0) AS due FROM charges WHERE status = 'due'");
@@ -2953,7 +3042,7 @@ export class Club {
       biz_day: today, now: new Date(now).toISOString(),
       rooms_status: roomsStatus,
       today: todayList, current, upcoming, to_close: toClose,
-      expiring, expired, stock_alerts: stockAlerts, outstanding_total: due,
+      expiring, expired, renewal_alerts: renewalAlerts, stock_alerts: stockAlerts, outstanding_total: due,
       cash_today: this.financeSummary(today, today),
       lounge: this.loungeOverview(),
     };

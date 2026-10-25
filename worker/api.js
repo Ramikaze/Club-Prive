@@ -241,7 +241,8 @@ export function createApi({ db, env = {}, demo = false }) {
   }
 
   // Overview
-  add('GET', '/api/dashboard', {}, (ctx) => club.dashboard(ctx.user));
+  // A GET that writes: the home page renews the subscriptions due today, so it runs in a transaction.
+  add('GET', '/api/dashboard', {}, (ctx) => club.tx(() => club.dashboard(ctx.user)));
 
   // Members, subscriptions, cards
   add('GET', '/api/members', {}, (ctx) => club.listMembers(ctx.query.q, ctx.query.statut));
@@ -543,5 +544,10 @@ export function createApi({ db, env = {}, demo = false }) {
     return handle(request, { user: account, demoConfig: config });
   }
 
-  return { club, handle, init, demoContext, handleDemo };
+  // The daily scheduled task (worker/index.js): the automatic renewals of every member, in one transaction.
+  function runRenewals() {
+    return club.tx(() => club.runRenewals());
+  }
+
+  return { club, handle, init, demoContext, handleDemo, runRenewals };
 }

@@ -632,6 +632,193 @@ test('annulation d’un repas extérieur : réservée à un administrateur, la c
   assert.ok(ok(await admin.get('/api/audit')).some((a) => a.action === 'carte.annuler_repas' && a.entity_id === member.id));
 });
 
+// ---------------------------------------------------------------------------- automatic renewal from the card
+
+// The business clock moved to `day` at noon, the club's time: what the scheduled run or a request made that day sees.
+const atDay = (day) => { server.club.at = localToUtcMs(day, '12:00', server.club.settings().timezone); };
+const planId = (code) => server.club.get('SELECT id FROM plans WHERE code = ?', code).id;
+// A new member whose subscription to the plan `code` starts today: the member and the subscription's last day.
+const subscribed = async (first_name, code = 'MENSUELLE') => {
+  const member = await newMember(first_name);
+  const r = ok(await manager.post(`/api/members/${member.id}/subscriptions`, { plan_id: planId(code), start_date: today }));
+  return { member, end: r.end_date };
+};
+// The renewal run for one member, in its transaction, on the business day of the clock.
+const renew = (memberId) => server.club.tx(() => server.club.runRenewals(undefined, memberId));
+const subscriptionsOf = (memberId) => server.club.all('SELECT * FROM subscriptions WHERE member_id = ? ORDER BY start_date', memberId);
+const renewalOf = async (memberId) => ok(await manager.get(`/api/members/${memberId}`)).renewal;
+
+test('renouvellement à l’heure : la formule finie hier est reprise sur la carte, sans action du gérant', async () => {
+  ok(await admin.put(`/api/plans/${planId('MENSUELLE')}`, { price: 50000 * UM, price_validated: true }));
+  const { member, end } = await subscribed('Nadia');
+  ok(await recharge(member.id, { amount: 60000 * UM, method: 'Espèces' }));
+  const day = addDays(end, 1);
+  atDay(day);
+  try {
+    const r = renew(member.id);
+    assert.equal(r.renewed.length, 1);
+    assert.deepEqual(r.blocked, []);
+    const sub = server.club.get('SELECT * FROM subscriptions WHERE id = ?', r.renewed[0]);
+    assert.equal(sub.member_id, member.id);
+    assert.equal(sub.start_date, day);
+    assert.equal(sub.end_date, addDays(addMonths(day, 1), -1));
+    assert.equal(sub.plan_id, planId('MENSUELLE'));
+    assert.equal(sub.included_minutes, 120);
+    assert.equal(sub.price, 50000 * UM);
+    assert.equal(sub.created_by, null);
+    assert.equal(balance(member.id), 10000 * UM);
+    const charge = server.club.get('SELECT * FROM charges WHERE subscription_id = ?', sub.id);
+    assert.equal(charge.status, 'payee');
+    assert.equal(charge.amount, 50000 * UM);
+    assert.equal(charge.created_by, null);
+    const payment = server.club.get(
+      'SELECT p.* FROM payments p JOIN payment_allocations pa ON pa.payment_id = p.id WHERE pa.charge_id = ?', charge.id,
+    );
+    assert.equal(payment.method, CARD_METHOD);
+    assert.equal(payment.card_amount, 50000 * UM);
+    assert.equal(payment.created_by, null);
+    assert.match(payment.ticket_code, /^[A-Z0-9]+$/);
+    const detail = ok(await manager.get(`/api/members/${member.id}`));
+    assert.equal(detail.subscription.state, 'active');
+    assert.equal(detail.subscription.id, sub.id);
+    assert.equal(detail.subscription.credit.available, 120);
+    assert.equal(detail.renewal, null);
+    const entry = ok(await admin.get('/api/audit')).find((a) => a.action === 'abonnement.renouveler_auto' && a.entity_id === member.id);
+    assert.equal(entry.user_id, null);
+    assert.equal(entry.details.subscription_id, sub.id);
+    assert.equal(entry.details.payment_id, payment.id);
+    assert.equal(entry.details.solde, 10000 * UM);
+  } finally {
+    server.club.at = null;
+  }
+});
+
+test('renouvellement idempotent : trois passages, un seul abonnement et un seul débit', async () => {
+  const { member, end } = await subscribed('Octave');
+  ok(await recharge(member.id, { amount: 120000 * UM, method: 'Espèces' }));
+  atDay(addDays(end, 1));
+  try {
+    assert.equal(renew(member.id).renewed.length, 1);
+    assert.deepEqual(renew(member.id), { renewed: [], blocked: [] });
+    // The scheduled run goes through the API's own entry point, in its own transaction, for every member.
+    server.api.runRenewals();
+    assert.equal(subscriptionsOf(member.id).length, 2);
+    assert.equal(server.club.get("SELECT COUNT(*) AS n FROM wallet_movements WHERE member_id = ? AND kind = 'paiement'", member.id).n, 1);
+    assert.equal(balance(member.id), 70000 * UM);
+  } finally {
+    server.club.at = null;
+  }
+});
+
+test('renouvellement bloqué : rien n’est pris, alerte sur la fiche et l’accueil ; la recharge suivante renouvelle du jour même', async () => {
+  const { member, end } = await subscribed('Pauline');
+  ok(await recharge(member.id, { amount: 30000 * UM, method: 'Espèces' }));
+  atDay(addDays(end, 1));
+  try {
+    assert.deepEqual(renew(member.id), { renewed: [], blocked: [member.id] });
+    assert.equal(subscriptionsOf(member.id).length, 1);
+    assert.equal(balance(member.id), 30000 * UM);
+    assert.deepEqual(await renewalOf(member.id), {
+      state: 'bloque', plan_name: 'Mensuelle — 2 heures', price: 50000 * UM, balance: 30000 * UM, missing: 20000 * UM, end_date: end,
+    });
+    // The home page runs the renewals itself (the demo space has no scheduled run) and lists the alert.
+    const alert = ok(await manager.get('/api/dashboard')).renewal_alerts.find((a) => a.member_id === member.id);
+    assert.equal(alert.state, 'bloque');
+    assert.equal(alert.missing, 20000 * UM);
+    assert.equal(alert.member_name, 'Pauline Carte');
+    assert.equal(alert.phone_ok, false);
+    assert.equal(subscriptionsOf(member.id).length, 1);
+
+    // Nine days later the member tops up what was missing: the new subscription starts on the day of the recharge.
+    const day = addDays(end, 10);
+    atDay(day);
+    const r = ok(await recharge(member.id, { amount: 20000 * UM, method: 'Espèces' }));
+    assert.equal(r.wallet.balance, 0);
+    assert.equal(balance(member.id), 0);
+    const subs = subscriptionsOf(member.id);
+    assert.equal(subs.length, 2);
+    assert.equal(subs[1].start_date, day);
+    assert.equal(subs[1].end_date, addDays(addMonths(day, 1), -1));
+    assert.equal(await renewalOf(member.id), null);
+    assert.ok(!ok(await manager.get('/api/dashboard')).renewal_alerts.some((a) => a.member_id === member.id));
+  } finally {
+    server.club.at = null;
+  }
+});
+
+test('délai dépassé : une recharge 31 jours après l’échéance ne renouvelle plus, l’alerte a disparu', async () => {
+  const { member, end } = await subscribed('Quentin');
+  atDay(addDays(end, 31));
+  try {
+    assert.equal(await renewalOf(member.id), null);
+    ok(await recharge(member.id, { amount: 60000 * UM, method: 'Espèces' }));
+    assert.equal(subscriptionsOf(member.id).length, 1);
+    assert.equal(balance(member.id), 60000 * UM);
+    assert.equal(await renewalOf(member.id), null);
+    assert.ok(!ok(await manager.get('/api/dashboard')).renewal_alerts.some((a) => a.member_id === member.id));
+  } finally {
+    server.club.at = null;
+  }
+});
+
+test('bientôt : prévenu 3 jours avant l’échéance quand le crédit ne suffira pas', async () => {
+  const { member, end } = await subscribed('Rose');
+  try {
+    atDay(addDays(end, -2));
+    assert.deepEqual(await renewalOf(member.id), {
+      state: 'bientot', plan_name: 'Mensuelle — 2 heures', price: 50000 * UM, balance: 0, missing: 50000 * UM, end_date: end,
+    });
+    assert.equal(ok(await manager.get('/api/dashboard')).renewal_alerts.find((a) => a.member_id === member.id).state, 'bientot');
+    atDay(addDays(end, -4));
+    assert.equal(await renewalOf(member.id), null);
+    // Enough credit: nothing to warn about.
+    atDay(addDays(end, -2));
+    ok(await recharge(member.id, { amount: 50000 * UM, method: 'Espèces' }));
+    assert.equal(await renewalOf(member.id), null);
+    assert.equal(subscriptionsOf(member.id).length, 1);
+  } finally {
+    server.club.at = null;
+  }
+});
+
+test('abonnement annulé par l’administrateur : jamais renouvelé', async () => {
+  const { member, end } = await subscribed('Samuel');
+  ok(await recharge(member.id, { amount: 60000 * UM, method: 'Espèces' }));
+  const [sub] = subscriptionsOf(member.id);
+  ok(await admin.post(`/api/subscriptions/${sub.id}/cancel`, { reason: 'Le membre arrête' }));
+  atDay(addDays(end, 1));
+  try {
+    assert.deepEqual(renew(member.id), { renewed: [], blocked: [] });
+    ok(await recharge(member.id, { amount: 1000 * UM, method: 'Espèces' }));
+    assert.equal(subscriptionsOf(member.id).length, 1);
+    assert.equal(balance(member.id), 61000 * UM);
+    assert.equal(await renewalOf(member.id), null);
+  } finally {
+    server.club.at = null;
+  }
+});
+
+test('formule annuelle : renouvelée en annuelle, à son prix', async () => {
+  ok(await admin.put(`/api/plans/${planId('ANNUELLE')}`, { price: 500000 * UM, price_validated: true }));
+  const { member, end } = await subscribed('Thierry', 'ANNUELLE');
+  ok(await recharge(member.id, { amount: 500000 * UM, method: 'Espèces' }));
+  const day = addDays(end, 1);
+  atDay(day);
+  try {
+    const [id] = renew(member.id).renewed;
+    const sub = server.club.get('SELECT * FROM subscriptions WHERE id = ?', id);
+    assert.equal(sub.plan_id, planId('ANNUELLE'));
+    assert.equal(sub.duration_months, 12);
+    assert.equal(sub.included_minutes, 1440);
+    assert.equal(sub.start_date, day);
+    assert.equal(sub.end_date, addDays(addMonths(day, 12), -1));
+    assert.equal(server.club.get('SELECT amount FROM charges WHERE subscription_id = ?', id).amount, 500000 * UM);
+    assert.equal(balance(member.id), 0);
+  } finally {
+    server.club.at = null;
+  }
+});
+
 test('migration sans perte : V15 garde réservations, crédits et lignes, et rend l’abonnement facultatif', async () => {
   const source = new Server({}, { lenientTariffs: true });
   const old = new Server({});
