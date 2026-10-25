@@ -1,6 +1,7 @@
 // Demonstration data. Every person and product here is fictitious and flagged as such.
 // History is created through the same business methods as real use, with a backdated clock.
-// It is only loaded into the demo space (club.demo), under the author the caller passes.
+// The demo space now starts empty (Club.prepareDemo): this seed only fills test clubs, in the demo mode
+// (club.demo), under the author the caller passes.
 // The accounts below have known passwords: only local development creates them (DEMO_ACCOUNTS=1),
 // and without any data.
 import { AppError, conflict } from './errors.js';
