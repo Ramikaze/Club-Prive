@@ -14,6 +14,7 @@ import Members from './pages/Members.jsx';
 import Member from './pages/Member.jsx';
 import MemberCard from './pages/MemberCard.jsx';
 import Reservation from './pages/Reservation.jsx';
+import BookingConfirmation from './pages/BookingConfirmation.jsx';
 import Products from './pages/Products.jsx';
 import Lounge, { HumidorPage } from './pages/Lounge.jsx';
 import Cash from './pages/Cash.jsx';
@@ -154,6 +155,7 @@ export default function App() {
             <Route path="membres/:id" element={<Member />} />
             <Route path="cartes/:id" element={<MemberCard />} />
             <Route path="reservations/:id" element={<Reservation />} />
+            <Route path="reservations/:id/confirmation" element={<BookingConfirmation />} />
             <Route path="produits" element={<Products />} />
             <Route path="lounge" element={<Lounge />} />
             <Route path="lounge/caves/:id" element={<HumidorPage />} />

@@ -72,6 +72,27 @@ export function rechargeWhatsAppText({ clubName, firstName, amount, balance, at,
   ].filter(Boolean).join('\n');
 }
 
+// A calendar date 'YYYY-MM-DD' with its weekday, as the booking confirmation writes it: 'mar. 27/10/2026'.
+const WEEKDAYS = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'];
+export function weekdayDayText(date) {
+  const [y, m, d] = clean(date).split('-').map(Number);
+  if (!y || !m || !d) return '';
+  return `${WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]} ${dayText(date)}`;
+}
+
+// The message of a booking confirmation, sent with its picture: the room, the day the session starts on (`day`,
+// 'YYYY-MM-DD'), its times and party size, the booking's number, signed by the club's team.
+export function bookingWhatsAppText({ clubName, firstName, roomName, day, startTime, endTime, partySize, number }) {
+  const people = Math.max(1, Number(partySize) || 1);
+  const where = clean(roomName) ? ` au ${clean(roomName)}` : '';
+  return [
+    `Bonjour ${clean(firstName)},`,
+    `Votre réservation${where} est confirmée pour le ${weekdayDayText(day)} de ${clean(startTime)} à ${clean(endTime)} (${people} personne${people > 1 ? 's' : ''}).`,
+    number ? `Réservation n° ${clean(number)} (ci-dessous)` : '',
+    `Merci de votre confiance. ${signature(clubName)}`,
+  ].filter(Boolean).join('\n');
+}
+
 // The renewal alert (renewalStatus): `bientot` before the end of the subscription, `bloque` after it, when the
 // card's `balance` does not cover the plan's `price`; it says what is missing.
 export function renewalWhatsAppText({ clubName, firstName, planName, endDate, balance, price, state, currency }) {

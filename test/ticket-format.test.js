@@ -6,7 +6,9 @@ import {
   TICKET_ALPHABET, TICKET_CODE_LENGTH, newTicketCode, formatTicketNumber, formatTicketCode,
   normalizeTicketCode, memberInitials, ticketVerifyUrl, ticketWhatsAppText, paymentLines, RECHARGE_LINE_LABEL,
 } from '../shared/ticket.js';
-import { mealWhatsAppText, paymentWhatsAppText, rechargeWhatsAppText, renewalWhatsAppText } from '../shared/wallet.js';
+import {
+  bookingWhatsAppText, mealWhatsAppText, paymentWhatsAppText, rechargeWhatsAppText, renewalWhatsAppText, weekdayDayText,
+} from '../shared/wallet.js';
 import { formatMoney } from '../shared/rules.js';
 
 // A generator that hands out the given bytes in order, then zeros.
@@ -229,4 +231,27 @@ test('renewalWhatsAppText : bientôt et bloqué, avec ce qui manque', () => {
     `Il manque ${m(20000)} : dès que vous approvisionnez votre carte, l’abonnement est renouvelé à partir du jour de l’approvisionnement.`,
   ].join('\n'));
   assert.match(renewalWhatsAppText({ ...input, state: 'bloque' }), /Il manque 20\s000 FCFA/);
+});
+
+test('weekdayDayText : jour de la semaine abrégé et date', () => {
+  assert.equal(weekdayDayText('2026-10-27'), 'mar. 27/10/2026');
+  assert.equal(weekdayDayText('2026-11-01'), 'dim. 01/11/2026');
+  assert.equal(weekdayDayText('2026-10-31'), 'sam. 31/10/2026');
+  assert.equal(weekdayDayText(''), '');
+});
+
+test('bookingWhatsAppText : une phrase par ligne, signée par l’équipe du club', () => {
+  const booking = {
+    clubName: 'Limen', firstName: 'Rami', roomName: 'Salon Principal', day: '2026-10-27',
+    startTime: '20:00', endTime: '22:00', partySize: 2, number: 13,
+  };
+  assert.equal(bookingWhatsAppText(booking), [
+    'Bonjour Rami,',
+    'Votre réservation au Salon Principal est confirmée pour le mar. 27/10/2026 de 20:00 à 22:00 (2 personnes).',
+    'Réservation n° 13 (ci-dessous)',
+    'Merci de votre confiance. L’équipe Limen',
+  ].join('\n'));
+  // One person is singular; a missing or broken party size counts one.
+  assert.match(bookingWhatsAppText({ ...booking, partySize: 1 }), /\(1 personne\)\.\n/);
+  assert.match(bookingWhatsAppText({ ...booking, partySize: null }), /\(1 personne\)\.\n/);
 });
