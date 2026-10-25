@@ -122,6 +122,14 @@ function ShareTicketDialog({ close, file, text, title, digits, demo }) {
       if (e?.name !== 'AbortError') toast('Le partage a échoué : téléchargez l’image et ouvrez WhatsApp avec le message.', 'error');
     }
   };
+  const copyImage = async () => {
+    try {
+      await navigator.clipboard.write([new window.ClipboardItem({ 'image/png': file })]);
+      toast('Ticket copié : collez-le (Cmd + V ou Ctrl + V) dans la conversation WhatsApp.');
+    } catch {
+      toast('La copie du ticket a échoué : utilisez « Télécharger le ticket ».', 'error');
+    }
+  };
   const copyText = async () => {
     try {
       await navigator.clipboard.writeText(text);
@@ -142,7 +150,13 @@ function ShareTicketDialog({ close, file, text, title, digits, demo }) {
             : canCopy
               ? '« Ouvrir WhatsApp avec le message » ouvre la conversation avec le message déjà écrit et copie le ticket : faites Cmd + V (ou Ctrl + V) pour le joindre, puis envoyez.'
               : 'Ouvrez WhatsApp avec le message, puis joignez le ticket téléchargé (trombone, puis Photos ou Document).'}</p>
-        <img src={url} alt={`Ticket ${file.name}`} className="ticket-image-preview" />
+        <div className="ticket-image-box">
+          <img src={url} alt={`Ticket ${file.name}`} className="ticket-image-preview" />
+          {canCopy ? (
+            <button type="button" className="btn btn-sm btn-ghost wa-copy" onClick={copyImage} title="Copier l’image du ticket" aria-label="Copier l’image du ticket">
+              <Icon name="copy" /></button>
+          ) : null}
+        </div>
         <div className="wa-message-box">
           <blockquote className="wa-message">{text}</blockquote>
           <button type="button" className="btn btn-sm btn-ghost wa-copy" onClick={copyText} title="Copier le message" aria-label="Copier le message">
