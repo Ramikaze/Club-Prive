@@ -43,7 +43,7 @@ const KIND_LABEL = { impression: 'Impression demandée', whatsapp: 'WhatsApp' };
 // A recharge or an outside meal sends the member its short message instead (amount, card part, new balance,
 // when), unless it was cancelled: that one goes out as the ticket, which says so.
 const isMemberMessage = (ticket) => ['recharge', 'repas'].includes(ticket.kind) && !ticket.cancelled_at;
-const MESSAGE_TITLE = { recharge: 'Reçu de recharge par WhatsApp', repas: 'Message du repas par WhatsApp' };
+const MESSAGE_TITLE = { recharge: 'Reçu d’approvisionnement par WhatsApp', repas: 'Message du repas par WhatsApp' };
 const MESSAGE_BUTTON = { recharge: 'Envoyer le reçu par WhatsApp', repas: 'Envoyer le message du repas par WhatsApp' };
 
 // The text sent on WhatsApp for one copy: the same content as the sheet. The demo has no verification link.

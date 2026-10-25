@@ -56,7 +56,7 @@ export function ticketVerifyUrl(origin, id, code) {
   return `${origin}/#/ticket/${id}/${code}`;
 }
 
-export const RECHARGE_LINE_LABEL = 'Recharge carte membre';
+export const RECHARGE_LINE_LABEL = 'Approvisionnement carte membre';
 
 // The lines a receipt shows. A recharge or an outside meal is a payment with no line (nothing is sold through
 // a charge), so it shows one line of its own: « Recharge carte membre », or the meal's label.

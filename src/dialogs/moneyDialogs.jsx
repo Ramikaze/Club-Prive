@@ -208,17 +208,17 @@ function RechargeDialog({ close, member, onDone }) {
   const onSubmit = (e) => {
     e.preventDefault();
     submit(async () => {
-      if (!amount) throw new Error('Indiquez le montant de la recharge.');
+      if (!amount) throw new Error('Indiquez le montant de l’approvisionnement.');
       const res = await api.post(`/api/members/${member.id}/wallet/recharge`, { amount, method }, key);
       close();
-      toast(`Carte rechargée de ${money(amount)} : nouveau solde ${money(res.wallet.balance)}.${res.renewed?.length ? ' L’abonnement a été renouvelé sur la carte.' : ''}`);
+      toast(`Carte approvisionnée de ${money(amount)} : nouveau solde ${money(res.wallet.balance)}.${res.renewed?.length ? ' L’abonnement a été renouvelé sur la carte.' : ''}`);
       onDone?.(res);
       navigate(`/caisse/ticket/${res.payment.id}`);
     });
   };
 
   return (
-    <Modal title="Recharger la carte" onClose={close}>
+    <Modal title="Approvisionner la carte" onClose={close}>
       <form className="form-grid" onSubmit={onSubmit} noValidate>
         <p className="muted">Membre : <strong>{member.name}</strong>. L’argent reçu à la caisse est crédité sur la carte, en {settings.currency.label} ; il n’est jamais rendu en espèces ni perdu.</p>
         <div className="form-row">
@@ -236,7 +236,7 @@ function RechargeDialog({ close, member, onDone }) {
         <FormError error={error} />
         <div className="modal-actions"><button type="button" className="btn" onClick={close}>Annuler</button>
           <button type="submit" className="btn btn-primary" disabled={busy || !amount} aria-busy={busy}>
-            {amount ? `Recharger ${money(amount)}` : 'Recharger'}</button></div>
+            {amount ? `Approvisionner ${money(amount)}` : 'Approvisionner'}</button></div>
       </form>
     </Modal>
   );
@@ -326,15 +326,15 @@ export function openOutsideMealDialog(member, onDone) {
 export function openCancelRechargeDialog({ paymentId, amount, at }, onDone) {
   const key = newKey();
   actionDialog({
-    title: 'Annuler la recharge',
-    message: `Recharge de ${money(amount)} du ${dateTime(at)}.`,
+    title: 'Annuler l’approvisionnement',
+    message: `Approvisionnement de ${money(amount)} du ${dateTime(at)}.`,
     body: <Notice kind="warn">Le montant sort de la caisse aujourd’hui et il est retiré de la carte. C’est refusé si cet argent a déjà été dépensé avec la carte.</Notice>,
     reasonLabel: 'Motif de l’annulation',
     danger: true,
-    confirmLabel: 'Annuler la recharge',
+    confirmLabel: 'Annuler l’approvisionnement',
     run: async (v) => {
       const res = await api.post(`/api/payments/${paymentId}/cancel-recharge`, { reason: v.reason }, key);
-      toast(`Recharge annulée : nouveau solde ${money(res.wallet.balance)}.`);
+      toast(`Approvisionnement annulé : nouveau solde ${money(res.wallet.balance)}.`);
       onDone?.(res);
     },
   });

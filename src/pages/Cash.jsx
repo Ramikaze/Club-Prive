@@ -94,13 +94,29 @@ function AccountCard({ a, total = false }) {
 function RechargesCard({ r }) {
   return (
     <section className="card section-gap recharges-card">
-      <div className="card-head"><h2><Icon name="card" /> Recharges carte CFA</h2><span className="big">{money(r.net)}</span></div>
+      <div className="card-head"><h2><Icon name="card" /> Approvisionnements carte CFA</h2><span className="big">{money(r.net)}</span></div>
       <dl className="calc">
-        <div><dt>Encaissé sur les cartes <span className="subtle">({r.n} recharge{r.n > 1 ? 's' : ''})</span></dt><dd>{money(r.collected)}</dd></div>
+        <div><dt>Encaissé sur les cartes <span className="subtle">({r.n} approvisionnement{r.n > 1 ? 's' : ''})</span></dt><dd>{money(r.collected)}</dd></div>
         {r.methods.map((x) => <div key={x.method}><dt className="subtle">dont {x.method}</dt><dd>{money(x.total)}</dd></div>)}
-        {r.cancelled ? <div><dt>Recharges annulées</dt><dd>−{money(r.cancelled)}</dd></div> : null}
+        {r.cancelled ? <div><dt>Approvisionnements annulés</dt><dd>−{money(r.cancelled)}</dd></div> : null}
         <div className="total"><dt>Net reçu sur les cartes</dt><dd>{money(r.net)}</dd></div>
       </dl>
+      {r.items.length ? (
+        <div className="list section-gap">
+          {r.items.map((x) => (
+            <div key={x.id} className={`list-item ${x.cancelled_at ? 'is-muted' : ''}`}>
+              <span className="time">{dateTime(x.paid_at)}</span>
+              <div className="grow">
+                <div className="title"><Link to={`/membres/${x.member_id}`}>{x.member_name}</Link></div>
+                <div className="meta">{x.method}{x.member_no ? ` · ${x.member_no}` : ''}{x.cancelled_at ? ' · annulé' : ''}</div>
+              </div>
+              <span className="num">{money(x.amount)}</span>
+              <Link className="btn btn-sm" to={`/caisse/ticket/${x.id}`} aria-label={`Ticket de l’approvisionnement de ${x.member_name}`}>
+                <Icon name="receipt" /> Ticket</Link>
+            </div>
+          ))}
+        </div>
+      ) : null}
       <p className="subtle">Cet argent est dans la caisse ; il devient une recette quand le membre consomme, c’est pourquoi il ne s’ajoute pas au total des ventes.</p>
     </section>
   );
@@ -113,7 +129,11 @@ function rechargesOf(payments) {
   for (const p of list) methods[p.method] = { method: p.method, total: (methods[p.method]?.total ?? 0) + p.amount };
   const collected = list.reduce((sum, p) => sum + p.amount, 0);
   const cancelled = list.filter((p) => p.cancelled_at).reduce((sum, p) => sum + p.amount, 0);
-  return { collected, cancelled, net: collected - cancelled, n: list.length, methods: Object.values(methods) };
+  const items = list.map((p) => ({
+    id: p.id, amount: p.amount, method: p.method, paid_at: p.paid_at, cancelled_at: p.cancelled_at,
+    member_id: p.member_id, member_name: p.member_name, member_no: p.member_no,
+  }));
+  return { collected, cancelled, net: collected - cancelled, n: list.length, methods: Object.values(methods), items };
 }
 
 // The page's period: a preset, or the dates chosen in « Du » and « au » (one day or several). Chosen dates that

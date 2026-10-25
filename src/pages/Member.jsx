@@ -58,10 +58,10 @@ function CfaBar({ wallet }) {
   return (
     <div className="tile-bar">
       <div className="tile-bar-top"><span className="k">Crédit CFA</span><span className="v">{money(wallet.balance)}</span></div>
-      <div className="gauge" role="img" aria-label={`Crédit CFA : ${money(wallet.balance)}${last ? ` sur ${money(last.amount)} rechargés` : ''}`}>
+      <div className="gauge" role="img" aria-label={`Crédit CFA : ${money(wallet.balance)}${last ? ` sur ${money(last.amount)} approvisionnés` : ''}`}>
         <span className="g-cfa" style={{ width: `${Math.round(ratio * 1000) / 10}%` }} />
       </div>
-      <p className="subtle">{last ? `sur ${money(last.amount)} rechargés le ${dayMonth(last.at)}` : 'Aucune recharge pour l’instant.'}</p>
+      <p className="subtle">{last ? `sur ${money(last.amount)} approvisionnés le ${dayMonth(last.at)}` : 'Aucun approvisionnement pour l’instant.'}</p>
     </div>
   );
 }
@@ -75,7 +75,7 @@ function RenewalAlert({ m }) {
     <div className="tile-alert">
       <Notice kind={r.state === 'bloque' ? 'danger' : 'warn'}>
         {r.state === 'bloque'
-          ? `Renouvellement impossible : ${money(r.balance)} sur la carte, ${money(r.price)} nécessaires (formule ${r.plan_name} terminée le ${end}). Il manque ${money(r.missing)} : l’abonnement sera renouvelé dès la recharge.`
+          ? `Renouvellement impossible : ${money(r.balance)} sur la carte, ${money(r.price)} nécessaires (formule ${r.plan_name} terminée le ${end}). Il manque ${money(r.missing)} : l’abonnement sera renouvelé dès l’approvisionnement de la carte.`
           : `La formule ${r.plan_name} se termine le ${end} : ${money(r.balance)} sur la carte, ${money(r.price)} nécessaires pour la renouveler. Il manque ${money(r.missing)}.`}
         <div className="row">
           <button type="button" className="btn btn-sm" onClick={() => sendRenewalWhatsApp(r, { firstName: m.first_name, phone: m.phone })}>
@@ -87,7 +87,7 @@ function RenewalAlert({ m }) {
 }
 
 const MOVE_LABEL = {
-  recharge: 'Recharge', paiement: 'Payé par la carte', remboursement: 'Rendu sur la carte', annulation_recharge: 'Recharge annulée',
+  recharge: 'Approvisionnement', paiement: 'Payé par la carte', remboursement: 'Rendu sur la carte', annulation_recharge: 'Approvisionnement annulé',
 };
 
 function WalletMovements({ m, reload }) {
@@ -112,7 +112,7 @@ function WalletMovements({ m, reload }) {
               {w.payment_id ? <Link className="btn btn-sm" to={`/caisse/ticket/${w.payment_id}`}>Ticket</Link> : null}
               {isAdmin && w.kind === 'recharge' && !isCancelled ? (
                 <button type="button" className="btn btn-sm btn-ghost"
-                  onClick={() => openCancelRechargeDialog({ paymentId: w.payment_id, amount: w.amount, at: w.at }, reload)}>Annuler la recharge</button>
+                  onClick={() => openCancelRechargeDialog({ paymentId: w.payment_id, amount: w.amount, at: w.at }, reload)}>Annuler l’approvisionnement</button>
               ) : null}
             </div>
           );
@@ -181,7 +181,7 @@ function CardTile({ m, current, summary, reload, book }) {
 
       <div className="tile-actions-main">
         <button type="button" className="btn btn-primary" onClick={() => openRechargeDialog(m, reload)} disabled={!m.active} title={inactiveTitle}>
-          <Icon name="wallet" /> Recharger</button>
+          <Icon name="wallet" /> Approvisionner</button>
         <button type="button" className="btn" onClick={book}><Icon name="calendar" /> Réserver</button>
         <button type="button" className="btn" onClick={() => openOutsideMealDialog(m, reload)} disabled={!m.active} title={inactiveTitle}>
           <Icon name="receipt" /> Repas extérieur</button>

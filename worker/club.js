@@ -1337,16 +1337,16 @@ export class Club {
   rechargeWallet(actor, memberId, input) {
     const s = this.settings();
     const m = this.memberRow(memberId);
-    this.assertMemberActive(m, 'de recharger sa carte');
-    const amount = int(input.amount, 'Montant de la recharge', { min: 1, max: 1e13 });
+    this.assertMemberActive(m, 'd’approvisionner sa carte');
+    const amount = int(input.amount, 'Montant de l’approvisionnement', { min: 1, max: 1e13 });
     const method = text(input.method, 'Moyen de paiement', { required: true, max: 40 });
     if (method === CARD_METHOD || !s.payment_methods.includes(method)) throw invalid('Moyen de paiement non configuré.');
     const reference = null; // Receipts are numbered by the app (the ticket number), never typed by staff.
-    this.assertOpen(this.bizToday(), 'Cette recharge');
+    this.assertOpen(this.bizToday(), 'Cet approvisionnement');
     const paymentId = this.insert(
       `INSERT INTO payments (member_id, amount, method, reference, paid_at, created_by, ticket_code, kind, label)
        VALUES (?, ?, ?, ?, ?, ?, ?, 'recharge', ?)`,
-      m.id, amount, method, reference, this.nowIso(), actor.id, this.freshTicketCode(), 'Recharge de la carte membre',
+      m.id, amount, method, reference, this.nowIso(), actor.id, this.freshTicketCode(), 'Approvisionnement de la carte membre',
     );
     this.walletMove(actor, m.id, 'recharge', amount, { paymentId });
     this.audit(actor, 'carte.recharger', 'member', m.id, {
@@ -1448,11 +1448,11 @@ export class Club {
   // Only an administrator cancels a recharge, with a reason: the money leaves the till on the day of the
   // cancellation, and the card is debited, which is refused once the money has been spent.
   cancelRecharge(actor, paymentId, input) {
-    if (actor.role !== 'admin') throw forbidden("L'annulation d'une recharge est réservée à un administrateur.");
+    if (actor.role !== 'admin') throw forbidden("L'annulation d'un approvisionnement est réservée à un administrateur.");
     const p = this.get('SELECT * FROM payments WHERE id = ?', toId(paymentId, 'Encaissement'));
     if (!p) throw notFound('Encaissement');
-    if (p.kind !== 'recharge') throw conflict('PAS_UNE_RECHARGE', "Cet encaissement n'est pas une recharge de carte.");
-    if (p.cancelled_at) throw conflict('DEJA_ANNULEE', 'Recharge déjà annulée.');
+    if (p.kind !== 'recharge') throw conflict('PAS_UNE_RECHARGE', "Cet encaissement n'est pas un approvisionnement de carte.");
+    if (p.cancelled_at) throw conflict('DEJA_ANNULEE', 'Approvisionnement déjà annulé.');
     const reason = text(input.reason, "Motif d'annulation", { required: true, min: 3, max: 300 });
     this.assertOpen(this.bizToday(), 'Cette annulation');
     this.walletMove(actor, p.member_id, 'annulation_recharge', -p.amount, { paymentId: p.id, reason });
@@ -3157,8 +3157,17 @@ export class Club {
     const { cancelled } = this.get(
       "SELECT COALESCE(SUM(amount), 0) AS cancelled FROM payments WHERE kind = 'recharge' AND cancelled_at >= ? AND cancelled_at < ?", a, b,
     );
+    // Each one with its member, to see who put money on a card and get the ticket out again.
+    const items = this.all(
+      `SELECT p.id, p.amount, p.method, p.paid_at, p.cancelled_at, m.id AS member_id, m.first_name, m.last_name, m.member_no
+       FROM payments p JOIN members m ON m.id = p.member_id
+       WHERE p.kind = 'recharge' AND p.paid_at >= ? AND p.paid_at < ? ORDER BY p.paid_at DESC`, a, b,
+    ).map((x) => ({
+      id: x.id, amount: x.amount, method: x.method, paid_at: x.paid_at, cancelled_at: x.cancelled_at,
+      member_id: x.member_id, member_name: `${x.first_name} ${x.last_name}`, member_no: x.member_no,
+    }));
     const recharges = {
-      collected, cancelled, net: collected - cancelled, n: rechargeMethods.reduce((sum, x) => sum + x.n, 0), methods: rechargeMethods,
+      collected, cancelled, net: collected - cancelled, n: rechargeMethods.reduce((sum, x) => sum + x.n, 0), methods: rechargeMethods, items,
     };
     return { from, to, accounts, total, methods, recharges };
   }
