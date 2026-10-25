@@ -134,7 +134,7 @@ function RenewalAlerts({ alerts }) {
               : `Formule ${a.plan_name} jusqu’au ${dayLabel(a.end_date, 'short')} · ${money(a.balance)} sur la carte, ${money(a.price)} nécessaires`}</div>
           </div>
           <span className={`chip ${a.state === 'bloque' ? 'chip-danger' : 'chip-warn'}`}>{`il manque ${money(a.missing)}`}</span>
-          <button type="button" className="btn btn-sm" onClick={() => sendRenewalWhatsApp(a, { firstName: a.first_name, phone: a.phone })}
+          <button type="button" className="btn btn-sm" onClick={() => sendRenewalWhatsApp(a, { lastName: a.last_name, phone: a.phone })}
             title={a.phone_ok ? `Prévenir ${a.member_name} par WhatsApp` : 'Numéro inutilisable : WhatsApp s’ouvrira sans destinataire'}>
             <Icon name="message" /> WhatsApp</button>
         </div>

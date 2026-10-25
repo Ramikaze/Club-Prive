@@ -55,7 +55,7 @@ function ConfirmationPage({ d }) {
     try {
       const file = await sheetPicture(`reservation-${r.id}.png`);
       const text = bookingWhatsAppText({
-        clubName: settings.club_name, firstName: d.member_first_name, roomName: r.room_name, day: r.start_date,
+        clubName: settings.club_name, lastName: d.member_last_name, roomName: r.room_name, day: r.start_date,
         startTime: r.start_time, endTime: r.end_time, partySize: r.party_size, number: r.id,
       });
       openDialog(ShareTicketDialog, { file, text, digits, demo, title: 'Confirmation de réservation par WhatsApp' });
