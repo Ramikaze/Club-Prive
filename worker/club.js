@@ -1134,7 +1134,13 @@ export class Club {
     this.audit(actor, previous ? 'abonnement.renouveler' : 'abonnement.activer', 'member', m.id, {
       subscription_id: id, formule: plan.name, debut: start, fin: end, prix: plan.price, prix_valide: !!plan.price_validated,
     });
-    return { subscription_id: id, start_date: start, end_date: end, charge_id: chargeId, member: this.memberDetail(m.id) };
+    // Paid at once when the staff says how (`payment`: the card first, then a method for the rest), in the same
+    // transaction: a plan is never left waiting at the till, and a refused payment leaves no plan behind.
+    let payment = null;
+    if (chargeId && input.payment) {
+      ({ payment } = this.recordPayment(actor, { charge_ids: [chargeId], card: input.payment.card, method: input.payment.method }));
+    }
+    return { subscription_id: id, start_date: start, end_date: end, charge_id: chargeId, payment, member: this.memberDetail(m.id) };
   }
 
   cancelSubscription(actor, subId, input) {
