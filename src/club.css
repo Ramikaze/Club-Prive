@@ -302,6 +302,8 @@ main:focus { outline: none; }
 .card-head .subtle { font-weight: 400; }
 .card + .card { margin-top: 0; }
 .section-gap { margin-top: 16px; }
+.section-gap-bottom { margin-bottom: 16px; }
+.kpis.cash-balance { margin-bottom: 0; }
 
 /* ------------------------------------------------------------------ KPI tiles */
 

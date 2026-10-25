@@ -12,6 +12,7 @@ import { money, parseMoney, dayLabel, bizToday, ACCOUNT_LABEL } from '../lib/for
 import { useLoad, useSubmit, useBusy } from '../lib/hooks.js';
 import { useStore, useIsAdmin } from '../store/useStore.js';
 import { downloadExcel } from '../utils/exportExcel.js';
+import { CASH_METHOD } from '../../shared/rules.js';
 
 const TITLES = { depense: 'Nouvelle dépense', recette: 'Entrée diverse', transfert: 'Transfert entre comptes' };
 const DONE = { depense: 'Dépense enregistrée.', recette: 'Entrée enregistrée.', transfert: 'Transfert enregistré.' };
@@ -177,6 +178,44 @@ function EntryRow({ e, isAdmin, onCancel }) {
   );
 }
 
+// The till over the period, read left to right: the cash fund it started with, what came in less what went out,
+// and what is in it at the end. One account at a time, the cash till first; « Tous les comptes » adds them up
+// (a transfer between two of them then cancels out).
+function CashBalance({ t }) {
+  const [method, setMethod] = useState(t.accounts.some((a) => a.method === CASH_METHOD) ? CASH_METHOD : '');
+  const a = t.accounts.find((x) => x.method === method) ?? t.total;
+  const net = a.in - a.out;
+  const end = t.to >= bizToday() ? 'à ce jour' : `au ${dayLabel(t.to, 'short')}`;
+  return (
+    <section className="card section-gap-bottom">
+      <div className="card-head">
+        <h2>{method ? `Caisse : ${method}` : 'Toutes les caisses et comptes'}</h2>
+        {t.accounts.length > 1 && (
+          <Segmented label="Caisse ou compte" value={method} onChange={setMethod}
+            options={[...t.accounts.map((x) => [x.method, x.method]), ['', 'Tous']]} />
+        )}
+      </div>
+      <div className="kpis cash-balance">
+        <div className="kpi">
+          <div className="label">Fond de caisse</div>
+          <div className="value">{money(a.opening)}</div>
+          <div className="hint">au {dayLabel(t.from, 'short')}</div>
+        </div>
+        <div className="kpi">
+          <div className="label">Recettes − dépenses</div>
+          <div className="value">{net > 0 ? '+' : ''}{money(net)}</div>
+          <div className="hint">{money(a.in)} de recettes − {money(a.out)} de dépenses</div>
+        </div>
+        <div className="kpi">
+          <div className="label">Solde en caisse</div>
+          <div className="value">{money(a.closing)}</div>
+          <div className="hint">{end}</div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function Expenses() {
   const isAdmin = useIsAdmin();
   const methods = useStore((s) => s.settings.payment_methods);
@@ -184,11 +223,12 @@ export default function Expenses() {
   const kind = isAdmin ? (period.params.get('type') ?? '') : '';
   const excel = useBusy();
   const state = useLoad(async () => {
-    const [list, categories] = await Promise.all([
+    const [list, categories, treasury] = await Promise.all([
       api.get(`/api/ledger/entries${qs({ from: period.from, to: period.to, kind })}`),
       api.get('/api/ledger/categories'),
+      isAdmin ? api.get(`/api/treasury${qs({ from: period.from, to: period.to })}`) : null,
     ]);
-    return { ...list, categories };
+    return { ...list, categories, treasury };
   }, [period.from, period.to, kind]);
 
   const open = (entryKind) => openDialog(EntryDialog, { kind: entryKind, categories: state.data?.categories ?? [], onDone: state.reload });
@@ -246,6 +286,7 @@ export default function Expenses() {
           const total = (k) => active.filter((e) => e.kind === k).reduce((s, e) => s + e.amount, 0);
           return (
             <>
+              {data.treasury && <CashBalance t={data.treasury} />}
               <div className="grid-2">
                 <div className="card">
                   <div className="card-head"><h2>Dépenses par catégorie</h2><span className="subtle">{money(total('depense'))}</span></div>
