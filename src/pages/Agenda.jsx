@@ -195,22 +195,25 @@ function DayView({ day, list, now, settings, maxRooms, onSlot }) {
           <span><i style={{ background: 'var(--surface-3)', borderLeft: '3px solid var(--text-3)' }} /> Terminée</span>
         </div>
       </section>
-      <DayPanel active={active} />
+      {/* Beside the timeline: the day's bookings, then the cancelled ones, so nothing hangs below the screen. */}
+      <div className="day-side">
+        <DayPanel active={active} />
+        {cancelled.length > 0 && (
+          <section className="card day-cancelled" aria-label="Annulées ce jour">
+            <div className="card-head"><h2>Annulées ce jour</h2></div>
+            <div className="list">
+              {cancelled.map((r) => (
+                <Link key={r.id} className="list-item" to={`/reservations/${r.id}`}>
+                  <span className="time">{r.start_time} – {r.end_time}</span>
+                  <div className="grow"><div className="title">{r.member_name} ({r.room_name})</div><div className="meta">{r.cancel_reason ?? ''}</div></div>
+                  <Chip group="res" value={r.status} />
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
       </div>
-      {cancelled.length > 0 && (
-        <section className="card section-gap">
-          <div className="card-head"><h2>Annulées ce jour</h2></div>
-          <div className="list">
-            {cancelled.map((r) => (
-              <Link key={r.id} className="list-item" to={`/reservations/${r.id}`}>
-                <span className="time">{r.start_time} – {r.end_time}</span>
-                <div className="grow"><div className="title">{r.member_name} ({r.room_name})</div><div className="meta">{r.cancel_reason ?? ''}</div></div>
-                <Chip group="res" value={r.status} />
-              </Link>
-            ))}
-          </div>
-        </section>
-      )}
+      </div>
     </>
   );
 }
@@ -410,6 +413,8 @@ export default function Agenda() {
             <button key={k} type="button" aria-pressed={view === k} onClick={() => setQuery({ vue: k, date, salle: roomId })}>{label}</button>
           ))}
         </div>
+        {/* The room filter only matters with two rooms or more: with one, it would show twice the same thing. */}
+        {activeRooms.length > 1 && (
         <div className="segmented" role="group" aria-label="Salle">
           <button type="button" aria-pressed={roomId === ''} onClick={() => setQuery({ vue: view, date, au: listTo(0), statut: status, salle: '' })}>
             Toutes les salles ({activeRooms.length})
@@ -425,6 +430,7 @@ export default function Agenda() {
             </button>
           ))}
         </div>
+        )}
         <div className="date-nav">
           <button type="button" className="btn btn-sm" onClick={() => setQuery({ vue: view, date: addDays(date, -step), au: listTo(-step), statut: status, salle: roomId })} aria-label="Période précédente"><Icon name="left" /></button>
           <button type="button" className="btn btn-sm" onClick={() => setQuery({ vue: view, date: bizToday(), au: view === 'liste' ? addDays(bizToday(), step - 1) : '', statut: status, salle: roomId })}
