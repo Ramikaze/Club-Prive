@@ -37,3 +37,8 @@ photos-cigares/
 
 # Knowledge graph of the project built by graphify (local tool, never committed)
 graphify-out/
+
+# Spec-kit assistant skills installed locally (local tool, never committed)
+.agents/
+.claude/skills/
+.specify/
