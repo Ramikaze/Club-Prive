@@ -228,6 +228,30 @@ p { margin: 0; }
 .side-user .btn { background: var(--charcoal-2); color: var(--on-charcoal); border-color: var(--charcoal-3); }
 .side-user .btn:hover { background: var(--charcoal-3); }
 
+/* The fold button of the sidebar, and the sidebar folded into a rail of icons (desktop only: the phone has its
+   tab bar). Folded, the labels stay for screen readers and show as tooltips; the logo becomes the small mark. */
+.sidebar .brand { justify-content: space-between; gap: 8px; padding: 0 0 0 8px; }
+.side-toggle {
+  flex: none; display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 8px;
+  border: 1px solid var(--charcoal-3); background: var(--charcoal-2); color: var(--on-charcoal-2); cursor: pointer;
+}
+.side-toggle:hover { background: var(--charcoal-3); color: var(--on-charcoal); }
+.side-toggle:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.side-toggle svg { width: 18px; height: 18px; }
+.brand-mark { display: block; width: 40px; height: 40px; border-radius: 10px; }
+.shell.is-rail { --sidebar-w: 76px; }
+.shell.is-rail .sidebar { padding: 20px 10px 14px; gap: 16px; }
+.shell.is-rail .sidebar .brand { flex-direction: column; padding: 0; }
+.shell.is-rail .side-nav a { justify-content: center; padding: 0; }
+.shell.is-rail .side-nav-label { height: 1px; margin: 10px 8px; overflow: hidden; color: transparent; background: var(--charcoal-3); }
+.shell.is-rail .side-label, .shell.is-rail .side-who {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+.shell.is-rail .side-user { padding: 12px 0 0; justify-items: center; }
+.shell.is-rail .side-user .row { flex-direction: column; }
+.shell.is-rail .side-user .btn { width: 44px; padding: 0; justify-content: center; }
+@media (prefers-reduced-motion: no-preference) { .shell { transition: grid-template-columns 0.18s ease; } }
+
 .main-col { min-width: 0; display: flex; flex-direction: column; }
 main { padding: 32px 36px 52px; max-width: 1260px; width: 100%; margin: 0 auto; flex: 1; }
 main:focus { outline: none; }
@@ -303,7 +327,12 @@ main:focus { outline: none; }
 .card + .card { margin-top: 0; }
 .section-gap { margin-top: 16px; }
 .section-gap-bottom { margin-bottom: 16px; }
-.kpis.cash-balance { margin-bottom: 0; }
+.kpis.cash-balance { margin-bottom: 0; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 899px) { .kpis.cash-balance { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 499px) {
+  .cash-balance-card { padding: 14px; }
+  .kpis.cash-balance .kpi .value { font-size: 1rem; }
+}
 
 /* ------------------------------------------------------------------ KPI tiles */
 
@@ -1030,9 +1059,33 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 /* Picture of a ticket before it is shared on WhatsApp. */
 .ticket-image-preview { display: block; max-width: 100%; max-height: 55vh; margin: 0 auto; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
 
-/* Recharges of the members' cards, shown apart from the sales. */
-.recharges-card .card-head h2 { display: inline-flex; align-items: center; gap: 8px; }
-.recharges-card .card-head .big { font-size: 1.4rem; font-weight: 700; }
+/* The cash page (/caisse): « Soldes » full width, then « Recettes » and « Dépenses » side by side when the page's
+   content is wide enough (whatever the sidebar takes), each a summary, a compact list and its total. */
+.cash-page { display: grid; gap: 16px; }
+.cash-columns { container-type: inline-size; }
+.cash-columns-inner { display: grid; gap: 16px; align-items: start; }
+@container (min-width: 860px) { .cash-columns-inner { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.cash-block .card-head h2, .cash-balance-card .card-head h2 { display: inline-flex; align-items: center; gap: 8px; }
+.cash-block .card-head h2 svg, .cash-balance-card .card-head h2 svg { width: 20px; height: 20px; color: var(--text-3); }
+.cash-balance-card .segmented { flex-wrap: wrap; max-width: 100%; }
+.cash-block-total { font-size: 1.25rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cash-note { margin: 10px 0 0; font-size: 0.85rem; }
+.cash-block .cash-list-title, .cash-details .cash-list-title { margin: 20px 0 2px; }
+.cash-row { align-items: flex-start; min-height: 0; padding: 9px 2px; }
+.cash-row .title, .cash-row .meta { overflow-wrap: anywhere; }
+.cash-row-end { flex: none; display: grid; justify-items: end; gap: 2px; }
+.cash-amount { font-weight: 650; white-space: nowrap; }
+.cash-amount.is-quiet { color: var(--text-3); font-weight: 500; }
+.cash-account { display: inline-flex; align-items: center; gap: 6px; }
+.cash-account select { width: auto; }
+.list-item.is-muted { color: var(--text-3); }
+.list-item.is-muted .meta { color: var(--text-3); }
+.list-item.is-muted .strike { text-decoration: line-through; }
+.cash-quiet { display: flex; align-items: center; gap: 6px; margin: 0; padding: 0 4px; }
+.cash-quiet svg { width: 16px; height: 16px; flex: none; color: var(--ok); }
+.cash-details { padding-top: 14px; padding-bottom: 14px; }
+.cash-details > summary { cursor: pointer; font-weight: 600; color: var(--text-2); padding: 4px 0; }
+.cash-details > summary:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 6px; }
 
 /* Agenda day view: the timeline and, beside it, the day's bookings. */
 .day-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); gap: 16px; align-items: start; }

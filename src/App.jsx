@@ -1,7 +1,7 @@
 // Boot (session check), sign-in, then the routed application. Every rule is enforced by the server;
 // the admin guard here only avoids showing pages the server would refuse.
 import { Component, useEffect, useRef, useState } from 'react';
-import { HashRouter, Routes, Route, Link } from 'react-router-dom';
+import { HashRouter, Routes, Route, Link, Navigate, useLocation } from 'react-router-dom';
 import AppShell from './components/layout/AppShell.jsx';
 import { DialogRoot, closeAllDialogs } from './components/ui/Modal.jsx';
 import { Toasts } from './components/ui/toast.jsx';
@@ -21,7 +21,6 @@ import Lounge, { HumidorPage } from './pages/Lounge.jsx';
 import Cash from './pages/Cash.jsx';
 import Ticket from './pages/Ticket.jsx';
 import TicketHistory from './pages/TicketHistory.jsx';
-import Expenses from './pages/Expenses.jsx';
 import Treasury from './pages/Treasury.jsx';
 import Ledger from './pages/Ledger.jsx';
 import Closing from './pages/Closing.jsx';
@@ -36,6 +35,12 @@ function AdminOnly({ children }) {
   const isAdmin = useIsAdmin();
   if (isAdmin) return children;
   return <div className="card"><Empty icon="alert">Cette page est réservée aux administrateurs.</Empty></div>;
+}
+
+// The former expenses page is now part of the cash page: its links (period, ?type=depense) open there.
+function ToCash() {
+  const { search } = useLocation();
+  return <Navigate to={`/caisse${search}`} replace />;
 }
 
 function NotFound() {
@@ -164,7 +169,7 @@ export default function App() {
             <Route path="caisse" element={<Cash />} />
             <Route path="caisse/ticket/:id" element={<Ticket />} />
             <Route path="caisse/historique-tickets" element={<AdminOnly><TicketHistory /></AdminOnly>} />
-            <Route path="depenses" element={<Expenses />} />
+            <Route path="depenses" element={<ToCash />} />
             <Route path="tresorerie" element={<AdminOnly><Treasury /></AdminOnly>} />
             <Route path="grand-livre" element={<AdminOnly><Ledger /></AdminOnly>} />
             <Route path="cloture" element={<AdminOnly><Closing /></AdminOnly>} />

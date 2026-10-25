@@ -22,7 +22,7 @@ export const NAV = [
   { path: '/agenda', label: 'Agenda', short: 'Agenda', icon: 'calendar', tab: true, also: ['/reservations'] },
   { path: '/membres', label: 'Membres', short: 'Membres', icon: 'users', tab: true, also: ['/cartes'] },
   { path: '/produits', label: 'Stocks & Cave', short: 'Stocks', icon: 'box', also: ['/lounge'] },
-  { path: '/caisse', label: 'Caisse', short: 'Caisse', icon: 'wallet', tab: true, also: ['/depenses'] },
+  { path: '/caisse', label: 'Caisse', short: 'Caisse', icon: 'wallet', tab: true },
   { group: 'Administration', admin: true },
   { path: '/parametres', label: 'Administration', short: 'Admin', icon: 'settings', admin: true, also: ['/tresorerie', '/grand-livre', '/cloture'] },
 ];
@@ -31,6 +31,12 @@ export const NAV = [
 const navFor = (pathname) => NAV.find((n) => n.path && (n.path === '/'
   ? pathname === '/'
   : pathname === n.path || pathname.startsWith(`${n.path}/`) || n.also?.some((p) => pathname.startsWith(p))))?.path;
+
+// The sidebar folds into a rail of icons on desktop; the choice is kept per browser, unfolded by default.
+const RAIL_KEY = 'sidebar-rail';
+function readRail() {
+  try { return localStorage.getItem(RAIL_KEY) === '1'; } catch { return false; }
+}
 
 async function logout() {
   try { await api.post('/api/logout', {}); } catch { /* session already gone */ }
@@ -120,6 +126,17 @@ export default function AppShell() {
   const { pathname } = useLocation();
   const current = navFor(pathname);
   const [tour, setTour] = useState(false);
+  const [rail, setRail] = useState(readRail);
+  const toggleRail = () => {
+    const next = !rail;
+    setRail(next);
+    try {
+      if (next) localStorage.setItem(RAIL_KEY, '1');
+      else localStorage.removeItem(RAIL_KEY);
+    } catch { /* storage unavailable: the choice lasts until the page is reloaded */ }
+  };
+  // Folded, the labels are hidden (still read out) and shown as tooltips.
+  const tip = (label) => (rail ? label : undefined);
 
   useEffect(() => {
     closeAllDialogs();
@@ -142,20 +159,28 @@ export default function AppShell() {
   const aria = (path) => (path === current ? 'page' : undefined);
 
   return (
-    <div className={`shell${entering ? ' is-entering' : ''}${demo ? ' is-demo' : ''}`}>
+    <div className={`shell${entering ? ' is-entering' : ''}${demo ? ' is-demo' : ''}${rail ? ' is-rail' : ''}`}>
       <aside className="sidebar" aria-label="Navigation principale">
-        <div className="brand"><BrandLogo className="brand-logo" /></div>
-        <nav className="side-nav" data-tour="nav">
+        <div className="brand">
+          {rail
+            ? <img className="brand-mark" src="/favicon.svg" alt={settings.club_name} width="40" height="40" />
+            : <BrandLogo className="brand-logo" />}
+          <button type="button" className="side-toggle" aria-expanded={!rail} aria-controls="side-nav"
+            title={rail ? 'Déplier le menu' : 'Replier le menu'} onClick={toggleRail}>
+            <Icon name={rail ? 'right' : 'left'} /><span className="sr-only">{rail ? 'Déplier le menu' : 'Replier le menu'}</span>
+          </button>
+        </div>
+        <nav className="side-nav" id="side-nav" data-tour="nav">
           {NAV.filter((n) => !n.admin || isAdmin).map((n) => (n.group
             ? <div key={n.group} className="side-nav-label">{n.group}</div>
-            : <Link key={n.path} to={n.path} aria-current={aria(n.path)}><Icon name={n.icon} /><span>{n.label}</span></Link>))}
+            : <Link key={n.path} to={n.path} aria-current={aria(n.path)} title={tip(n.label)}><Icon name={n.icon} /><span className="side-label">{n.label}</span></Link>))}
         </nav>
         <div className="side-user" data-tour="account">
-          <div><div className="who">{me.name}</div><div className="role">{ROLE_LABEL[me.role]}</div></div>
-          <button type="button" className="btn btn-sm btn-block" onClick={startTour}><Icon name="tour" /> Visite guidée</button>
+          <div className="side-who" title={tip(`${me.name} · ${ROLE_LABEL[me.role]}`)}><div className="who">{me.name}</div><div className="role">{ROLE_LABEL[me.role]}</div></div>
+          <button type="button" className="btn btn-sm btn-block" onClick={startTour} title={tip('Visite guidée')}><Icon name="tour" /><span className="side-label">Visite guidée</span></button>
           <div className="row">
             {demo ? (
-              <button type="button" className="btn btn-sm btn-block btn-demo" onClick={leaveDemo}><Icon name="demo" /> Quitter la démo</button>
+              <button type="button" className="btn btn-sm btn-block btn-demo" onClick={leaveDemo} title={tip('Quitter la démo')}><Icon name="demo" /><span className="side-label">Quitter la démo</span></button>
             ) : (
               <button type="button" className="btn btn-sm btn-demo" onClick={enterDemo} title="Mode démo (entraînement)">
                 <Icon name="demo" /><span className="sr-only">Mode démo</span></button>
@@ -166,7 +191,7 @@ export default function AppShell() {
             )}
             <button type="button" className="btn btn-sm" onClick={toggleTheme} title="Thème clair / sombre">
               <Icon name="moon" /><span className="sr-only">Thème</span></button>
-            <button type="button" className="btn btn-sm" onClick={logout}><Icon name="logout" /> Déconnexion</button>
+            <button type="button" className="btn btn-sm" onClick={logout} title={tip('Déconnexion')}><Icon name="logout" /><span className="side-label">Déconnexion</span></button>
           </div>
         </div>
       </aside>

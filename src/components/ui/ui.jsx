@@ -183,18 +183,6 @@ export function StocksTabs() {
   );
 }
 
-export function CashTabs() {
-  return (
-    <RouteTabs
-      label="Rubriques Caisse"
-      items={[
-        ['/caisse', 'Encaissements & Notes', 'wallet'],
-        ['/depenses', 'Recettes & Dépenses', 'receipt'],
-      ]}
-    />
-  );
-}
-
 export function AdminTabs() {
   return (
     <RouteTabs
