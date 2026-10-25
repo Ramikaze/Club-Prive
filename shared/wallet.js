@@ -16,34 +16,39 @@ function instantText(iso, timezone) {
 }
 
 // The ticket's number, and the link anyone can open to check that it is genuine (absent in the demo).
+// « L’équipe Limen »: how the club signs its messages.
+const signature = (clubName) => (clean(clubName) ? `L’équipe ${clean(clubName)}` : '').trim();
+
 const ticketLines = (number, verifyUrl) => [
   number ? `Ticket ${clean(number)}` : '',
   verifyUrl ? `Vérifier le ticket : ${verifyUrl}` : '',
 ];
 
-// The message of an outside meal: what was ordered, when, the card's part, the rest paid at the till if any,
-// the new balance, then the ticket's number and verification link.
+// The message of an outside meal, as the owner words it: what was ordered and when, the card's part (and the rest
+// paid at the till), the new balance, the ticket's number and verification link, signed by the club's team.
 export function mealWhatsAppText({ clubName, firstName, label, amount, cardAmount, balance, at, timezone, currency, number, verifyUrl }) {
   const money = (n) => formatMoney(n, currency);
   const head = `Votre repas « ${clean(label)} » du ${instantText(at, timezone)} (${money(amount)})`;
   const body = cardAmount >= amount
-    ? `${head} a été payé par votre carte membre : nouveau solde ${money(balance)}.`
-    : `${head} : ${money(cardAmount)} payés par votre carte membre, ${money(amount - cardAmount)} réglés à la caisse. Nouveau solde ${money(balance)}.`;
-  return [clean(clubName), `Bonjour ${clean(firstName)},`, body, ...ticketLines(number, verifyUrl), 'Bon appétit !']
+    ? `${head} a été payé par votre carte membre.`
+    : `${head} : ${money(cardAmount)} payés par votre carte membre, ${money(amount - cardAmount)} réglés à la caisse.`;
+  // One sentence per line; the thanks and the signature share the last one.
+  return [`Bonjour ${clean(firstName)},`, body, `Votre nouveau solde est de ${money(balance)}.`, ...ticketLines(number, verifyUrl),
+    `Bon appétit ! ${signature(clubName)}`]
     .filter(Boolean).join('\n');
 }
 
-// The receipt of a recharge: the amount, the new balance and when, then the ticket's number and verification
-// link. `at` is the payment's instant, shown in the club's `timezone`; `currency` is the club's (formatMoney's
-// default otherwise).
+// The receipt of a recharge, as the owner words it: the amount and when, the new balance, the ticket's number and
+// verification link, signed by the club's team. `at` is the payment's instant, shown in the club's `timezone`;
+// `currency` is the club's (formatMoney's default otherwise).
 export function rechargeWhatsAppText({ clubName, firstName, amount, balance, at, timezone, currency, number, verifyUrl }) {
   const money = (n) => formatMoney(n, currency);
   return [
-    clean(clubName),
     `Bonjour ${clean(firstName)},`,
-    `Votre carte membre a été approvisionnée de ${money(amount)} le ${instantText(at, timezone)} : nouveau solde ${money(balance)}.`,
+    `Votre carte membre a été approvisionnée de ${money(amount)} le ${instantText(at, timezone)}.`,
+    `Votre nouveau solde est de ${money(balance)}.`,
     ...ticketLines(number, verifyUrl),
-    'Merci de votre confiance.',
+    `Merci de votre confiance. ${signature(clubName)}`,
   ].filter(Boolean).join('\n');
 }
 

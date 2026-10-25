@@ -115,8 +115,8 @@ function ShareTicketDialog({ close, file, text, title, digits, demo }) {
     const tab = window.open(waHref, '_blank');
     if (tab) tab.opener = null;
     toast(tab
-      ? 'Ticket copié : dans WhatsApp, faites Cmd + V (ou Ctrl + V) avant d’envoyer : le ticket part avec le message.'
-      : 'Ticket copié : cliquez encore sur « Ouvrir WhatsApp » pour ouvrir la conversation, puis Cmd + V avant d’envoyer.');
+      ? 'Ticket copié : dans WhatsApp, envoyez le message (Entrée), puis faites Cmd + V (ou Ctrl + V) et Entrée pour envoyer le ticket.'
+      : 'Ticket copié : cliquez encore sur « Ouvrir WhatsApp », envoyez le message, puis Cmd + V et Entrée pour le ticket.');
   };
   const share = async () => {
     try {
@@ -152,7 +152,7 @@ function ShareTicketDialog({ close, file, text, title, digits, demo }) {
         <p className="muted">{useShare
             ? 'Touchez « Envoyer sur WhatsApp », choisissez WhatsApp puis le client : le ticket et le message partent ensemble.'
             : canCopy
-              ? '« Envoyer sur WhatsApp » copie le ticket et ouvre la conversation avec le message écrit. Faites Cmd + V (ou Ctrl + V) avant d’envoyer : le ticket et le message partent ensemble.'
+              ? '« Envoyer sur WhatsApp » copie le ticket et ouvre la conversation avec le message écrit. Dans WhatsApp : 1. Entrée pour envoyer le message ; 2. Cmd + V (ou Ctrl + V) puis Entrée pour envoyer le ticket.'
               : '« Envoyer sur WhatsApp » ouvre la conversation avec le message écrit ; joignez le ticket téléchargé (trombone, puis Photos ou Document).'}</p>
         <div className="modal-actions share-actions">
           <a className="btn btn-ghost" href={url} download={file.name}><Icon name="download" /> Télécharger le ticket</a>
