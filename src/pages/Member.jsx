@@ -78,7 +78,7 @@ function RenewalAlert({ m }) {
           ? `Renouvellement impossible : ${money(r.balance)} sur la carte, ${money(r.price)} nécessaires (formule ${r.plan_name} terminée le ${end}). Il manque ${money(r.missing)} : l’abonnement sera renouvelé dès l’approvisionnement de la carte.`
           : `La formule ${r.plan_name} se termine le ${end} : ${money(r.balance)} sur la carte, ${money(r.price)} nécessaires pour la renouveler. Il manque ${money(r.missing)}.`}
         <div className="row">
-          <button type="button" className="btn btn-sm" onClick={() => sendRenewalWhatsApp(r, { firstName: m.first_name, phone: m.phone })}>
+          <button type="button" className="btn btn-sm" onClick={() => sendRenewalWhatsApp(r, { lastName: m.last_name, phone: m.phone })}>
             <Icon name="message" /> Prévenir par WhatsApp</button>
         </div>
       </Notice>

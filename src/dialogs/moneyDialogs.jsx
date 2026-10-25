@@ -360,10 +360,10 @@ export function openCancelMealDialog(payment, onDone) {
 
 // The renewal alert sent to the member on WhatsApp (shown, never sent, in the demo). `alert` is a renewal status
 // (memberDetail.renewal or a dashboard renewal alert).
-export function sendRenewalWhatsApp(alert, { firstName, phone }) {
+export function sendRenewalWhatsApp(alert, { lastName, phone }) {
   const { club_name: clubName, currency } = useStore.getState().settings;
   const text = renewalWhatsAppText({
-    clubName, firstName, planName: alert.plan_name, endDate: alert.end_date, balance: alert.balance, price: alert.price, state: alert.state, currency,
+    clubName, lastName, planName: alert.plan_name, endDate: alert.end_date, balance: alert.balance, price: alert.price, state: alert.state, currency,
   });
   sendWhatsAppText(phone, text, { title: 'Alerte de renouvellement' });
 }

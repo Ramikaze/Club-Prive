@@ -58,7 +58,7 @@ function StatementView({ s }) {
     try {
       const { from, to } = s.period;
       const file = await statementPdf(document.querySelector('.statement-sheet'), `releve-${m.member_no}-${from}-${to}.pdf`);
-      const text = statementWhatsAppText({ clubName: settings.club_name, firstName: m.first_name, from, to });
+      const text = statementWhatsAppText({ clubName: settings.club_name, lastName: m.last_name, from, to });
       openDialog(SharePdfDialog, { file, text, digits, demo, title: 'Relevé de compte par WhatsApp' });
     } catch (e) {
       toast(e?.message || 'Le PDF du relevé n’a pas pu être créé.', 'error');

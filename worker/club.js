@@ -2418,6 +2418,7 @@ export class Club {
       // What the WhatsApp confirmation to the booking's holder is addressed from. They are in this detail only:
       // the lists of bookings do not spread the members' phone numbers.
       member_first_name: r.first_name,
+      member_last_name: r.last_name,
       member_phone: this.memberRow(r.member_id).phone,
     };
   }
@@ -2734,6 +2735,7 @@ export class Club {
       number: formatTicketNumber(p.id),
       member_phone: p.member_phone ?? '',
       member_first_name: p.first_name,
+      member_last_name: p.last_name,
       refunded_amount: refunds.reduce((sum, r) => sum + r.amount, 0),
       refunds,
       status: this.ticketStatus(p),
@@ -3158,7 +3160,7 @@ export class Club {
     ).flatMap((m) => {
       const status = this.renewalStatus(m.id, today);
       return status ? [{
-        member_id: m.id, member_name: `${m.first_name} ${m.last_name}`, first_name: m.first_name, phone: m.phone,
+        member_id: m.id, member_name: `${m.first_name} ${m.last_name}`, first_name: m.first_name, last_name: m.last_name, phone: m.phone,
         phone_ok: waDigits(m.phone) !== null, ...status,
       }] : [];
     });

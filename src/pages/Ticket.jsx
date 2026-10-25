@@ -37,7 +37,7 @@ function whatsAppText(ticket, copyNo) {
     const { timezone, currency } = useStore.getState().settings;
     const verifiable = !ticket.demo && Boolean(ticket.ticket_code);
     const common = {
-      clubName: ticket.club_name, firstName: ticket.member_first_name, amount: ticket.amount, balance: ticket.wallet_balance_after,
+      clubName: ticket.club_name, lastName: ticket.member_last_name, amount: ticket.amount, balance: ticket.wallet_balance_after,
       at: ticket.paid_at, timezone, currency, number: ticket.number,
       verifyUrl: verifiable ? ticketVerifyUrl(window.location.origin, ticket.id, ticket.ticket_code) : null,
     };

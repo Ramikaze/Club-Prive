@@ -57,7 +57,7 @@ export default function StatementSheet({ s, settings, demo }) {
         </div>
         <div className="st-ident">
           <strong className="st-title">RELEVÉ DE COMPTE</strong>
-          <div className="st-name">{m.name}</div>
+          <div className="st-name">Monsieur {m.name}</div>
           <dl className="st-facts">
             <Fact k="Membre n°" v={m.member_no} />
             <Fact k="Téléphone" v={m.phone} />
