@@ -3,7 +3,8 @@
 // club hands out its configuration (Club.demoConfig), the demo club prepares itself from it.
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { addMonths } from '../shared/time.js';
+import { addDays, addMonths } from '../shared/time.js';
+import { CARD_METHOD } from '../shared/rules.js';
 import { sha256Hex } from '../worker/auth.js';
 import { DEMO_AUTHOR_ID } from '../worker/club.js';
 import { Server, Site, Client, ok, ORIGIN, UM } from './harness.js';
@@ -845,4 +846,58 @@ test('aiguillage : comptes et effacement demandés en démo sont refusés, le vr
   assert.deepEqual(memberNames(real.club), ['Vrai Membre']);
   assert.deepEqual(real.club.listUsers(), accountsBefore);
   await new Client(site).login('proprietaire', PROPRIO); // the real password is the old one
+});
+
+// ---------------------------------------------------------------------------- the member card's credit in the demo
+
+// Every row of every table of a club, to see that nothing moved in it.
+const dump = (club) => Object.fromEntries(
+  club.all("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+    .map(({ name }) => [name, club.all(`SELECT * FROM ${name}`)]),
+);
+
+test('carte de débit en démo : recharge, paiement par la carte et renouvellement ne touchent pas le vrai club', async () => {
+  const { real, demo, admin, bundle } = await clubs();
+  ok(await admin.post('/api/members', TRIAL)); // a real member must stay as it is
+  const realMember = real.club.listMembers()[0];
+  const asAdmin = inDemo(demo, await contextOf(real, admin));
+  const before = dump(real.club);
+
+  // A recharge of the card credit, with its signed ticket.
+  const member = ok(await asAdmin.post('/api/members', TRIAL));
+  const recharged = ok(await asAdmin.post(`/api/members/${member.id}/wallet/recharge`, { amount: 100000 * UM, method: 'Espèces' }));
+  assert.equal(recharged.wallet.balance, 100000 * UM);
+  assert.equal(recharged.payment.kind, 'recharge');
+  assert.equal(demo.club.walletBalance(member.id), 100000 * UM);
+
+  // A due line paid with the card.
+  const author = demo.club.userRow(bundle.user.id);
+  const due = demo.club.tx(() => demo.club.insertCharge(author, {
+    account: 'alcool', kind: 'produit', member_id: member.id, label: 'Bouteille', quantity: 1, unit_price: 30000 * UM,
+  }));
+  const paid = ok(await asAdmin.post('/api/payments', { charge_ids: [due], card: true, method: 'Espèces' }));
+  assert.equal(paid.payment.method, CARD_METHOD);
+  assert.equal(paid.payment.card_amount, 30000 * UM);
+  assert.equal(demo.club.walletBalance(member.id), 70000 * UM);
+
+  // A renewal: the monthly plan ended yesterday, the home page of the day renews it from the credit.
+  const plan = demo.club.plans().find((p) => p.code === 'MENSUELLE');
+  assert.ok(plan.price > 0 && plan.price <= 70000 * UM, String(plan.price));
+  const today = demo.club.bizToday();
+  const start = addDays(today, -31);
+  // This space's renewals started before that plan ended (a fresh database starts them today).
+  demo.club.run("UPDATE meta SET value = ? WHERE key = 'renewals_since'", start);
+  const sub = ok(await asAdmin.post(`/api/members/${member.id}/subscriptions`, { plan_id: plan.id, start_date: start }));
+  assert.ok(sub.end_date < today, sub.end_date);
+  ok(await asAdmin.get('/api/dashboard'));
+  const subs = demo.club.all('SELECT * FROM subscriptions WHERE member_id = ? ORDER BY start_date', member.id);
+  assert.equal(subs.length, 2);
+  assert.equal(subs[1].start_date, today);
+  assert.equal(demo.club.walletBalance(member.id), 70000 * UM - plan.price);
+  assert.ok(demo.club.all('SELECT action FROM audit_log').some((a) => a.action === 'abonnement.renouveler_auto'));
+
+  // The real club is exactly as it was.
+  assert.deepEqual(dump(real.club), before);
+  assert.deepEqual(real.club.listMembers().map((m) => m.id), [realMember.id]);
+  assert.equal(real.club.walletBalance(realMember.id), 0);
 });

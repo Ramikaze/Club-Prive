@@ -241,7 +241,12 @@ export function createApi({ db, env = {}, demo = false }) {
   }
 
   // Overview
-  add('GET', '/api/dashboard', {}, (ctx) => club.dashboard(ctx.user));
+  // A GET that writes: the home page first renews the subscriptions due today (the demo space has no scheduled
+  // task), each member in a transaction of its own, then reads the overview.
+  add('GET', '/api/dashboard', {}, (ctx) => {
+    renewDue();
+    return club.dashboard(ctx.user);
+  });
 
   // Members, subscriptions, cards
   add('GET', '/api/members', {}, (ctx) => club.listMembers(ctx.query.q, ctx.query.statut));
@@ -258,6 +263,11 @@ export function createApi({ db, env = {}, demo = false }) {
   add('POST', '/api/cards/:id/deactivate', {}, (ctx) => club.deactivateCard(ctx.user, ctx.params.id, ctx.body));
   add('GET', '/api/cards/lookup', {}, (ctx) => club.lookupCard(ctx.query.code));
   add('GET', '/api/cards/:id', {}, (ctx) => club.cardView(ctx.params.id));
+  // The card's CFA credit: any staff member recharges it, only an administrator cancels a recharge.
+  add('POST', '/api/members/:id/wallet/recharge', {}, (ctx) => club.rechargeWallet(ctx.user, ctx.params.id, ctx.body));
+  add('POST', '/api/members/:id/outside-meal', {}, (ctx) => club.recordOutsideMeal(ctx.user, ctx.params.id, ctx.body));
+  add('POST', '/api/payments/:id/cancel-meal', ADMIN, (ctx) => club.cancelOutsideMeal(ctx.user, ctx.params.id, ctx.body));
+  add('POST', '/api/payments/:id/cancel-recharge', ADMIN, (ctx) => club.cancelRecharge(ctx.user, ctx.params.id, ctx.body));
 
   // Rooms
   add('GET', '/api/rooms', {}, (ctx) => club.rooms({ includeInactive: ctx.query.all === '1' }));
@@ -538,5 +548,31 @@ export function createApi({ db, env = {}, demo = false }) {
     return handle(request, { user: account, demoConfig: config });
   }
 
-  return { club, handle, init, demoContext, handleDemo };
+  // The automatic renewals due today, each member in a top-level transaction of its own: a member whose renewal
+  // fails is rolled back alone and logged, and holds up neither the other members nor the request that ran it.
+  // Never called inside a transaction: a nested one joins the outer one, which the caught error would leave half
+  // applied.
+  function renewDue() {
+    if (club.depth > 0) throw new Error('renewDue: each renewal must be a transaction of its own.');
+    const result = { renewed: [], blocked: [], failed: [] };
+    const today = club.bizToday();
+    for (const memberId of club.renewalCandidates(today)) {
+      try {
+        const { renewed, blocked } = club.tx(() => club.runRenewals(today, memberId));
+        result.renewed.push(...renewed);
+        result.blocked.push(...blocked);
+      } catch (err) {
+        console.error(err);
+        result.failed.push(memberId);
+      }
+    }
+    return result;
+  }
+
+  // The daily scheduled task (worker/index.js): the automatic renewals of every member.
+  function runRenewals() {
+    return renewDue();
+  }
+
+  return { club, handle, init, demoContext, handleDemo, runRenewals };
 }

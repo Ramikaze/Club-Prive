@@ -6,16 +6,19 @@
 import { invalid, forbidden, notFound, conflict } from './errors.js';
 import { text, int, toId, flag } from './validate.js';
 import { addDays, addMonths, isValidDate, localParts } from '../shared/time.js';
-import { ACCOUNTS, ACCOUNT_LABELS } from '../shared/rules.js';
+import { ACCOUNTS, ACCOUNT_LABELS, CARD_METHOD } from '../shared/rules.js';
 
 // The largest expense a manager may record alone, in hundredths (5 000 FCFA); above it, an administrator records it.
 export const MANAGER_EXPENSE_MAX = 5000 * 100;
+// The expense category of the meals the club advances to a courier; it is no cost of the club (the member repays it).
+export const OUTSIDE_MEAL_CATEGORY = 'Avance repas client';
 export const ENTRY_KIND = { depense: 'Dépense', recette: 'Entrée diverse', transfert: 'Transfert' };
 export const ENTRY_STATUS = { active: 'Enregistrée', annulee: 'Annulée' };
 const CATEGORY_KIND = { depense: 'Dépense', recette: 'Entrée diverse' };
 const MOVEMENT_KIND = {
   ouverture: "Solde d'ouverture", encaissement: 'Encaissement', remboursement: 'Remboursement',
   depense: 'Dépense', recette: 'Entrée diverse', transfert: 'Transfert',
+  recharge: 'Recharge de carte', annulation_recharge: 'Annulation de recharge', annulation_repas: 'Annulation de repas',
 };
 
 export const DEFAULT_CATEGORIES = {
@@ -97,6 +100,9 @@ export const ledgerMethods = {
     if (!c) throw notFound('Catégorie');
     const name = input.name !== undefined ? text(input.name, 'Nom de la catégorie', { required: true, max: 60 }) : c.name;
     const active = input.active !== undefined ? flag(input.active) : !!c.active;
+    if (c.kind === 'depense' && c.name === OUTSIDE_MEAL_CATEGORY && (name !== c.name || !active)) {
+      throw conflict('CATEGORIE_PROTEGEE', `La catégorie « ${OUTSIDE_MEAL_CATEGORY} » sert aux repas commandés à l'extérieur : elle ne se renomme ni ne se désactive.`);
+    }
     if (this.get('SELECT 1 AS x FROM categories WHERE kind = ? AND name = ? AND id <> ?', c.kind, name, c.id)) {
       throw conflict('CATEGORIE_EXISTANTE', 'Cette catégorie existe déjà.');
     }
@@ -183,6 +189,9 @@ export const ledgerMethods = {
     } else {
       category = this.get('SELECT * FROM categories WHERE id = ?', toId(input.category_id, 'Catégorie'));
       if (!category || category.kind !== kind || !category.active) throw invalid('Catégorie invalide ou inactive.');
+      if (kind === 'depense' && category.name === OUTSIDE_MEAL_CATEGORY) {
+        throw invalid(`La catégorie « ${OUTSIDE_MEAL_CATEGORY} » est réservée aux repas commandés à l'extérieur.`);
+      }
       if (kind === 'depense' && input.account) {
         if (!ACCOUNTS.includes(input.account)) throw invalid('Sous-compte invalide.');
         account = input.account;
@@ -207,6 +216,14 @@ export const ledgerMethods = {
     const e = this.get('SELECT * FROM ledger_entries WHERE id = ?', toId(entryId, 'Opération'));
     if (!e) throw notFound('Opération');
     if (e.status !== 'active') throw conflict('DEJA_ANNULEE', 'Opération déjà annulée.');
+    // The courier's pay for an outside meal goes with the meal's payment: cancelled alone, it would leave the meal
+    // paid and the card debited. cancelOutsideMeal cancels both together.
+    if (e.category_id && this.get('SELECT name FROM categories WHERE id = ?', e.category_id)?.name === OUTSIDE_MEAL_CATEGORY) {
+      throw conflict(
+        'DEPENSE_REPAS',
+        "Cette dépense paie le livreur d'un repas commandé à l'extérieur : elle ne s'annule pas seule. Ouvrez la fiche du membre et cliquez sur « Annuler le repas » : la dépense et le paiement seront annulés ensemble, et la carte recréditée.",
+      );
+    }
     this.assertOpen(e.biz_date, 'Cette opération');
     const reason = text(input.reason, "Motif d'annulation", { required: true, min: 3, max: 300 });
     this.run(
@@ -227,6 +244,8 @@ export const ledgerMethods = {
       `SELECT method FROM payments UNION SELECT method FROM refunds UNION SELECT method FROM ledger_entries
        UNION SELECT to_method FROM ledger_entries WHERE to_method IS NOT NULL`,
     )) methods.add(r.method);
+    // The card's credit is no treasury account: its money came in through the till when it was recharged.
+    methods.delete(CARD_METHOD);
     return [...methods];
   },
 
@@ -240,11 +259,26 @@ export const ledgerMethods = {
     if (to < from) return flows;
     const a = this.dayStartIso(from);
     const b = this.dayStartIso(addDays(to, 1));
-    for (const r of this.all('SELECT method, SUM(amount) AS total FROM payments WHERE paid_at >= ? AND paid_at < ? GROUP BY method', a, b)) {
-      add(r.method, 'in', r.total);
+    // The part of a payment taken from the member's card is no inflow: that money came in with the recharge.
+    // A recharge counts in on its day, and out again on the day an administrator cancels it.
+    for (const r of this.all(
+      'SELECT method, SUM(amount - card_amount) AS total FROM payments WHERE paid_at >= ? AND paid_at < ? AND method <> ? GROUP BY method',
+      a, b, CARD_METHOD,
+    )) {
+      if (r.total) add(r.method, 'in', r.total);
     }
-    for (const r of this.all('SELECT method, SUM(amount) AS total FROM refunds WHERE created_at >= ? AND created_at < ? GROUP BY method', a, b)) {
+    for (const r of this.all(
+      `SELECT method, SUM(amount - card_amount) AS total FROM payments
+       WHERE kind IN ('recharge', 'repas') AND cancelled_at >= ? AND cancelled_at < ? GROUP BY method`, a, b,
+    )) {
       add(r.method, 'out', r.total);
+    }
+    // The part of a refund put back on the member's card is no outflow either.
+    for (const r of this.all(
+      'SELECT method, SUM(amount - card_amount) AS total FROM refunds WHERE created_at >= ? AND created_at < ? AND method <> ? GROUP BY method',
+      a, b, CARD_METHOD,
+    )) {
+      if (r.total) add(r.method, 'out', r.total);
     }
     for (const r of this.all(
       `SELECT kind, method, to_method, SUM(amount) AS total FROM ledger_entries
@@ -291,8 +325,8 @@ export const ledgerMethods = {
     for (const r of this.all(
       `SELECT e.category_id, c.name, e.account, SUM(e.amount) AS total FROM ledger_entries e
        JOIN categories c ON c.id = e.category_id
-       WHERE e.status = 'active' AND e.kind = 'depense' AND e.biz_date >= ? AND e.biz_date <= ?
-       GROUP BY e.category_id, e.account`, from, to,
+       WHERE e.status = 'active' AND e.kind = 'depense' AND e.biz_date >= ? AND e.biz_date <= ? AND c.name <> ?
+       GROUP BY e.category_id, e.account`, from, to, OUTSIDE_MEAL_CATEGORY,
     )) {
       expenses += r.total;
       if (r.account) byAccount[r.account] += r.total;
@@ -316,8 +350,13 @@ export const ledgerMethods = {
     };
   },
 
+  // What the members' cards hold at the end of the business day `to` (the money the club owes them in consumption).
+  walletLiabilityAt(to) {
+    return this.walletLiability(new Date(Date.parse(this.dayStartIso(addDays(to, 1))) - 1).toISOString());
+  },
+
   treasury(from, to) {
-    return { ...this.treasuryBalances(from, to), result: this.periodResult(from, to) };
+    return { ...this.treasuryBalances(from, to), result: this.periodResult(from, to), wallet_liability: this.walletLiabilityAt(to) };
   },
 
   // ---------------------------------------------------------------- general ledger
@@ -344,26 +383,78 @@ export const ledgerMethods = {
         });
       }
     }
+    // Only cash enters the book: the part of a payment taken from the card is spread over its lines in order and
+    // left out (that money came in with the recharge); a line the card paid in full has no row.
+    const cardLeft = new Map();
     for (const r of this.all(
-      `SELECT pa.id, pa.account, pa.amount, p.id AS payment_id, p.paid_at, p.method, p.reference, c.label, m.first_name, m.last_name
+      `SELECT pa.id, pa.account, pa.amount, p.id AS payment_id, p.paid_at, p.method, p.reference, p.card_amount, c.label,
+         m.first_name, m.last_name
        FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id JOIN charges c ON c.id = pa.charge_id
        JOIN members m ON m.id = p.member_id
        WHERE p.paid_at >= ? AND p.paid_at < ? ORDER BY p.paid_at, pa.id`, a, b,
     )) {
+      const left = cardLeft.get(r.payment_id) ?? r.card_amount;
+      const card = Math.min(left, r.amount);
+      cardLeft.set(r.payment_id, left - card);
+      if (card === r.amount) continue;
       rows.push({
         key: `E-${r.id}`, ...when(r.paid_at), type: 'encaissement', ref: `ENC-${r.payment_id}`, label: r.label,
-        detail: `${r.first_name} ${r.last_name}`, reference: r.reference, account: r.account, method: r.method, in: r.amount, out: 0,
+        detail: `${r.first_name} ${r.last_name}`, reference: r.reference, account: r.account, method: r.method, in: r.amount - card, out: 0,
       });
+    }
+    for (const r of this.all(
+      `SELECT p.*, m.first_name, m.last_name FROM payments p JOIN members m ON m.id = p.member_id
+       WHERE p.kind = 'recharge' AND ((p.paid_at >= ? AND p.paid_at < ?) OR (p.cancelled_at >= ? AND p.cancelled_at < ?))
+       ORDER BY p.paid_at, p.id`, a, b, a, b,
+    )) {
+      const base = { ref: `ENC-${r.id}`, reference: r.reference, account: null, method: r.method };
+      const member = `${r.first_name} ${r.last_name}`;
+      if (r.paid_at >= a && r.paid_at < b) {
+        rows.push({
+          ...base, key: `K-${r.id}`, ...when(r.paid_at), type: 'recharge', label: r.label ?? 'Recharge de la carte membre',
+          detail: member, in: r.amount, out: 0,
+        });
+      }
+      if (r.cancelled_at && r.cancelled_at >= a && r.cancelled_at < b) {
+        rows.push({
+          ...base, key: `KA-${r.id}`, ...when(r.cancelled_at), type: 'annulation_recharge', label: 'Annulation de recharge',
+          detail: `${member} — ${r.cancel_reason}`, in: 0, out: r.amount,
+        });
+      }
+    }
+    // A meal ordered outside: the cash share comes in (the courier's pay goes out as an expense entry below).
+    for (const r of this.all(
+      `SELECT p.*, m.first_name, m.last_name FROM payments p JOIN members m ON m.id = p.member_id
+       WHERE p.kind = 'repas' AND p.card_amount < p.amount
+         AND ((p.paid_at >= ? AND p.paid_at < ?) OR (p.cancelled_at >= ? AND p.cancelled_at < ?))
+       ORDER BY p.paid_at, p.id`, a, b, a, b,
+    )) {
+      const base = { ref: `ENC-${r.id}`, reference: r.reference, account: null, method: r.method };
+      const member = `${r.first_name} ${r.last_name}`;
+      if (r.paid_at >= a && r.paid_at < b) {
+        rows.push({
+          ...base, key: `M-${r.id}`, ...when(r.paid_at), type: 'encaissement', label: `Repas extérieur : ${r.label}`,
+          detail: member, in: r.amount - r.card_amount, out: 0,
+        });
+      }
+      if (r.cancelled_at && r.cancelled_at >= a && r.cancelled_at < b) {
+        rows.push({
+          ...base, key: `MA-${r.id}`, ...when(r.cancelled_at), type: 'annulation_repas', label: `Annulation du repas extérieur : ${r.label}`,
+          detail: `${member} — ${r.cancel_reason}`, in: 0, out: r.amount - r.card_amount,
+        });
+      }
     }
     for (const r of this.all(
       `SELECT rf.*, c.label, m.first_name, m.last_name FROM refunds rf
        JOIN charges c ON c.id = rf.charge_id JOIN members m ON m.id = c.member_id
        WHERE rf.created_at >= ? AND rf.created_at < ? ORDER BY rf.created_at, rf.id`, a, b,
     )) {
+      // The part put back on the card leaves no cash.
+      if (r.card_amount === r.amount) continue;
       rows.push({
         key: `R-${r.id}`, ...when(r.created_at), type: 'remboursement', ref: `RMB-${r.id}`, label: `Remboursement : ${r.label}`,
         detail: `${r.first_name} ${r.last_name} — ${r.reason}`, reference: r.reference, account: r.account, method: r.method,
-        in: 0, out: r.amount,
+        in: 0, out: r.amount - r.card_amount,
       });
     }
     for (const e of this.all(
@@ -458,7 +549,9 @@ export const ledgerMethods = {
     if (n > 0) {
       throw conflict('RESERVATIONS_OUVERTES', `${n} réservation(s) de ${monthLabel(month)} ne sont ni terminées ni annulées : traitez-les avant la clôture.`);
     }
-    const summary = { treasury: this.treasuryBalances(first, last), result: this.periodResult(first, last) };
+    const summary = {
+      treasury: this.treasuryBalances(first, last), result: this.periodResult(first, last), wallet_liability: this.walletLiabilityAt(last),
+    };
     this.run(
       'INSERT INTO closed_periods (month, closed_at, closed_by, summary) VALUES (?, ?, ?, ?)',
       month, this.nowIso(), actor.id, JSON.stringify(summary),

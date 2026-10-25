@@ -6,10 +6,12 @@
 import { AppError, invalid, forbidden, notFound, conflict } from './errors.js';
 import { searchable, smartFilter } from '../shared/search.js';
 import { text, int, toId, flag, frDate } from './validate.js';
-import { ledgerMethods, DEFAULT_CATEGORIES } from './ledger.js';
+import { ledgerMethods, DEFAULT_CATEGORIES, OUTSIDE_MEAL_CATEGORY } from './ledger.js';
 import { loungeMethods } from './lounge.js';
 import { seedDemo } from './seed.js';
-import { newTicketCode, formatTicketNumber, normalizeTicketCode, memberInitials, TICKET_CODE_LENGTH } from '../shared/ticket.js';
+import {
+  newTicketCode, formatTicketNumber, normalizeTicketCode, memberInitials, paymentLines, TICKET_CODE_LENGTH,
+} from '../shared/ticket.js';
 import { timingSafeEqual } from './auth.js';
 import { decodePhoto } from './photos.js';
 import {
@@ -17,8 +19,9 @@ import {
 } from '../shared/time.js';
 import {
   ACCOUNTS, ACCOUNT_LABELS, bookingWindow, validateHours, placeInWindow, supplementAmount, supplementDetail, fmtDuration,
-  isWeekend, minDurationFor, DEPOSIT_FROM, depositFor, formatMoney,
+  isWeekend, minDurationFor, DEPOSIT_FROM, depositFor, formatMoney, CARD_METHOD, RENEWAL_WARNING_DAYS, RENEWAL_GRACE_DAYS,
 } from '../shared/rules.js';
+import { waDigits } from '../shared/whatsapp.js';
 
 export const RES_STATUS = { reservee: 'Réservée', en_cours: 'En cours', terminee: 'Terminée', annulee: 'Annulée' };
 export const CHARGE_STATUS = { due: 'À encaisser', payee: 'Encaissée', annulee: 'Annulée', remboursee: 'Remboursée' };
@@ -38,7 +41,7 @@ const SESSION_DAYS = 14;
 // categories are kept.
 const WIPE_ORDER = [
   'humidor_readings', 'humidors',
-  'idempotency_keys', 'payment_allocations', 'refunds', 'stock_movements', 'credit_movements', 'charges',
+  'idempotency_keys', 'wallet_movements', 'payment_allocations', 'refunds', 'stock_movements', 'credit_movements', 'charges',
   'ticket_events', 'payments',
   'reservation_attendees', 'reservations', 'cards', 'subscriptions', 'members', 'product_photos', 'products',
   'ledger_entries', 'closed_periods', 'audit_log',
@@ -54,6 +57,10 @@ const DEMO_CATALOGUE_STOCK = 10;
 // The fictitious author of the demo space's records: an administrator account of the demo database
 // only. Real accounts start at id 1, so it never stands for one of them.
 export const DEMO_AUTHOR_ID = 0;
+
+// The author of what the club does on its own (the automatic renewal): no account, so every row it writes has a
+// NULL author.
+export const SYSTEM_ACTOR = { id: null, name: 'Renouvellement automatique', role: 'admin' };
 
 export function defaultSettings() {
   return {
@@ -222,10 +229,16 @@ export class Club {
         this.retireExtraRooms();
         this.run("INSERT INTO meta (key, value) VALUES ('single_room', ?)", this.nowIso());
       }
+      // The automatic renewals leave alone the subscriptions that ended before the card existed: a member whose
+      // plan lapsed long ago is not debited at the first recharge. Set once, on the first business day of the card.
+      this.run("INSERT OR IGNORE INTO meta (key, value) VALUES ('renewals_since', ?)", this.bizToday());
       if (!this.get('SELECT 1 AS x FROM categories LIMIT 1')) {
         for (const [kind, names] of Object.entries(DEFAULT_CATEGORIES)) {
           for (const name of names) this.run('INSERT INTO categories (kind, name, created_at) VALUES (?, ?, ?)', kind, name, this.nowIso());
         }
+      }
+      if (!this.get("SELECT 1 AS x FROM categories WHERE kind = 'depense' AND name = ?", OUTSIDE_MEAL_CATEGORY)) {
+        this.run("INSERT INTO categories (kind, name, created_at) VALUES ('depense', ?, ?)", OUTSIDE_MEAL_CATEGORY, this.nowIso());
       }
       this.run('DELETE FROM idempotency_keys WHERE created_at < ?', new Date(Date.now() - 7 * 86400000).toISOString());
       this.run('DELETE FROM sessions WHERE expires_at < ?', new Date().toISOString());
@@ -376,6 +389,9 @@ export class Club {
         if (!Array.isArray(v)) throw invalid('Liste des moyens de paiement invalide.');
         const list = [...new Set(v.map((x) => text(x, 'Moyen de paiement', { max: 40 })).filter(Boolean))];
         if (!list.length || list.length > 12) throw invalid('Indiquez entre 1 et 12 moyens de paiement.');
+        if (list.some((x) => x.toLowerCase() === CARD_METHOD.toLowerCase())) {
+          throw invalid(`« ${CARD_METHOD} » est le paiement par le crédit de la carte : il ne se configure pas comme un moyen de paiement.`);
+        }
         return list;
       }
       case 'opening_balances':
@@ -877,6 +893,8 @@ export class Club {
         && ['active', 'expire_bientot'].includes(subscription.state)
         && (subscription.credit?.available ?? 0) > 0,
       subscriptions, cards, reservations, charges, payments, balance_due: due,
+      wallet: this.walletDTO(m.id),
+      renewal: this.renewalStatus(m.id, today),
     };
   }
 
@@ -964,6 +982,12 @@ export class Club {
     return { state: 'aucun' };
   }
 
+  // The minutes the member can still book on the current subscription today, or null without one.
+  timeAvailable(memberId) {
+    const summary = this.subscriptionSummary(memberId, this.bizToday());
+    return ['active', 'expire_bientot'].includes(summary.state) ? summary.credit.available : null;
+  }
+
   activateSubscription(actor, memberId, input) {
     const m = this.memberRow(memberId);
     this.assertMemberActive(m, 'd’activer une formule');
@@ -1048,6 +1072,83 @@ export class Club {
     );
     this.audit(actor, 'abonnement.annuler', 'member', sub.member_id, { subscription_id: sub.id, motif: reason });
     return this.memberDetail(sub.member_id);
+  }
+
+  // What the automatic renewal would take over for a member: the latest subscription and its plan at today's price.
+  // Null when there is nothing to renew: no subscription, the latest one cancelled (cancelling stops the renewals),
+  // or a plan that could not be activated now (inactive, price undefined, or not validated outside the demo).
+  renewalBase(memberId) {
+    const sub = this.get('SELECT * FROM subscriptions WHERE member_id = ? ORDER BY start_date DESC, id DESC LIMIT 1', memberId);
+    if (!sub || sub.status !== 'active') return null;
+    // A subscription that ended before the renewals started (meta renewals_since) is never renewed nor announced.
+    const since = this.get("SELECT value FROM meta WHERE key = 'renewals_since'")?.value;
+    if (since && sub.end_date < since) return null;
+    const plan = this.get('SELECT * FROM plans WHERE id = ?', sub.plan_id);
+    if (!plan?.active || plan.price == null || (!plan.price_validated && !this.settings().demo_mode)) return null;
+    return { sub, plan };
+  }
+
+  // The renewal alert of a member, or null: 'bientot' when the subscription ends within RENEWAL_WARNING_DAYS and the
+  // card's credit will not cover the price, 'bloque' when it ended at most RENEWAL_GRACE_DAYS ago and the credit still
+  // does not (a recharge of `missing` renews it). Enough credit means no alert: the next run renews it.
+  renewalStatus(memberId, today = this.bizToday()) {
+    const m = this.memberRow(memberId);
+    const base = m.active !== 0 ? this.renewalBase(m.id) : null;
+    if (!base) return null;
+    const { sub, plan } = base;
+    const balance = this.walletBalance(m.id);
+    if (balance >= plan.price) return null;
+    const ended = sub.end_date < today;
+    const days = ended ? daysBetween(sub.end_date, today) : daysBetween(today, sub.end_date);
+    if (days > (ended ? RENEWAL_GRACE_DAYS : RENEWAL_WARNING_DAYS)) return null;
+    return {
+      state: ended ? 'bloque' : 'bientot', plan_name: plan.name, price: plan.price, balance,
+      missing: plan.price - balance, end_date: sub.end_date,
+    };
+  }
+
+  // The members whose renewal may be due on `today`: the scheduled run and the home page renew each one in its own
+  // transaction (worker/api.js), so a member whose renewal fails holds up no one.
+  renewalCandidates(today = this.bizToday()) {
+    return this.all(
+      `SELECT DISTINCT m.id FROM members m JOIN subscriptions s ON s.member_id = m.id
+       WHERE m.active = 1 AND s.status = 'active' AND s.end_date < ? AND s.end_date >= ? ORDER BY m.id`,
+      today, addDays(today, -RENEWAL_GRACE_DAYS),
+    ).map((m) => m.id);
+  }
+
+  // Renews from the card's credit, with no one at the till, the subscriptions that ended before `today` (at most
+  // RENEWAL_GRACE_DAYS ago) of every active member, or of `memberId` alone: same plan, today's price, starting
+  // today, which is the day after the end when the run is on time, else the day of the recharge that makes it
+  // possible (the member does not pay for the days without a subscription). Not enough credit: nothing is taken,
+  // the member is in `blocked`. Run by the scheduled task, after a recharge and when the home page loads; running
+  // it again changes nothing, since a renewed member's latest subscription no longer ends before today.
+  runRenewals(today = this.bizToday(), memberId = null) {
+    const result = { renewed: [], blocked: [] };
+    // A closed month takes no card movement: the renewals wait until it is reopened.
+    if (this.get('SELECT 1 AS x FROM closed_periods WHERE month = ?', this.bizToday().slice(0, 7))) return result;
+    const members = memberId != null ? [this.memberRow(memberId)] : this.renewalCandidates(today).map((id) => this.memberRow(id));
+    for (const m of members) {
+      const base = m.active !== 0 ? this.renewalBase(m.id) : null;
+      if (!base) continue;
+      const { sub, plan } = base;
+      if (sub.end_date >= today || daysBetween(sub.end_date, today) > RENEWAL_GRACE_DAYS) continue;
+      if (this.walletBalance(m.id) < plan.price) {
+        result.blocked.push(m.id);
+        continue;
+      }
+      const renewal = this.activateSubscription(SYSTEM_ACTOR, m.id, { plan_id: plan.id, start_date: today });
+      let paymentId = null;
+      if (renewal.charge_id) {
+        paymentId = this.recordPayment(SYSTEM_ACTOR, { charge_ids: [renewal.charge_id], card: true }).payment.id;
+      }
+      this.audit(SYSTEM_ACTOR, 'abonnement.renouveler_auto', 'member', m.id, {
+        subscription_id: renewal.subscription_id, formule: plan.name, debut: renewal.start_date, fin: renewal.end_date,
+        prix: plan.price, payment_id: paymentId, solde: this.walletBalance(m.id),
+      });
+      result.renewed.push(renewal.subscription_id);
+    }
+    return result;
   }
 
   adjustCredit(actor, subId, input) {
@@ -1155,6 +1256,205 @@ export class Club {
     return this.memberDetail(c.member_id);
   }
 
+  // ---------------------------------------------------------------- member card: CFA credit
+
+  walletBalance(memberId) {
+    return this.get('SELECT COALESCE(SUM(amount), 0) AS b FROM wallet_movements WHERE member_id = ?', memberId).b;
+  }
+
+  // The only way the balance changes: one dated, signed row with its author, never edited or removed. Credits
+  // (recharge, refund) are positive, debits (payment, cancelled recharge) negative, and the balance never goes
+  // below zero. `actor` may be null for a movement the club makes on its own (an automatic renewal).
+  walletMove(actor, memberId, kind, amount, { paymentId = null, refundId = null, reason = null } = {}) {
+    const credit = { recharge: true, remboursement: true, paiement: false, annulation_recharge: false }[kind];
+    if (credit === undefined || !Number.isInteger(amount) || amount === 0 || (amount > 0) !== credit) {
+      throw invalid('Mouvement de carte invalide.');
+    }
+    this.assertOpen(this.bizToday(), 'Ce mouvement de carte');
+    const balance = this.walletBalance(memberId);
+    if (balance + amount < 0) {
+      throw conflict(
+        'SOLDE_INSUFFISANT',
+        `Crédit de la carte insuffisant : ${this.money(balance)} disponibles, ${this.money(-amount)} nécessaires.`,
+        { balance, needed: -amount },
+      );
+    }
+    return this.insert(
+      `INSERT INTO wallet_movements (member_id, kind, amount, payment_id, refund_id, reason, created_at, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      memberId, kind, amount, paymentId, refundId, reason, this.nowIso(), actor?.id ?? null,
+    );
+  }
+
+  // The balance, the last recharge still standing (the scale of the card's bar) and the 50 latest movements,
+  // each with the balance it left.
+  walletDTO(memberId) {
+    const last = this.get(
+      `SELECT w.amount, w.created_at FROM wallet_movements w JOIN payments p ON p.id = w.payment_id
+       WHERE w.member_id = ? AND w.kind = 'recharge' AND p.cancelled_at IS NULL ORDER BY w.id DESC LIMIT 1`, memberId,
+    );
+    const movements = this.all(
+      `SELECT x.*, u.name AS by_name FROM (
+         SELECT w.*, SUM(w.amount) OVER (ORDER BY w.id) AS balance_after FROM wallet_movements w WHERE w.member_id = ?
+       ) x LEFT JOIN users u ON u.id = x.created_by ORDER BY x.id DESC LIMIT 50`, memberId,
+    ).map((w) => ({
+      id: w.id, kind: w.kind, amount: w.amount, balance_after: w.balance_after, at: w.created_at, by_name: w.by_name ?? null,
+      payment_id: w.payment_id, reason: w.reason,
+    }));
+    return {
+      balance: this.walletBalance(memberId),
+      last_recharge: last ? { amount: last.amount, at: last.created_at } : null,
+      movements,
+    };
+  }
+
+  // What the club owes its members in consumption at an instant: the sum of every card's balance.
+  walletLiability(atIso = this.nowIso()) {
+    return this.get('SELECT COALESCE(SUM(amount), 0) AS total FROM wallet_movements WHERE created_at <= ?', atIso).total;
+  }
+
+  paymentRow(id) {
+    return this.get(
+      `SELECT p.*, m.first_name, m.last_name, m.member_no, u.name AS created_by_name FROM payments p
+       JOIN members m ON m.id = p.member_id LEFT JOIN users u ON u.id = p.created_by WHERE p.id = ?`, id,
+    );
+  }
+
+  // Money paid at the till onto the card: a payment of its own (cash in, with its ticket), with no line, since
+  // nothing is sold yet. It becomes revenue when the card pays for something.
+  rechargeWallet(actor, memberId, input) {
+    const s = this.settings();
+    const m = this.memberRow(memberId);
+    this.assertMemberActive(m, 'de recharger sa carte');
+    const amount = int(input.amount, 'Montant de la recharge', { min: 1, max: 1e13 });
+    const method = text(input.method, 'Moyen de paiement', { required: true, max: 40 });
+    if (method === CARD_METHOD || !s.payment_methods.includes(method)) throw invalid('Moyen de paiement non configuré.');
+    const reference = text(input.reference, 'Référence', { max: 80 });
+    this.assertOpen(this.bizToday(), 'Cette recharge');
+    const paymentId = this.insert(
+      `INSERT INTO payments (member_id, amount, method, reference, paid_at, created_by, ticket_code, kind, label)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'recharge', ?)`,
+      m.id, amount, method, reference, this.nowIso(), actor.id, this.freshTicketCode(), 'Recharge de la carte membre',
+    );
+    this.walletMove(actor, m.id, 'recharge', amount, { paymentId });
+    this.audit(actor, 'carte.recharger', 'member', m.id, {
+      payment_id: paymentId, montant: amount, moyen: method, reference, solde: this.walletBalance(m.id),
+    });
+    // A subscription waiting for credit renews as soon as the recharge covers it, starting today.
+    const { renewed } = this.runRenewals(this.bizToday(), m.id);
+    return { payment: this.paymentDTO(this.paymentRow(paymentId)), wallet: this.walletDTO(m.id), renewed };
+  }
+
+  // A meal the member orders from an outside restaurant: the club pays the courier from the till (an expense
+  // under « Avance repas client », not a cost of the club) and takes the same exact amount from the member: the
+  // card pays what it can, another method the rest. A payment of its own with a ticket, no line, no revenue.
+  recordOutsideMeal(actor, memberId, input, { demo = false } = {}) {
+    const s = this.settings();
+    const m = this.memberRow(memberId);
+    this.assertMemberActive(m, 'de commander un repas');
+    const amount = int(input.amount, 'Montant du repas', { min: 1, max: 1e13 });
+    const label = text(input.label, 'Restaurant ou plat', { required: true, max: 100 });
+    const courier = text(input.courier_method, 'Livreur payé depuis', { required: true, max: 40 });
+    if (courier === CARD_METHOD || !s.payment_methods.includes(courier)) throw invalid('Moyen de paiement du livreur non configuré.');
+    const reservationId = input.reservation_id ? toId(input.reservation_id, 'Réservation') : null;
+    if (reservationId && !this.get('SELECT 1 AS x FROM reservations WHERE id = ? AND member_id = ?', reservationId, m.id)) {
+      throw invalid("Cette réservation n'est pas celle de ce membre.");
+    }
+    const reference = text(input.reference, 'Référence', { max: 80 });
+    const cardAmount = Math.min(this.walletBalance(m.id), amount);
+    let method = CARD_METHOD;
+    if (cardAmount < amount) {
+      method = text(input.rest_method, 'Moyen pour le reste', { required: true, max: 40 });
+      if (method === CARD_METHOD || !s.payment_methods.includes(method)) throw invalid('Moyen de paiement du reste non configuré.');
+    }
+    const today = this.bizToday();
+    this.assertOpen(today, 'Ce repas');
+    const category = this.get("SELECT id FROM categories WHERE kind = 'depense' AND name = ?", OUTSIDE_MEAL_CATEGORY);
+    if (!category) throw conflict('CATEGORIE_REPAS_ABSENTE', `La catégorie de dépense « ${OUTSIDE_MEAL_CATEGORY} » est introuvable : contactez l'administrateur.`);
+    const now = this.nowIso();
+    const memberName = `${m.first_name} ${m.last_name}`;
+    const paymentId = this.tx(() => {
+      const id = this.insert(
+        `INSERT INTO payments (member_id, reservation_id, amount, method, reference, paid_at, created_by, ticket_code, card_amount, kind, label)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'repas', ?)`,
+        m.id, reservationId, amount, method, reference, now, actor.id, this.freshTicketCode(), cardAmount, label,
+      );
+      // The expense carries the payment's ticket number as its reference, which is how a cancellation finds it.
+      this.insert(
+        `INSERT INTO ledger_entries (kind, biz_date, category_id, account, method, to_method, amount, label, reference,
+           status, is_demo, created_at, created_by)
+         VALUES ('depense', ?, ?, NULL, ?, NULL, ?, ?, ?, 'active', ?, ?, ?)`,
+        today, category.id, courier, amount, `Repas extérieur — ${label} — ${memberName}`, `ENC-${id}`, demo ? 1 : 0, now, actor.id,
+      );
+      if (cardAmount > 0) this.walletMove(actor, m.id, 'paiement', -cardAmount, { paymentId: id });
+      return id;
+    });
+    const wallet = this.walletDTO(m.id);
+    this.audit(actor, 'carte.repas', 'member', m.id, {
+      payment_id: paymentId, montant: amount, carte: cardAmount, reste: amount - cardAmount, moyen_reste: cardAmount < amount ? method : null,
+      livreur_paye_depuis: courier, libelle: label, reservation_id: reservationId, solde: wallet.balance,
+    });
+    return { payment: this.paymentDTO(this.paymentRow(paymentId)), wallet };
+  }
+
+  // Only an administrator cancels an outside meal, with a reason: the courier's expense is cancelled, the card
+  // part goes back on the card, and the cash share leaves the till on the day of the cancellation.
+  cancelOutsideMeal(actor, paymentId, input) {
+    if (actor.role !== 'admin') throw forbidden("L'annulation d'un repas extérieur est réservée à un administrateur.");
+    const p = this.get('SELECT * FROM payments WHERE id = ?', toId(paymentId, 'Encaissement'));
+    if (!p) throw notFound('Encaissement');
+    if (p.kind !== 'repas') throw conflict('PAS_UN_REPAS', "Cet encaissement n'est pas un repas commandé à l'extérieur.");
+    if (p.cancelled_at) throw conflict('DEJA_ANNULEE', 'Repas déjà annulé.');
+    const reason = text(input.reason, "Motif d'annulation", { required: true, min: 3, max: 300 });
+    const today = this.bizToday();
+    this.assertOpen(today, 'Cette annulation');
+    const expense = this.get(
+      `SELECT e.* FROM ledger_entries e JOIN categories c ON c.id = e.category_id
+       WHERE c.name = ? AND e.reference = ? AND e.status = 'active'`, OUTSIDE_MEAL_CATEGORY, `ENC-${p.id}`,
+    );
+    if (expense) this.assertOpen(expense.biz_date, 'Cette annulation');
+    this.tx(() => {
+      if (p.card_amount > 0) this.walletMove(actor, p.member_id, 'remboursement', p.card_amount, { paymentId: p.id, reason });
+      this.run(
+        'UPDATE payments SET cancelled_at = ?, cancelled_by = ?, cancel_reason = ? WHERE id = ?',
+        this.nowIso(), actor.id, reason, p.id,
+      );
+      if (expense) {
+        this.run(
+          "UPDATE ledger_entries SET status = 'annulee', cancelled_at = ?, cancelled_by = ?, cancel_reason = ? WHERE id = ?",
+          this.nowIso(), actor.id, reason, expense.id,
+        );
+      }
+    });
+    const wallet = this.walletDTO(p.member_id);
+    this.audit(actor, 'carte.annuler_repas', 'member', p.member_id, {
+      payment_id: p.id, montant: p.amount, carte: p.card_amount, motif: reason, solde: wallet.balance, operation_id: expense?.id ?? null,
+    });
+    return { payment: this.paymentDTO(this.paymentRow(p.id)), wallet };
+  }
+
+  // Only an administrator cancels a recharge, with a reason: the money leaves the till on the day of the
+  // cancellation, and the card is debited, which is refused once the money has been spent.
+  cancelRecharge(actor, paymentId, input) {
+    if (actor.role !== 'admin') throw forbidden("L'annulation d'une recharge est réservée à un administrateur.");
+    const p = this.get('SELECT * FROM payments WHERE id = ?', toId(paymentId, 'Encaissement'));
+    if (!p) throw notFound('Encaissement');
+    if (p.kind !== 'recharge') throw conflict('PAS_UNE_RECHARGE', "Cet encaissement n'est pas une recharge de carte.");
+    if (p.cancelled_at) throw conflict('DEJA_ANNULEE', 'Recharge déjà annulée.');
+    const reason = text(input.reason, "Motif d'annulation", { required: true, min: 3, max: 300 });
+    this.assertOpen(this.bizToday(), 'Cette annulation');
+    this.walletMove(actor, p.member_id, 'annulation_recharge', -p.amount, { paymentId: p.id, reason });
+    this.run(
+      'UPDATE payments SET cancelled_at = ?, cancelled_by = ?, cancel_reason = ? WHERE id = ?',
+      this.nowIso(), actor.id, reason, p.id,
+    );
+    const wallet = this.walletDTO(p.member_id);
+    this.audit(actor, 'carte.annuler_recharge', 'member', p.member_id, {
+      payment_id: p.id, montant: p.amount, moyen: p.method, motif: reason, solde: wallet.balance,
+    });
+    return { wallet };
+  }
+
   cardView(cardId) {
     const c = this.get('SELECT * FROM cards WHERE id = ?', toId(cardId));
     if (!c) throw notFound('Carte');
@@ -1173,7 +1473,9 @@ export class Club {
 
   // ---------------------------------------------------------------- reservations
 
-  verifyMemberRoomAccess(memberId, bizDay, { requireRemainingCredit = true } = {}) {
+  // `allowWithoutSubscription`: a member without a plan may still book when the whole time is paid with the card;
+  // there is then no plan and no time credit to return.
+  verifyMemberRoomAccess(memberId, bizDay, { requireRemainingCredit = true, allowWithoutSubscription = false } = {}) {
     const member = this.memberRow(memberId);
     const who = `${member.first_name} ${member.last_name}`;
     this.assertMemberActive(member, 'toute réservation ou entrée en salle');
@@ -1181,6 +1483,7 @@ export class Club {
       throw conflict('CARTE_DESACTIVEE', `La carte de membre de ${who} est désactivée : émettez une carte active avant l'accès en salle.`);
     }
     const sub = this.currentSubscription(member.id, bizDay);
+    if (!sub && allowWithoutSubscription) return { member, sub: null, credit: null };
     if (!sub) {
       const last = this.get(
         "SELECT * FROM subscriptions WHERE member_id = ? AND status = 'active' AND end_date < ? ORDER BY end_date DESC LIMIT 1",
@@ -1268,14 +1571,15 @@ export class Club {
       notes: r.notes, created_at: r.created_at, created_by_name: r.created_by_name ?? null,
       started_at: r.started_at, finished_at: r.finished_at, cancelled_at: r.cancelled_at, cancel_reason: r.cancel_reason,
       due_amount: r.due_amount ?? 0, billed_amount: r.billed_amount ?? 0,
-      card_credit_min: r.status === 'en_cours' ? this.cardCreditAtEntry(r) : null,
+      // Without a subscription the card carries no time: the room view counts down to the booking's end instead.
+      card_credit_min: r.status === 'en_cours' && r.subscription_id ? this.cardCreditAtEntry(r) : null,
     };
   }
 
   // Time credit the holder's card carried into a running session: the minutes this booking took from the
   // card plus what the card still has free. The room view counts it down from the arrival.
   cardCreditAtEntry(r) {
-    const sub = r.subscription_id ? this.get('SELECT * FROM subscriptions WHERE id = ?', r.subscription_id) : null;
+    const sub = this.get('SELECT * FROM subscriptions WHERE id = ?', r.subscription_id);
     const free = sub ? this.credit(sub, this.bizToday()).available : 0;
     return (r.included_minutes ?? 0) + free;
   }
@@ -1422,8 +1726,10 @@ export class Club {
     const startMs = localToUtcMs(calendarDate, input.start_time, s.timezone);
     const endMs = startMs + duration * 60000;
     const place = placeInWindow(startMs, endMs, s.timezone, win);
+    // Paying with the card lets a member without a plan book: the whole duration is then paid time.
+    const payWithCard = flag(input.pay_with_card);
     const { sub, credit } = this.verifyMemberRoomAccess(member.id, place.bizDay, {
-      requireRemainingCredit: flag(input.require_credit),
+      requireRemainingCredit: flag(input.require_credit), allowWithoutSubscription: payWithCard,
     });
 
     if (input.attendee_ids !== undefined && (!Array.isArray(input.attendee_ids) || input.attendee_ids.length > 200)) {
@@ -1450,7 +1756,7 @@ export class Club {
       : int(input.party_size, 'Nombre de personnes', { min: 1, max: 200 });
     this.validateOccupancy(room, partySize, 1 + extraAttendees.length);
 
-    const included = Math.min(credit.available, duration);
+    const included = credit ? Math.min(credit.available, duration) : 0;
     const paid = duration - included;
     const tariff = s.overtime_tariff;
     const allOverlaps = this.overlapping(startMs, endMs, null);
@@ -1470,7 +1776,7 @@ export class Club {
     }));
     return {
       member, sub, room, partySize, extraAttendees, credit, startMs, endMs, duration, place, included, paid,
-      supplement: supplementAmount(paid, tariff), tariff,
+      supplement: supplementAmount(paid, tariff), tariff, payWithCard,
       conflicts,
       gap_conflicts: near.get(room.id),
       rooms_availability: roomsAvailability,
@@ -1483,7 +1789,7 @@ export class Club {
     const tz = s.timezone;
     return {
       member: { id: p.member.id, name: `${p.member.first_name} ${p.member.last_name}`, member_no: p.member.member_no },
-      subscription: { id: p.sub.id, plan_name: p.sub.plan_name, end_date: p.sub.end_date },
+      subscription: p.sub ? { id: p.sub.id, plan_name: p.sub.plan_name, end_date: p.sub.end_date } : null,
       room: this.roomDTO(p.room),
       party_size: p.partySize,
       extra_attendees: p.extraAttendees.map((a) => ({
@@ -1500,8 +1806,9 @@ export class Club {
       end_next_day: p.place.endRel > 1440,
       duration_min: p.duration,
       credit_before: p.credit, included_minutes: p.included, paid_minutes: p.paid,
-      credit_after: p.credit.available - p.included,
+      credit_after: p.credit ? p.credit.available - p.included : null,
       supplement_amount: p.supplement, supplement_detail: supplementDetail(p.paid),
+      ...this.cardQuote(p.member.id, p.payWithCard ? p.supplement : 0, p.supplement),
       tariff: { hour: p.tariff.hour, half: p.tariff.half, validated: !!p.tariff.validated },
       tariff_blocked: p.paid > 0 && !p.tariff.validated && !s.demo_mode,
       deposit_amount: depositFor(p.duration, p.supplement),
@@ -1522,10 +1829,13 @@ export class Club {
     if (p.paid > 0 && !p.tariff.validated && !s.demo_mode) {
       throw conflict('TARIF_NON_VALIDE', "Le tarif des heures supplémentaires n'a pas été validé par un administrateur.");
     }
-    // 3 hours or more with paid time: half of it is taken now, or the booking is not recorded.
+    // 3 hours or more with paid time: half of it is taken now, or the booking is not recorded. With the card, its
+    // balance takes the paid time now; `deposit_method` then pays what the card cannot.
     const deposit = depositFor(p.duration, p.supplement);
-    const depositMethod = deposit ? text(input.deposit_method, "Moyen de paiement de l'acompte", { max: 40 }) : null;
-    if (deposit && !depositMethod) {
+    const payWithCard = p.payWithCard && p.supplement > 0;
+    const depositMethod = deposit || payWithCard ? text(input.deposit_method, "Moyen de paiement de l'acompte", { max: 40 }) : null;
+    const cardTakesDeposit = payWithCard && this.walletBalance(p.member.id) >= deposit;
+    if (deposit && !depositMethod && !cardTakesDeposit) {
       throw invalid(
         `Une réservation de 3 h ou plus se confirme par un acompte de ${this.money(deposit)} (50 % du temps payant), à encaisser maintenant.`,
         'ACOMPTE_REQUIS',
@@ -1544,7 +1854,7 @@ export class Club {
            included_minutes, paid_minutes, supplement_amount, tariff_hour, tariff_half, tariff_validated, deposit_amount,
            notes, created_at, created_by, started_at, started_by)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        p.member.id, p.sub.id, p.room.id, p.partySize, p.place.bizDay, p.startMs, p.endMs, p.duration, initialStatus,
+        p.member.id, p.sub?.id ?? null, p.room.id, p.partySize, p.place.bizDay, p.startMs, p.endMs, p.duration, initialStatus,
         p.included, p.paid, p.supplement, p.tariff.hour, p.tariff.half, p.tariff.validated ? 1 : 0, deposit,
         notes, this.nowIso(), actor.id, startedAt, startedBy,
       );
@@ -1552,7 +1862,7 @@ export class Club {
       if (String(err.message).includes('CHEVAUCHEMENT')) throw this.overlapError(this.overlapping(p.startMs, p.endMs, null, p.room.id), p.room.name);
       throw err;
     }
-    this.creditMove(actor, p.sub.id, id, 'engagement', p.included, 'Réservation confirmée');
+    if (p.sub) this.creditMove(actor, p.sub.id, id, 'engagement', p.included, 'Réservation confirmée');
     for (const att of p.extraAttendees) {
       this.insert(
         'INSERT INTO reservation_attendees (reservation_id, member_id, subscription_id, included_minutes, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?)',
@@ -1561,29 +1871,62 @@ export class Club {
       this.creditMove(actor, att.sub.id, id, 'engagement', att.included, `Présence en salle (${p.room.name})`);
     }
     // Paid time is one line, or two when a deposit is due: the deposit (paid now) and the balance
-    // (paid before entering the room, or now as well when the member goes straight in).
+    // (paid before entering the room, or now as well when the member goes straight in). Paid with the card,
+    // every line is paid now, after the audit of the booking.
     const paidNow = [];
-    if (p.supplement > 0) {
-      const line = {
-        account: 'reservations', kind: 'temps_supplementaire', member_id: p.member.id, reservation_id: id,
-        quantity: 1, tariff_validated: p.tariff.validated ? 1 : 0,
-      };
-      if (deposit) {
-        paidNow.push(this.insertCharge(actor, { ...line, label: `Acompte 50 % — temps supplémentaire (${fmtDuration(p.paid)})`, unit_price: deposit, deposit: 1 }));
-        const balanceId = this.insertCharge(actor, { ...line, label: `Solde 50 % — temps supplémentaire (${fmtDuration(p.paid)})`, unit_price: p.supplement - deposit });
-        if (startNow) paidNow.push(balanceId);
-      } else {
-        this.insertCharge(actor, { ...line, label: `Temps supplémentaire (${fmtDuration(p.paid)})`, unit_price: p.supplement });
-      }
+    const line = {
+      account: 'reservations', kind: 'temps_supplementaire', member_id: p.member.id, reservation_id: id,
+      quantity: 1, tariff_validated: p.tariff.validated ? 1 : 0,
+    };
+    const timeLines = !(p.supplement > 0) ? [] : deposit
+      ? [
+        { label: `Acompte 50 % — temps supplémentaire (${fmtDuration(p.paid)})`, unit_price: deposit, deposit: 1 },
+        { label: `Solde 50 % — temps supplémentaire (${fmtDuration(p.paid)})`, unit_price: p.supplement - deposit },
+      ]
+      : [{ label: `Temps supplémentaire (${fmtDuration(p.paid)})`, unit_price: p.supplement }];
+    if (!payWithCard) {
+      const ids = timeLines.map((l) => this.insertCharge(actor, { ...line, ...l }));
+      if (deposit) paidNow.push(...(startNow ? ids : ids.slice(0, 1)));
     }
     this.audit(actor, 'reservation.creer', 'reservation', id, {
       membre: `${p.member.first_name} ${p.member.last_name}`, salle: p.room.name, personnes: p.partySize,
       accompagnants: p.extraAttendees.map((a) => `${a.member.first_name} ${a.member.last_name}`),
       debut: new Date(p.startMs).toISOString(), duree: p.duration,
-      minutes_incluses: p.included, minutes_payantes: p.paid, supplement: p.supplement, acompte: deposit,
+      minutes_incluses: p.included, minutes_payantes: p.paid, supplement: p.supplement, acompte: deposit, carte: payWithCard,
     });
+    if (payWithCard) this.insertTimeLinesPaidByCard(actor, line, timeLines, { method: depositMethod, reference: input.deposit_reference });
     if (paidNow.length) this.recordPayment(actor, { charge_ids: paidNow, method: depositMethod, reference: input.deposit_reference });
     return this.reservationDetail(id);
+  }
+
+  // The card's balance and what it would pay of `payable` (the paid time, when the card pays it) out of `total`.
+  cardQuote(memberId, payable, total) {
+    const balance = this.walletBalance(memberId);
+    const card = Math.min(balance, payable);
+    return { card_balance: balance, card_amount: card, rest_amount: total - card };
+  }
+
+  // Inserts a booking's paid-time lines (`specs` in order, each completing `base`) and pays them with the card.
+  // With `method`, the card pays what it can and the method the rest. Without one, what the card cannot cover is
+  // left to collect: the line where the balance runs out is split into the part paid by the card and the part
+  // left to collect, so that each line is either paid or due (quantity 1, amount = unit price).
+  insertTimeLinesPaidByCard(actor, base, specs, { method = null, reference = null } = {}) {
+    const total = specs.reduce((sum, l) => sum + l.unit_price, 0);
+    let left = method ? total : Math.min(this.walletBalance(base.member_id), total);
+    const paidIds = [];
+    for (const l of specs) {
+      if (left >= l.unit_price) {
+        paidIds.push(this.insertCharge(actor, { ...base, ...l }));
+        left -= l.unit_price;
+      } else if (left > 0) {
+        paidIds.push(this.insertCharge(actor, { ...base, ...l, label: `${l.label} — payé par carte`, unit_price: left }));
+        this.insertCharge(actor, { ...base, ...l, label: `${l.label} — reste à encaisser`, unit_price: l.unit_price - left });
+        left = 0;
+      } else {
+        this.insertCharge(actor, { ...base, ...l });
+      }
+    }
+    if (paidIds.length) this.recordPayment(actor, { charge_ids: paidIds, card: true, method, reference });
   }
 
   addReservationAttendee(actor, id, input) {
@@ -1673,9 +2016,10 @@ export class Club {
     if (r.duration_min + add > 1440) throw invalid('Une séance ne peut pas dépasser 24 heures.', 'DUREE_MAXIMALE');
     const newEnd = r.end_ms + add * 60000;
     const place = placeInWindow(r.start_ms, newEnd, s.timezone, win);
-    const sub = this.get('SELECT * FROM subscriptions WHERE id = ?', r.subscription_id);
-    const credit = this.credit(sub, r.biz_day);
-    const addIncluded = sub.status === 'active' ? Math.min(credit.available, add) : 0;
+    // A booking without a plan (paid with the card) has no credit: all of the extension is paid time.
+    const sub = r.subscription_id ? this.get('SELECT * FROM subscriptions WHERE id = ?', r.subscription_id) : null;
+    const credit = sub ? this.credit(sub, r.biz_day) : null;
+    const addIncluded = sub?.status === 'active' ? Math.min(credit.available, add) : 0;
     const addPaid = add - addIncluded;
     // Confirmed services keep the tariff they were booked with.
     const tariff = { hour: r.tariff_hour, half: r.tariff_half, validated: !!r.tariff_validated };
@@ -1701,9 +2045,10 @@ export class Club {
       reservation_id: p.r.id, minutes: p.add,
       new_end_at: new Date(p.newEnd).toISOString(), new_end_time: localParts(p.newEnd, s.timezone).time,
       end_next_day: p.place.endRel > 1440,
-      credit_available: p.credit.available, included_minutes: p.addIncluded, paid_minutes: p.addPaid,
+      credit_available: p.credit?.available ?? 0, included_minutes: p.addIncluded, paid_minutes: p.addPaid,
       total_paid_minutes: p.newPaid, supplement_before: p.r.supplement_amount, supplement_after: p.newSupplement,
       supplement_delta: p.delta, tariff: p.tariff,
+      ...this.cardQuote(p.r.member_id, flag(input.pay_with_card) ? Math.max(p.delta, 0) : 0, Math.max(p.delta, 0)),
       tariff_blocked: p.addPaid > 0 && !p.tariff.validated && !s.demo_mode,
       conflicts: p.conflicts,
       gap_conflicts: p.gap_conflicts,
@@ -1730,6 +2075,11 @@ export class Club {
     const p = this.planExtension(id, input.minutes);
     const refusal = this.extensionRefusal(p);
     if (refusal) throw refusal;
+    // Without a plan the extension is paid with the card, as the booking was.
+    const payWithCard = flag(input.pay_with_card);
+    if (!p.r.subscription_id && !payWithCard) {
+      throw conflict('ABONNEMENT_INVALIDE', `${p.r.first_name} ${p.r.last_name} n'a pas d'abonnement : la prolongation se paie avec la carte.`);
+    }
     try {
       this.run(
         `UPDATE reservations SET end_ms = ?, duration_min = duration_min + ?, included_minutes = included_minutes + ?,
@@ -1755,15 +2105,22 @@ export class Club {
       }
     }
     if (p.delta > 0) {
-      this.insertCharge(actor, {
+      const line = {
         account: 'reservations', kind: 'temps_supplementaire', member_id: p.r.member_id, reservation_id: p.r.id,
-        label: `Prolongation +${fmtDuration(p.add)} (temps supplémentaire)`, quantity: 1, unit_price: p.delta,
-        tariff_validated: p.tariff.validated ? 1 : 0,
-      });
+        quantity: 1, tariff_validated: p.tariff.validated ? 1 : 0,
+      };
+      const extra = { label: `Prolongation +${fmtDuration(p.add)} (temps supplémentaire)`, unit_price: p.delta };
+      if (payWithCard) {
+        this.insertTimeLinesPaidByCard(actor, line, [extra], {
+          method: text(input.method, 'Moyen de paiement', { max: 40 }), reference: input.reference,
+        });
+      } else {
+        this.insertCharge(actor, { ...line, ...extra });
+      }
     }
     this.audit(actor, 'reservation.prolonger', 'reservation', p.r.id, {
       minutes: p.add, ancienne_fin: new Date(p.r.end_ms).toISOString(), nouvelle_fin: new Date(p.newEnd).toISOString(),
-      minutes_incluses: p.addIncluded, minutes_payantes: p.addPaid, supplement_ajoute: p.delta,
+      minutes_incluses: p.addIncluded, minutes_payantes: p.addPaid, supplement_ajoute: p.delta, carte: payWithCard,
     });
     return this.reservationDetail(p.r.id);
   }
@@ -1857,8 +2214,9 @@ export class Club {
     if (!['reservee', 'en_cours'].includes(r.status)) {
       throw conflict('STATUT', `Impossible de terminer une réservation au statut « ${RES_STATUS[r.status]} ».`);
     }
-    const open = this.committedFor(r.id, r.subscription_id);
-    this.creditMove(actor, r.subscription_id, r.id, 'consommation', open, 'Réservation terminée');
+    // A booking without a plan has no minutes of its holder to consume.
+    const open = r.subscription_id ? this.committedFor(r.id, r.subscription_id) : 0;
+    if (open) this.creditMove(actor, r.subscription_id, r.id, 'consommation', open, 'Réservation terminée');
     for (const att of this.all('SELECT * FROM reservation_attendees WHERE reservation_id = ?', r.id)) {
       const attOpen = this.committedFor(r.id, att.subscription_id);
       this.creditMove(actor, att.subscription_id, r.id, 'consommation', attOpen, 'Réservation terminée (présence en salle)');
@@ -1879,8 +2237,9 @@ export class Club {
         : `Impossible d'annuler une réservation au statut « ${RES_STATUS[r.status]} ».`);
     }
     // A booking of 3 hours or more can be cancelled until midnight before its business day. On the
-    // day, only the member's absence can be recorded; either way the deposit stays with the club,
-    // the balance is cancelled and the credit hours are released.
+    // day, only the member's absence can be recorded; either way the deposit stays with the club, however
+    // it was paid, the balance is cancelled and the credit hours are released. Room time paid with the
+    // card goes back to the card.
     const late = this.isLateForCancellation(r);
     const absence = flag(input.no_show);
     if (late && !absence) {
@@ -1892,8 +2251,8 @@ export class Club {
     if (absence && !late) throw invalid("L'absence s'enregistre le jour de la séance ; avant, annulez la réservation.");
     const reason = text(input.reason, absence ? "Motif de l'absence" : "Motif d'annulation", { required: true, min: 3, max: 300 });
     const what = absence ? 'Absence' : 'Annulation';
-    const released = this.committedFor(r.id, r.subscription_id);
-    this.creditMove(actor, r.subscription_id, r.id, 'liberation', released, `${what} : ${reason}`);
+    const released = r.subscription_id ? this.committedFor(r.id, r.subscription_id) : 0;
+    if (released) this.creditMove(actor, r.subscription_id, r.id, 'liberation', released, `${what} : ${reason}`);
     for (const att of this.all('SELECT * FROM reservation_attendees WHERE reservation_id = ?', r.id)) {
       const attReleased = this.committedFor(r.id, att.subscription_id);
       this.creditMove(actor, att.subscription_id, r.id, 'liberation', attReleased, `${what} : ${reason}`);
@@ -1901,18 +2260,36 @@ export class Club {
     const due = this.all("SELECT * FROM charges WHERE reservation_id = ? AND status = 'due'", r.id);
     for (const c of due) this.voidCharge(actor, c, `${what} de la réservation : ${reason}`);
     const paid = this.all("SELECT * FROM charges WHERE reservation_id = ? AND status = 'payee'", r.id);
-    const depositKept = paid.filter((c) => c.deposit).reduce((sum, c) => sum + c.amount, 0);
+    // Room time the card paid goes back to the card, except the deposit, which stays with the club whichever way
+    // it was paid. A line paid partly in cash, and any product, stays paid, for a refund at the till as before
+    // (which restocks it and follows its own rules).
+    const toCard = [];
+    for (const c of paid) {
+      if (c.deposit || c.kind !== 'temps_supplementaire') continue;
+      const { payment, cardPart } = this.cardPartOf(c);
+      if (cardPart !== c.amount) continue;
+      this.writeRefund(actor, c, payment, cardPart, { method: CARD_METHOD, reason: `${what} de la réservation : ${reason}` });
+      toCard.push(c);
+    }
+    const backToCard = toCard.reduce((sum, c) => sum + c.amount, 0);
+    if (toCard.length) {
+      this.audit(actor, 'carte.rembourser', 'member', r.member_id, {
+        reservation_id: r.id, charge_ids: toCard.map((c) => c.id), montant: backToCard, motif: reason, solde: this.walletBalance(r.member_id),
+      });
+    }
+    const kept = paid.filter((c) => !toCard.includes(c));
+    const depositKept = kept.filter((c) => c.deposit).reduce((sum, c) => sum + c.amount, 0);
     this.run(
       "UPDATE reservations SET status = 'annulee', cancelled_at = ?, cancelled_by = ?, cancel_reason = ?, updated_at = ?, updated_by = ? WHERE id = ?",
       this.nowIso(), actor.id, absence ? `Absence : ${reason}` : reason, this.nowIso(), actor.id, r.id,
     );
     this.audit(actor, absence ? 'reservation.absence' : 'reservation.annuler', 'reservation', r.id, {
       motif: reason, minutes_liberees: released, lignes_annulees: due.length, lignes_deja_encaissees: paid.length,
-      acompte_conserve: depositKept,
+      acompte_conserve: depositKept, rembourse_carte: backToCard,
     });
     return {
-      ...this.reservationDetail(r.id), released_minutes: released, deposit_kept: depositKept,
-      paid_lines_to_review: paid.filter((c) => !c.deposit).length,
+      ...this.reservationDetail(r.id), released_minutes: released, deposit_kept: depositKept, refunded_to_card: backToCard,
+      paid_lines_to_review: kept.filter((c) => !c.deposit).length,
     };
   }
 
@@ -1947,10 +2324,10 @@ export class Club {
       if (c.status === 'due') t.due += c.amount;
       if (c.status === 'remboursee') t.refunded += c.amount;
     }
-    const sub = this.get('SELECT * FROM subscriptions WHERE id = ?', r.subscription_id);
+    const sub = r.subscription_id ? this.get('SELECT * FROM subscriptions WHERE id = ?', r.subscription_id) : null;
     return {
       reservation: this.reservationDTO(r),
-      subscription: this.subscriptionDTO(sub, this.bizToday()),
+      subscription: sub ? this.subscriptionDTO(sub, this.bizToday()) : null,
       charges, payments, credit_movements, history, totals,
       extension_window: this.extensionWindow(r.id),
       // What the WhatsApp confirmation to the booking's holder is addressed from. They are in this detail only:
@@ -2114,6 +2491,8 @@ export class Club {
       id: p.id, member_id: p.member_id, member_name: p.first_name ? `${p.first_name} ${p.last_name}` : undefined,
       member_no: p.member_no, reservation_id: p.reservation_id, amount: p.amount, method: p.method, reference: p.reference,
       paid_at: p.paid_at, ticket_code: p.ticket_code ?? null, created_by_name: p.created_by_name ?? null, allocations, by_account: byAccount,
+      kind: p.kind ?? 'encaissement', card_amount: p.card_amount ?? 0, label: p.label ?? null,
+      cancelled_at: p.cancelled_at ?? null, cancel_reason: p.cancel_reason ?? null,
     };
   }
 
@@ -2133,32 +2512,47 @@ export class Club {
       }
     }
     if (new Set(charges.map((c) => c.member_id)).size > 1) throw invalid("Un encaissement ne peut concerner qu'un seul membre.");
-    const method = text(input.method, 'Moyen de paiement', { required: true, max: 40 });
-    if (!s.payment_methods.includes(method)) throw invalid('Moyen de paiement non configuré.');
+    const memberId = charges[0].member_id;
+    const total = charges.reduce((sum, c) => sum + c.amount, 0);
+    // With the card, its credit pays as much of the note as it can; the rest goes through the chosen method,
+    // which is only required when something is left. A note the card covers in full is paid by CARD_METHOD.
+    const cardAmount = flag(input.card) ? Math.min(this.walletBalance(memberId), total) : 0;
+    let method = CARD_METHOD;
+    if (cardAmount < total) {
+      method = text(input.method, 'Moyen de paiement', { required: true, max: 40 });
+      if (!s.payment_methods.includes(method)) throw invalid('Moyen de paiement non configuré.');
+    }
     const reference = text(input.reference, 'Référence', { max: 80 });
     if (!s.demo_mode && charges.some((c) => !c.tariff_validated)) {
       throw conflict('TARIF_NON_VALIDE', 'Une des lignes repose sur un tarif non validé par un administrateur.');
     }
     this.assertOpen(this.bizToday(), 'Cet encaissement');
-    const total = charges.reduce((sum, c) => sum + c.amount, 0);
     const reservationIds = new Set(charges.map((c) => c.reservation_id));
     const reservationId = reservationIds.size === 1 ? [...reservationIds][0] : null;
     const paymentId = this.insert(
-      'INSERT INTO payments (member_id, reservation_id, amount, method, reference, paid_at, created_by, ticket_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      charges[0].member_id, reservationId, total, method, reference, this.nowIso(), actor.id, this.freshTicketCode(),
+      `INSERT INTO payments (member_id, reservation_id, amount, method, reference, paid_at, created_by, ticket_code, card_amount)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      memberId, reservationId, total, method, reference, this.nowIso(), actor.id, this.freshTicketCode(), cardAmount,
     );
     for (const c of charges) {
       this.run('INSERT INTO payment_allocations (payment_id, charge_id, account, amount) VALUES (?, ?, ?, ?)', paymentId, c.id, c.account, c.amount);
       const res = this.run("UPDATE charges SET status = 'payee' WHERE id = ? AND status = 'due'", c.id);
       if (res.changes !== 1) throw conflict('DEJA_TRAITEE', `La ligne « ${c.label} » a été traitée entre-temps.`);
     }
+    if (cardAmount > 0) {
+      // walletMove reads the balance again and refuses to take the card below zero.
+      this.walletMove(actor, memberId, 'paiement', -cardAmount, { paymentId });
+      this.audit(actor, 'carte.payer', 'member', memberId, {
+        payment_id: paymentId, montant: cardAmount, total, reste: total - cardAmount, solde: this.walletBalance(memberId),
+      });
+    }
     const payment = this.paymentDTO(this.get(
       `SELECT p.*, m.first_name, m.last_name, m.member_no, u.name AS created_by_name FROM payments p
        JOIN members m ON m.id = p.member_id LEFT JOIN users u ON u.id = p.created_by WHERE p.id = ?`, paymentId,
     ));
-    const details = { payment_id: paymentId, montant: total, moyen: method, reference, ventilation: payment.by_account };
+    const details = { payment_id: paymentId, montant: total, moyen: method, reference, ventilation: payment.by_account, carte: cardAmount };
     if (reservationId) this.audit(actor, 'paiement.enregistrer', 'reservation', reservationId, details);
-    else this.audit(actor, 'paiement.enregistrer', 'member', charges[0].member_id, details);
+    else this.audit(actor, 'paiement.enregistrer', 'member', memberId, details);
     return { payment };
   }
 
@@ -2168,24 +2562,44 @@ export class Club {
     const c = this.get('SELECT * FROM charges WHERE id = ?', toId(chargeId, 'Ligne'));
     if (!c) throw notFound('Ligne');
     if (c.status !== 'payee') throw conflict('STATUT_LIGNE', 'Seule une ligne encaissée peut être remboursée.');
-    const alloc = this.get('SELECT * FROM payment_allocations WHERE charge_id = ?', c.id);
     const reason = text(input.reason, 'Motif du remboursement', { required: true, min: 3, max: 300 });
-    const method = text(input.method, 'Moyen de remboursement', { required: true, max: 40 });
-    if (!s.payment_methods.includes(method)) throw invalid('Moyen de paiement non configuré.');
+    const { payment: p, cardPart } = this.cardPartOf(c);
+    let method = CARD_METHOD;
+    if (cardPart < c.amount) {
+      method = text(input.method, 'Moyen de remboursement', { required: true, max: 40 });
+      if (!s.payment_methods.includes(method)) throw invalid('Moyen de paiement non configuré.');
+    }
     const reference = text(input.reference, 'Référence', { max: 80 });
-    this.assertOpen(this.bizToday(), 'Ce remboursement');
     const restock = !!c.product_id && flag(input.restock);
-    const refundId = this.insert(
-      `INSERT INTO refunds (charge_id, payment_id, account, amount, method, reference, reason, restocked, created_at, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      c.id, alloc.payment_id, c.account, c.amount, method, reference, reason, restock ? 1 : 0, this.nowIso(), actor.id,
-    );
-    this.run("UPDATE charges SET status = 'remboursee' WHERE id = ?", c.id);
-    if (restock) this.moveStock(actor, c.product_id, c.quantity, 'retour', { chargeId: c.id, reason });
+    const refundId = this.writeRefund(actor, c, p, cardPart, { method, reference, reason, restock });
     this.audit(actor, 'ligne.rembourser', c.reservation_id ? 'reservation' : 'member', c.reservation_id ?? c.member_id, {
       refund_id: refundId, charge_id: c.id, libelle: c.label, montant: c.amount, sous_compte: c.account, motif: reason, remis_en_stock: restock,
+      carte: cardPart,
     });
     return c.reservation_id ? this.reservationDetail(c.reservation_id) : this.memberDetail(c.member_id);
+  }
+
+  // The part of a paid line its payment took from the card and has not given back yet: the card part of a
+  // payment goes back to the card first (its money is never handed out in cash), line after line in refund order.
+  cardPartOf(c) {
+    const alloc = this.get('SELECT * FROM payment_allocations WHERE charge_id = ?', c.id);
+    const payment = this.paymentRow(alloc.payment_id);
+    const cardRefunded = this.get('SELECT COALESCE(SUM(card_amount), 0) AS n FROM refunds WHERE payment_id = ?', payment.id).n;
+    return { payment, cardPart: Math.max(0, Math.min(c.amount, payment.card_amount - cardRefunded)) };
+  }
+
+  // Refunds a paid line in full: `cardPart` back onto the card, the rest out of the till through `method`.
+  writeRefund(actor, c, payment, cardPart, { method, reference = null, reason, restock = false }) {
+    this.assertOpen(this.bizToday(), 'Ce remboursement');
+    const refundId = this.insert(
+      `INSERT INTO refunds (charge_id, payment_id, account, amount, method, reference, reason, restocked, created_at, created_by, card_amount)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      c.id, payment.id, c.account, c.amount, method, reference, reason, restock ? 1 : 0, this.nowIso(), actor.id, cardPart,
+    );
+    if (cardPart > 0) this.walletMove(actor, payment.member_id, 'remboursement', cardPart, { paymentId: payment.id, refundId, reason });
+    this.run("UPDATE charges SET status = 'remboursee' WHERE id = ?", c.id);
+    if (restock) this.moveStock(actor, c.product_id, c.quantity, 'retour', { chargeId: c.id, reason });
+    return refundId;
   }
 
   // ---------------------------------------------------------------- cash receipt (ticket de caisse)
@@ -2199,16 +2613,31 @@ export class Club {
     ) ?? null;
   }
 
-  // « valide » without refund, « rembourse » when every line of the payment is refunded, else partial.
-  ticketStatus(paymentId) {
-    const lines = this.get('SELECT COUNT(*) AS n FROM payment_allocations WHERE payment_id = ?', paymentId).n;
-    const refunds = this.get('SELECT COUNT(*) AS n FROM refunds WHERE payment_id = ?', paymentId).n;
+  // « annule » for a cancelled recharge or meal, « valide » without refund, « rembourse » when every line of the
+  // payment is refunded, else partial.
+  ticketStatus(p) {
+    if (p.cancelled_at) return 'annule';
+    const lines = this.get('SELECT COUNT(*) AS n FROM payment_allocations WHERE payment_id = ?', p.id).n;
+    const refunds = this.get('SELECT COUNT(*) AS n FROM refunds WHERE payment_id = ?', p.id).n;
     if (!refunds) return 'valide';
     return refunds >= lines ? 'rembourse' : 'partiellement_rembourse';
   }
 
-  // The receipt for the staff: the payment, its refunds, the next copy number and the club's texts. Only an
-  // administrator also gets the list of copies already given out.
+  // The card's balance right after this payment, as its receipt prints it: the member's movements up to the
+  // payment's own (a later refund or cancellation of it comes after). A recharge or meal that did not move the
+  // card shows the balance at that instant; a payment the card had no part in shows none (null).
+  balanceAfterPayment(p) {
+    const own = this.get('SELECT MIN(id) AS id FROM wallet_movements WHERE payment_id = ?', p.id).id;
+    if (own !== null) {
+      return this.get('SELECT COALESCE(SUM(amount), 0) AS n FROM wallet_movements WHERE member_id = ? AND id <= ?', p.member_id, own).n;
+    }
+    if ((p.kind ?? 'encaissement') === 'encaissement') return null;
+    return this.get('SELECT COALESCE(SUM(amount), 0) AS n FROM wallet_movements WHERE member_id = ? AND created_at <= ?', p.member_id, p.paid_at).n;
+  }
+
+  // The receipt for the staff: the payment, its refunds, the next copy number and the club's texts, and for the
+  // card the balance it left, the member's time credit now and whether the member signs. A movement made by
+  // the automatic renewal (no author) is not signed. Only an administrator also gets the copies given out.
   ticketFor(actor, id) {
     const p = this.ticketPaymentRow(id);
     if (!p) throw notFound('Paiement');
@@ -2219,9 +2648,13 @@ export class Club {
       ...this.paymentDTO(p),
       number: formatTicketNumber(p.id),
       member_phone: p.member_phone ?? '',
+      member_first_name: p.first_name,
       refunded_amount: refunds.reduce((sum, r) => sum + r.amount, 0),
       refunds,
-      status: this.ticketStatus(p.id),
+      status: this.ticketStatus(p),
+      wallet_balance_after: this.balanceAfterPayment(p),
+      time_available: this.timeAvailable(p.member_id),
+      signature_required: (p.card_amount > 0 || (p.kind ?? 'encaissement') !== 'encaissement') && p.created_by !== null,
       next_copy_no: last + 1,
       header: s.ticket_header,
       footer: s.ticket_footer,
@@ -2266,10 +2699,16 @@ export class Club {
     const valid = Boolean(p) && given.length === TICKET_CODE_LENGTH && p.ticket_code?.length === TICKET_CODE_LENGTH;
     const stored = encoder.encode(valid ? p.ticket_code : '0'.repeat(given.length));
     if (!timingSafeEqual(given, stored) || !valid) return null;
-    const lines = this.all(
-      `SELECT c.label, c.quantity, pa.amount FROM payment_allocations pa JOIN charges c ON c.id = pa.charge_id
-       WHERE pa.payment_id = ? ORDER BY pa.id`, p.id,
-    );
+    const lines = paymentLines({
+      kind: p.kind,
+      // A meal's label is free text typed by the staff (a restaurant, a dish): the public page names neither.
+      label: p.kind === 'repas' ? 'Repas commandé à l’extérieur' : p.label,
+      amount: p.amount,
+      allocations: this.all(
+        `SELECT c.label, c.quantity, pa.amount FROM payment_allocations pa JOIN charges c ON c.id = pa.charge_id
+         WHERE pa.payment_id = ? ORDER BY pa.id`, p.id,
+      ),
+    });
     const refunded = this.get('SELECT COALESCE(SUM(amount), 0) AS n FROM refunds WHERE payment_id = ?', p.id).n;
     const s = this.settings();
     return {
@@ -2283,7 +2722,7 @@ export class Club {
       total: p.amount,
       method: p.method,
       initials: memberInitials(p.first_name, p.last_name),
-      status: this.ticketStatus(p.id),
+      status: this.ticketStatus(p),
       refunded_amount: refunded,
     };
   }
@@ -2584,6 +3023,7 @@ export class Club {
 
   // ---------------------------------------------------------------- dashboard & finance
 
+  // Reads only: the renewals due today run before it, member by member (worker/api.js).
   dashboard(actor) {
     const s = this.settings();
     const now = this.nowMs();
@@ -2626,6 +3066,17 @@ export class Club {
          AND NOT EXISTS (SELECT 1 FROM subscriptions n WHERE n.member_id = s.member_id AND n.status = 'active' AND n.start_date > s.end_date)
        ORDER BY s.end_date DESC`, today, addDays(today, -30),
     ).map((x) => ({ ...x, member_name: `${x.first_name} ${x.last_name}`, days_since: daysBetween(x.end_date, today) }));
+    const renewalAlerts = this.all(
+      `SELECT DISTINCT m.* FROM members m JOIN subscriptions s ON s.member_id = m.id
+       WHERE m.active = 1 AND s.status = 'active' AND s.end_date >= ? AND s.end_date <= ? ORDER BY m.last_name, m.first_name`,
+      addDays(today, -RENEWAL_GRACE_DAYS), addDays(today, RENEWAL_WARNING_DAYS),
+    ).flatMap((m) => {
+      const status = this.renewalStatus(m.id, today);
+      return status ? [{
+        member_id: m.id, member_name: `${m.first_name} ${m.last_name}`, first_name: m.first_name, phone: m.phone,
+        phone_ok: waDigits(m.phone) !== null, ...status,
+      }] : [];
+    });
     const stockAlerts = this.all(`${PRODUCT_SELECT} WHERE p.active = 1 AND p.stock_qty <= p.low_stock_threshold ORDER BY p.stock_qty, p.name`)
       .map((p) => this.productDTO(p));
     const { due } = this.get("SELECT COALESCE(SUM(amount), 0) AS due FROM charges WHERE status = 'due'");
@@ -2633,7 +3084,7 @@ export class Club {
       biz_day: today, now: new Date(now).toISOString(),
       rooms_status: roomsStatus,
       today: todayList, current, upcoming, to_close: toClose,
-      expiring, expired, stock_alerts: stockAlerts, outstanding_total: due,
+      expiring, expired, renewal_alerts: renewalAlerts, stock_alerts: stockAlerts, outstanding_total: due,
       cash_today: this.financeSummary(today, today),
       lounge: this.loungeOverview(),
     };
@@ -2674,8 +3125,15 @@ export class Club {
     });
     const total = empty('total', 'Total');
     for (const x of accounts) for (const f of ['billed', 'collected', 'refunded', 'net', 'outstanding', 'cancelled', 'lines']) total[f] += x[f];
+    // The part of a payment taken from the card shows under CARD_METHOD, the rest under its own method.
     const methods = this.all(
-      'SELECT method, SUM(amount) AS total, COUNT(*) AS n FROM payments WHERE paid_at >= ? AND paid_at < ? GROUP BY method ORDER BY total DESC', a, b,
+      `SELECT method, SUM(total) AS total, SUM(n) AS n FROM (
+         SELECT method, amount - card_amount AS total, 1 AS n FROM payments
+         WHERE paid_at >= ? AND paid_at < ? AND kind NOT IN ('recharge', 'repas') AND method <> ?
+         UNION ALL
+         SELECT ? AS method, card_amount AS total, 1 AS n FROM payments
+         WHERE paid_at >= ? AND paid_at < ? AND kind NOT IN ('recharge', 'repas') AND card_amount > 0
+       ) GROUP BY method ORDER BY total DESC`, a, b, CARD_METHOD, CARD_METHOD, a, b,
     );
     return { from, to, accounts, total, methods };
   }

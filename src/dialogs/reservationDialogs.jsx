@@ -47,19 +47,20 @@ function defaultStart(date) {
 const creditLine = (summary) => (summary?.credit
   ? ` · crédit disponible ${fmtDuration(summary.credit.available)}` : '');
 
-export function memberRoomEligibility(m) {
+// Whether a member may take the room. With `card`, the booking member who has no plan, or no time left on it,
+// may still book: the time is then paid with the card's money (`cardOnly`). The people he brings along always
+// need their own plan and time.
+export function memberRoomEligibility(m, { card = false } = {}) {
   if (!m) return { ok: false, reason: 'Membre inconnu' };
   if (m.active === false) return { ok: false, reason: 'Membre désactivé' };
   if (m.cards_deactivated) return { ok: false, reason: 'Carte désactivée' };
   const state = m.subscription?.state;
-  if (!['active', 'expire_bientot'].includes(state)) {
-    return { ok: false, reason: state === 'expiree' ? 'Carte / formule expirée' : 'Aucune formule active' };
-  }
   const avail = m.subscription?.credit?.available ?? 0;
-  if (avail <= 0) {
-    return { ok: false, reason: 'Crédit épuisé (0 min)' };
-  }
-  return { ok: true, available: avail };
+  let reason = null;
+  if (!['active', 'expire_bientot'].includes(state)) reason = state === 'expiree' ? 'Carte / formule expirée' : 'Aucune formule active';
+  else if (avail <= 0) reason = 'Crédit épuisé (0 min)';
+  if (!reason) return { ok: true, available: avail };
+  return card ? { ok: true, available: 0, cardOnly: true, reason } : { ok: false, reason };
 }
 
 const conflictText = (conflicts) => conflicts.map((c) => `${c.member_name} (${c.start_time} – ${c.end_time})`).join(', ');
@@ -81,9 +82,12 @@ function durationOptions(slot, minDur) {
   return out;
 }
 
-function QuotePanel({ q, s, now }) {
+// `card`: the paid time is taken from the card's money now (« Payer avec la carte »).
+function QuotePanel({ q, now, card }) {
   const warnings = [];
-  if (q.deposit_amount) {
+  if (q.deposit_amount && card) {
+    warnings.push(<Notice key="deposit" kind="info">{`Séance de 3 h ou plus : l’acompte de 50 % (${money(q.deposit_amount)}) reste acquis au club en cas d’annulation ou d’absence.${q.card_balance < q.deposit_amount ? ' La carte ne couvre pas l’acompte : choisissez le moyen qui paie le reste maintenant.' : ''}`}</Notice>);
+  } else if (q.deposit_amount) {
     warnings.push(<Notice key="deposit" kind="info">{now
       ? `Séance de 3 h ou plus avec entrée immédiate : tout le temps payant (${money(q.supplement_amount)}) s’encaisse maintenant.`
       : `Séance de 3 h ou plus : acompte de 50 % (${money(q.deposit_amount)}) encaissé maintenant, solde de ${money(q.balance_amount)} à régler avant l’entrée en salle. Annulable jusqu’à la veille à minuit ; l’acompte reste acquis au club, y compris si le membre ne vient pas.`}</Notice>);
@@ -106,9 +110,13 @@ function QuotePanel({ q, s, now }) {
         {q.room ? <div><dt>Salle</dt><dd>{`${q.room.name} · ${q.party_size} pers. (capacité ${q.room.capacity} pers.)`}</dd></div> : null}
         <div><dt>Horaire</dt><dd>{`${dayLabel(q.biz_day, 'medium')} · ${q.start_time} → ${q.end_time}${q.end_next_day ? ' (lendemain)' : ''}`}</dd></div>
         <div><dt>Durée</dt><dd>{fmtDuration(q.duration_min)}</dd></div>
-        <div><dt>Formule (titulaire)</dt><dd>{`${q.subscription.plan_name} · jusqu’au ${dayLabel(q.subscription.end_date, 'short')}`}</dd></div>
-        <div><dt>Crédit disponible (titulaire)</dt><dd>{fmtDuration(q.credit_before.available)}</dd></div>
-        <div><dt>Heures incluses utilisées (titulaire)</dt><dd>{fmtDuration(q.included_minutes)}</dd></div>
+        {q.subscription ? (
+          <>
+            <div><dt>Formule (titulaire)</dt><dd>{`${q.subscription.plan_name} · jusqu’au ${dayLabel(q.subscription.end_date, 'short')}`}</dd></div>
+            <div><dt>Crédit disponible (titulaire)</dt><dd>{fmtDuration(q.credit_before.available)}</dd></div>
+            <div><dt>Heures incluses utilisées (titulaire)</dt><dd>{fmtDuration(q.included_minutes)}</dd></div>
+          </>
+        ) : <div><dt>Formule (titulaire)</dt><dd>Aucune formule : tout le temps est payant</dd></div>}
         {q.extra_attendees?.length ? (
           <div>
             <dt>Crédits accompagnants ({q.extra_attendees.length})</dt>
@@ -122,13 +130,20 @@ function QuotePanel({ q, s, now }) {
             ? <>{' '}<Hypothesis title="Tarif annoncé dans les messages audio, non encore validé par un administrateur." label="tarif à valider" /></>
             : null}</dd></div>
         <div className="total"><dt>Supplément à régler</dt><dd>{money(q.supplement_amount)}</dd></div>
-        {q.deposit_amount && !now ? (
+        {card ? (
+          <>
+            <div><dt>Solde de la carte</dt><dd>{money(q.card_balance)}</dd></div>
+            <div><dt>Payé par la carte, maintenant</dt><dd>{money(q.card_amount)}</dd></div>
+            <div><dt>Reste à payer</dt><dd>{money(q.rest_amount)}</dd></div>
+          </>
+        ) : null}
+        {q.deposit_amount && !now && !card ? (
           <>
             <div><dt>Acompte (50 %), maintenant</dt><dd>{money(q.deposit_amount)}</dd></div>
             <div><dt>Solde, avant l’entrée en salle</dt><dd>{money(q.balance_amount)}</dd></div>
           </>
         ) : null}
-        <div><dt>Crédit restant après (titulaire)</dt><dd>{fmtDuration(q.credit_after)}</dd></div>
+        {q.credit_after != null ? <div><dt>Crédit restant après (titulaire)</dt><dd>{fmtDuration(q.credit_after)}</dd></div> : null}
       </dl>
       {warnings.length ? <div className="stack" style={{ marginTop: 10 }}>{warnings}</div> : null}
     </>
@@ -165,6 +180,9 @@ function BookingDialog({ close, preset, onDone }) {
   const minDur = minDurationFor(s.booking, date, startRelOf(start));
   const [notes, setNotes] = useState('');
   const [depositMethod, setDepositMethod] = useState(s.payment_methods[0] ?? '');
+  // Paying with the card is required when the member has no plan or no time left on it, offered otherwise.
+  const [payWithCard, setPayWithCard] = useState(() => cardRequired(preset.member));
+  const [restMethod, setRestMethod] = useState(''); // '' = what the card cannot pay stays on the note
   const [quote, setQuote] = useState(null);
   const [quoteError, setQuoteError] = useState(null);
   const [loading, setLoading] = useState(() => Boolean(preset.member));
@@ -176,7 +194,7 @@ function BookingDialog({ close, preset, onDone }) {
   const quoteTimer = useRef(null);
   const searchTimer = useRef(null);
   const latest = useRef(null);
-  latest.current = { member, roomId, partySize, startNow, date, start, duration, notes, depositMethod };
+  latest.current = { member, roomId, partySize, startNow, date, start, duration, notes, depositMethod, payWithCard, restMethod };
 
   const payload = () => {
     const v = latest.current;
@@ -186,13 +204,17 @@ function BookingDialog({ close, preset, onDone }) {
       room_id: Number(v.roomId),
       party_size: Number(v.partySize),
       attendee_ids: [],
-      require_credit: true,
+      // Paid with the card, a member whose time is used up still books: the card pays the whole time.
+      require_credit: !v.payWithCard,
+      pay_with_card: Boolean(v.payWithCard),
       start_now: Boolean(v.startNow && v.date === bizToday()),
       date: v.date,
       start_time: v.start,
       duration_min: Number(v.duration),
       notes: v.notes,
-      deposit_method: v.depositMethod, // used only when a deposit is due (3 h or more with paid time)
+      // Without the card, used only when a deposit is due (3 h or more with paid time); with it, the method that
+      // pays now what the card cannot (none: it stays on the note).
+      deposit_method: v.payWithCard ? (v.restMethod || undefined) : v.depositMethod,
     };
   };
 
@@ -251,7 +273,7 @@ function BookingDialog({ close, preset, onDone }) {
   };
 
   const pick = (x) => {
-    const elig = memberRoomEligibility(x);
+    const elig = memberRoomEligibility(x, { card: true });
     if (!elig.ok) {
       toast(`Accès refusé pour ${x.name} : ${elig.reason}.`, 'error');
       return;
@@ -259,6 +281,15 @@ function BookingDialog({ close, preset, onDone }) {
     stopSearch();
     setMember(x);
     latest.current.member = x;
+    const required = cardRequired(x);
+    setPayWithCard(required);
+    latest.current.payWithCard = required;
+    requestQuote();
+  };
+
+  const onPayWithCard = (e) => {
+    setPayWithCard(e.target.checked);
+    latest.current.payWithCard = e.target.checked;
     requestQuote();
   };
 
@@ -314,7 +345,10 @@ function BookingDialog({ close, preset, onDone }) {
     e.preventDefault();
     submit(async () => {
       if (!member) throw new Error('Choisissez un membre titulaire.');
-      const detail = await api.post('/api/reservations', payload(), key);
+      const body = payload();
+      // A deposit the card cannot cover is paid now: the « later » choice is not offered then.
+      if (body.pay_with_card && !body.deposit_method && !restLaterAllowed) body.deposit_method = s.payment_methods[0];
+      const detail = await api.post('/api/reservations', body, key);
       close();
       // A booking for later offers the confirmation to the member, one click away in the toast (members
       // installed in the room right now have nothing to be told). The dialog closes as it always did; the
@@ -326,12 +360,16 @@ function BookingDialog({ close, preset, onDone }) {
   };
 
   let quoteBox = null;
-  if (!member) quoteBox = <p className="subtle">Choisissez un membre ayant une carte active et du crédit disponible pour calculer la séance.</p>;
+  if (!member) quoteBox = <p className="subtle">Choisissez le membre titulaire pour calculer la séance.</p>;
   else if (loading && !quote) quoteBox = <p className="subtle">Calcul en cours…</p>;
   else if (quoteError) quoteBox = <Notice kind="danger">{quoteError}</Notice>;
-  else if (quote) quoteBox = <QuotePanel q={quote} s={s} now={startNow && date === bizToday()} />;
+  else if (quote) quoteBox = <QuotePanel q={quote} now={startNow && date === bizToday()} card={payWithCard} />;
   const deposit = quote && !quoteError ? quote.deposit_amount : 0;
   const goingIn = startNow && date === bizToday();
+  const forcedCard = cardRequired(member);
+  const rest = payWithCard && quote && !quoteError ? quote.rest_amount : 0;
+  const restLaterAllowed = !(deposit && quote && quote.card_balance < deposit);
+  const cardPays = payWithCard && quote && !quoteError ? quote.card_amount : 0;
 
   const ready = Boolean(member && quote && !quoteError);
   const canSubmit = ready && !(quote.conflicts.length > 0 || quote.gap_conflicts.length > 0 || quote.tariff_blocked);
@@ -349,7 +387,7 @@ function BookingDialog({ close, preset, onDone }) {
   return (
     <Modal title={startNow ? 'Installer des membres dans une salle' : 'Nouvelle réservation'} size="wide" onClose={close}>
       <form className="form-grid" onSubmit={onSubmit} noValidate>
-        <fieldset><legend>Membre titulaire (carte active & crédit &gt; 0 requis)</legend><div id="bk-member">
+        <fieldset><legend>Membre titulaire</legend><div id="bk-member">
           {member ? (
             <div className="row">
               <div className="grow" style={{ flex: 1, minWidth: 0 }}>
@@ -366,7 +404,7 @@ function BookingDialog({ close, preset, onDone }) {
                 {found.error ? <Notice kind="danger">{found.error}</Notice> : null}
                 {found.list ? (found.list.length
                   ? found.list.slice(0, 8).map((x) => {
-                    const elig = memberRoomEligibility(x);
+                    const elig = memberRoomEligibility(x, { card: true });
                     return (
                       <button
                         key={x.id}
@@ -380,9 +418,9 @@ function BookingDialog({ close, preset, onDone }) {
                           <div className="title">{x.name} <span className="subtle">{x.member_no}{x.card_code ? ` · ${x.card_code}` : ''}</span></div>
                           <div className="meta">{subStateLabel(x.subscription)}{creditLine(x.subscription)}</div>
                         </div>
-                        {elig.ok
-                          ? <span className="chip chip-ok">{fmtDuration(elig.available)} dispo</span>
-                          : <span className="chip chip-danger">{elig.reason}</span>}
+                        {!elig.ok ? <span className="chip chip-danger">{elig.reason}</span>
+                          : elig.cardOnly ? <span className="chip chip-info">payé par la carte</span>
+                            : <span className="chip chip-ok">{fmtDuration(elig.available)} dispo</span>}
                       </button>
                     );
                   })
@@ -452,8 +490,22 @@ function BookingDialog({ close, preset, onDone }) {
         <p className="subtle">{`Réservable à toute heure, par créneaux de ${slot} min. Minimum ${fmtDuration(s.booking.min_duration_min)}, ${fmtDuration(s.booking.weekend_min_duration_min ?? s.booking.min_duration_min)} le vendredi et le samedi à partir de 18 h.`}</p>
         <label className="field"><span>Remarque (facultatif)</span>
           <input name="notes" maxLength={300} value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
+        {member ? (
+          <label className="check">
+            <input type="checkbox" name="pay_with_card" checked={payWithCard} disabled={forcedCard} onChange={onPayWithCard} />
+            <span><strong>Payer avec la carte</strong>{' '}
+              {forcedCard ? '(aucune formule ou plus d’heures : le temps est payé avec le crédit CFA de la carte)' : '(le temps payant est pris maintenant sur le crédit CFA de la carte)'}</span>
+          </label>
+        ) : null}
         <div id="bk-quote" aria-live="polite">{quoteBox}</div>
-        {deposit ? (
+        {rest ? (
+          <label className="field"><span>{`Reste (${money(rest)}) payé maintenant par`}</span>
+            <select name="rest_method" value={restMethod || (restLaterAllowed ? '' : s.payment_methods[0])} onChange={(e) => setRestMethod(e.target.value)}>
+              {restLaterAllowed ? <option value="">Plus tard : le reste va sur la note, à encaisser</option> : null}
+              {s.payment_methods.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select></label>
+        ) : null}
+        {deposit && !payWithCard ? (
           <label className="field"><span>{goingIn ? 'Encaissé maintenant par' : 'Acompte encaissé maintenant par'}</span>
             <select name="deposit_method" value={depositMethod} onChange={(e) => setDepositMethod(e.target.value)}>
               {s.payment_methods.map((m) => <option key={m} value={m}>{m}</option>)}
@@ -463,15 +515,20 @@ function BookingDialog({ close, preset, onDone }) {
         <div className="modal-actions">
           <button type="button" className="btn" onClick={close}>Annuler</button>
           <button type="submit" className="btn btn-primary" id="bk-submit" disabled={busy || !canSubmit} aria-busy={busy}>
-            {deposit
-              ? (goingIn ? `Encaisser ${money(quote.supplement_amount)} et installer` : `Encaisser l’acompte (${money(deposit)}) et réserver`)
-              : (goingIn ? 'Installer dans la salle' : 'Confirmer la réservation')}
+            {cardPays
+              ? `Payer ${money(cardPays)} avec la carte et ${goingIn ? 'installer' : 'réserver'}`
+              : deposit && !payWithCard
+                ? (goingIn ? `Encaisser ${money(quote.supplement_amount)} et installer` : `Encaisser l’acompte (${money(deposit)}) et réserver`)
+                : (goingIn ? 'Installer dans la salle' : 'Confirmer la réservation')}
           </button>
         </div>
       </form>
     </Modal>
   );
 }
+
+// The card must pay when the member has no plan, or no time left on it, for the day.
+const cardRequired = (m) => Boolean(m) && !memberRoomEligibility(m).ok;
 
 export function openBookingDialog(preset = {}, onDone) {
   openDialog(BookingDialog, { preset: preset ?? {}, onDone });
@@ -517,12 +574,17 @@ export function DemoMessageDialog({ close, text, title = 'Confirmation WhatsApp'
 // the message. `demo` is whether the booking belongs to the demo: a button pressed on the page asks the store,
 // a toast's button passes the answer it was made with.
 export function sendWhatsAppConfirmation(detail, demo = useStore.getState().demo) {
-  const text = confirmationText(detail);
+  sendWhatsAppText(detail.member_phone, confirmationText(detail), { demo });
+}
+
+// Any message to a member the same way: WhatsApp opens on it, addressed to `phone` (to nobody when the number
+// cannot be used); the demo shows it under `title` and opens nothing.
+export function sendWhatsAppText(phone, text, { title, demo = useStore.getState().demo } = {}) {
   if (demo) {
-    openDialog(DemoMessageDialog, { text });
+    openDialog(DemoMessageDialog, title ? { text, title } : { text });
     return;
   }
-  window.open(waLink(waDigits(detail.member_phone), text), '_blank', 'noopener');
+  window.open(waLink(waDigits(phone), text), '_blank', 'noopener');
 }
 
 // The button of the toast shown after a booking for later. It stays 20 seconds, long enough for the session to
@@ -651,14 +713,18 @@ function ExtendDialog({ close, r, onDone, options, endRel }) {
   const [key] = useState(newKey);
   const { busy, error, submit } = useSubmit();
   const [minutes, setMinutes] = useState(options[0]);
+  // A booking made without a plan is extended with the card only; one with a plan may use it for the paid time.
+  const forcedCard = !r.subscription_id;
+  const [payWithCard, setPayWithCard] = useState(forcedCard);
+  const [restMethod, setRestMethod] = useState(''); // '' = what the card cannot pay stays on the note
   const [quote, setQuote] = useState(null);
   const [quoteError, setQuoteError] = useState(null);
   const seq = useRef(0);
 
-  const requestQuote = async (value) => {
+  const requestQuote = async (value, card = payWithCard) => {
     const n = (seq.current += 1);
     try {
-      const q = await api.preview(`/api/reservations/${r.id}/extend/quote`, { minutes: Number(value) });
+      const q = await api.preview(`/api/reservations/${r.id}/extend/quote`, { minutes: Number(value), pay_with_card: card });
       if (n !== seq.current) return;
       setQuote(q);
       setQuoteError(null);
@@ -677,7 +743,9 @@ function ExtendDialog({ close, r, onDone, options, endRel }) {
   const onSubmit = (e) => {
     e.preventDefault();
     submit(async () => {
-      const detail = await api.post(`/api/reservations/${r.id}/extend`, { minutes: Number(minutes) }, key);
+      // The extension names the method for the rest `method` (the booking calls it `deposit_method`).
+      const body = { minutes: Number(minutes), pay_with_card: payWithCard, method: payWithCard && restMethod ? restMethod : undefined };
+      const detail = await api.post(`/api/reservations/${r.id}/extend`, body, key);
       close();
       toast(`Réservation prolongée jusqu’à ${detail.reservation.end_time}.`);
       onDone?.(detail);
@@ -701,7 +769,14 @@ function ExtendDialog({ close, r, onDone, options, endRel }) {
           <div><dt>Temps payant ajouté</dt><dd>{fmtDuration(q.paid_minutes)}</dd></div>
           <div><dt>Temps payant total</dt><dd>{supplementText(q.total_paid_minutes, q.tariff)}</dd></div>
           <div><dt>Supplément</dt><dd>{`${money(q.supplement_before)} → ${money(q.supplement_after)}`}</dd></div>
-          <div className="total"><dt>À ajouter à la note</dt><dd>{money(q.supplement_delta)}</dd></div>
+          <div className="total"><dt>{payWithCard ? 'À payer' : 'À ajouter à la note'}</dt><dd>{money(q.supplement_delta)}</dd></div>
+          {payWithCard ? (
+            <>
+              <div><dt>Solde de la carte</dt><dd>{money(q.card_balance)}</dd></div>
+              <div><dt>Payé par la carte, maintenant</dt><dd>{money(q.card_amount)}</dd></div>
+              <div><dt>Reste à payer</dt><dd>{money(q.rest_amount)}</dd></div>
+            </>
+          ) : null}
         </dl>
         <p className="subtle" style={{ marginTop: 6 }}>{`Le tarif appliqué reste celui de la réservation confirmée (${money(q.tariff.hour)} / h, ${money(q.tariff.half)} / 30 min).`}</p>
         {warnings.length ? <div className="stack" style={{ marginTop: 10 }}>{warnings}</div> : null}
@@ -710,6 +785,7 @@ function ExtendDialog({ close, r, onDone, options, endRel }) {
   }
 
   const blocked = Boolean(quoteError) || !q || q.conflicts.length > 0 || q.gap_conflicts.length > 0 || q.tariff_blocked;
+  const rest = payWithCard && q && !quoteError ? q.rest_amount : 0;
 
   return (
     <Modal title="Prolonger la réservation" onClose={close}>
@@ -721,7 +797,19 @@ function ExtendDialog({ close, r, onDone, options, endRel }) {
               <option key={d} value={d}>{`+ ${fmtDuration(d)} (fin ${endRel + d === 1440 ? 'minuit' : relLabel(endRel + d)}${endRel + d > 1440 ? ', lendemain' : ''})`}</option>
             ))}
           </select></label>
+        <label className="check">
+          <input type="checkbox" name="pay_with_card" checked={payWithCard} disabled={forcedCard}
+            onChange={(e) => { setPayWithCard(e.target.checked); requestQuote(minutes, e.target.checked); }} />
+          <span><strong>Payer avec la carte</strong>{forcedCard ? ' (réservation sans formule : le temps est payé avec le crédit CFA)' : ''}</span>
+        </label>
         <div id="ex-quote" aria-live="polite">{box}</div>
+        {rest ? (
+          <label className="field"><span>{`Reste (${money(rest)}) payé maintenant par`}</span>
+            <select name="rest_method" value={restMethod} onChange={(e) => setRestMethod(e.target.value)}>
+              <option value="">Plus tard : le reste va sur la note, à encaisser</option>
+              {s.payment_methods.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select></label>
+        ) : null}
         <FormError error={error} />
         <div className="modal-actions"><button type="button" className="btn" onClick={close}>Annuler</button>
           <button type="submit" className="btn btn-primary" id="ex-submit" disabled={busy || blocked} aria-busy={busy}>Confirmer la prolongation</button></div>

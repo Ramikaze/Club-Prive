@@ -1,6 +1,7 @@
 // The cash receipt (ticket de caisse): the pure helpers shared by the Worker and the browser. They build
 // the ticket number, the check code, the member's initials and the WhatsApp text; nothing here reads or
 // sends anything. The code is drawn by the caller's source of random bytes, so tests can drive it.
+import { fmtDuration } from './rules.js';
 
 // 31 letters and digits without the look-alikes (no I, L, O, 0, 1). 248 = 8 * 31 is the largest multiple of
 // 31 under 256, so a byte below it maps to a letter with no bias.
@@ -55,14 +56,31 @@ export function ticketVerifyUrl(origin, id, code) {
   return `${origin}/#/ticket/${id}/${code}`;
 }
 
+export const RECHARGE_LINE_LABEL = 'Recharge carte membre';
+
+// The lines a receipt shows. A recharge or an outside meal is a payment with no line (nothing is sold through
+// a charge), so it shows one line of its own: « Recharge carte membre », or the meal's label.
+export function paymentLines({ kind, label, amount, allocations }) {
+  if (kind === 'recharge') return [{ label: RECHARGE_LINE_LABEL, quantity: 1, amount }];
+  if (kind === 'repas') return [{ label: clean(label), quantity: 1, amount }];
+  return allocations || [];
+}
+
 // The receipt as text, for WhatsApp. `money(hundredths)` and `dateTime(iso)` are the caller's formatters.
 // Without `verifyUrl` (the demo) there is no « Vérifiez » line; a positive `refunded` adds a « Remboursé » line.
+// A positive `cardAmount` replaces « Payé » by the card's share and the rest with its method; `balance` (the
+// card's balance after the payment) and `timeAvailable` (minutes) add the member's balances when not null.
 export function ticketWhatsAppText({
   clubName, number, copyLabel, paidAt, memberName, memberNo, lines, total, method, reference, cashier,
-  refunded, verifyUrl, footer, money, dateTime,
+  refunded, verifyUrl, footer, money, dateTime, cardAmount = 0, balance = null, timeAvailable = null, cancelledAt = null,
 }) {
   const client = [clean(memberName), clean(memberNo) && `(${clean(memberNo)})`].filter(Boolean).join(' ');
   const paid = [clean(method), clean(reference) && `(${clean(reference)})`].filter(Boolean).join(' ');
+  const card = Number(cardAmount) || 0;
+  const rest = total - card;
+  const payment = card > 0
+    ? [`Payé par carte membre : ${money(card)}`, rest > 0 && `Reste payé (${paid}) : ${money(rest)}`]
+    : [`Payé : ${paid}`];
   return [
     clean(clubName),
     `TICKET DE CAISSE ${number}${clean(copyLabel) ? ` (${clean(copyLabel)})` : ''}`,
@@ -73,9 +91,12 @@ export function ticketWhatsAppText({
       return `- ${quantity}${line.label}  ${money(line.amount)}`;
     }),
     `TOTAL : ${money(total)}`,
-    `Payé : ${paid}`,
+    ...payment,
+    balance !== null && balance !== undefined && `Solde carte : ${money(balance)}`,
+    timeAvailable !== null && timeAvailable !== undefined && `Crédit temps (à ce jour) : ${fmtDuration(timeAvailable)} disponibles`,
     clean(cashier) && `Encaissé par : ${clean(cashier)}`,
     Number(refunded) > 0 && `Remboursé : ${money(refunded)}`,
+    cancelledAt && `Annulé le ${dateTime(cancelledAt)}`,
     clean(verifyUrl) && `Vérifiez ce ticket : ${clean(verifyUrl)}`,
     clean(footer),
   ].filter(Boolean).join('\n');

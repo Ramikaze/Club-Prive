@@ -26,8 +26,8 @@ const minutes = (ms) => Math.max(1, Math.ceil(Math.abs(ms) / 60000));
 
 export const isRunning = (r) => r?.status === 'en_cours' && Boolean(r.started_at);
 
-// Time credit left on the card, in ms (negative once it is used up). Without the figure, the booking's
-// own length stands in.
+// Time credit left on the card, in ms (negative once it is used up). Without the figure (a member with no
+// subscription carries no time on the card), the booking's own length stands in.
 const creditLeft = (r, now) => {
   const started = Date.parse(r.started_at);
   const creditMs = r.card_credit_min != null ? r.card_credit_min * 60000 : Date.parse(r.end_at) - started;
@@ -45,13 +45,17 @@ export default function SessionTimer({ reservation: r, compact = false }) {
   const ending = !over && (left <= ENDING_SOON_MS || remaining <= ENDING_SOON_MS);
   const progress = creditMs > 0 ? Math.min(1, Math.max(0, left / creditMs)) : 0;
   const state = over ? 'is-over' : ending ? 'is-ending' : '';
+  const booked = r.card_credit_min == null;
+  const label = booked
+    ? (spent ? 'Temps réservé dépassé' : 'Temps réservé restant')
+    : (spent ? 'Crédit épuisé · temps payant' : 'Crédit temps restant sur la carte');
   return (
     <div className={`session-timer ${state} ${compact ? 'is-compact' : ''}`} role="timer"
       aria-label={spent
-        ? `Crédit temps épuisé depuis ${fmtDuration(minutes(left))}`
-        : `Crédit temps restant sur la carte : ${fmtDuration(Math.floor(left / 60000))}`}>
+        ? `${booked ? 'Temps réservé dépassé' : 'Crédit temps épuisé'} depuis ${fmtDuration(minutes(left))}`
+        : `${label} : ${fmtDuration(Math.floor(left / 60000))}`}>
       <div className="session-timer-main">
-        <span className="session-timer-label">{spent ? 'Crédit épuisé · temps payant' : 'Crédit temps restant sur la carte'}</span>
+        <span className="session-timer-label">{label}</span>
         <span className="session-timer-clock">{spent ? `+${clock(-left)}` : clock(left)}</span>
       </div>
       <div className="session-timer-track" aria-hidden="true"><span style={{ transform: `scaleX(${progress})` }} /></div>
@@ -72,7 +76,9 @@ export function TimeInRoom({ reservation: r }) {
   const over = left < 0 || now > Date.parse(r.end_at);
   return (
     <span className={over ? 'session-inline is-over' : 'session-inline'}>
-      {left < 0 ? `crédit épuisé depuis ${fmtDuration(minutes(left))}` : `crédit restant ${fmtDuration(Math.floor(left / 60000))}`}
+      {r.card_credit_min == null
+        ? (left < 0 ? `dépassé depuis ${fmtDuration(minutes(left))}` : `temps restant ${fmtDuration(Math.floor(left / 60000))}`)
+        : (left < 0 ? `crédit épuisé depuis ${fmtDuration(minutes(left))}` : `crédit restant ${fmtDuration(Math.floor(left / 60000))}`)}
     </span>
   );
 }

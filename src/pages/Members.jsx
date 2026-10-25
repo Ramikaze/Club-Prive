@@ -26,7 +26,7 @@ function MembersTable({ items, onBook, onDeactivate, onReactivate, statut }) {
     <section className="card"><div className="table-wrap"><table className="table stack-sm">
       <thead><tr><th>Membre</th><th>Téléphone</th><th>Formule</th><th>État</th><th className="num">Crédit disponible</th><th><span className="sr-only">Actions</span></th></tr></thead>
       <tbody>{items.map((m) => {
-        const elig = memberRoomEligibility(m);
+        const elig = memberRoomEligibility(m, { card: true });
         return (
           <tr key={m.id}>
             <td data-label="Membre"><Link to={`/membres/${m.id}`}><strong>{m.name}</strong></Link> <span className="subtle">{m.member_no}</span> <DemoChip on={m.is_demo} />

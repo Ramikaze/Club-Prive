@@ -1,30 +1,45 @@
-// Payment, refund and line cancellation dialogs. Each dialog keeps one idempotency key for its
-// whole life, so a double click or a retry after a network error never records the operation twice.
+// Payment, refund and line cancellation dialogs, and the member card's money: recharge, outside meal and their
+// cancellation. Each dialog keeps one idempotency key for its whole life, so a double click or a retry after a
+// network error never records the operation twice.
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, newKey } from '../lib/api.js';
-import { money } from '../lib/format.js';
+import { money, parseMoney, dateTime } from '../lib/format.js';
 import { useStore, useSettings, isAdminNow } from '../store/useStore.js';
 import { openDialog, Modal, actionDialog } from '../components/ui/Modal.jsx';
 import { toast } from '../components/ui/toast.jsx';
-import { Hypothesis, AccountTag, FormError } from '../components/ui/ui.jsx';
-import { useSubmit } from '../lib/hooks.js';
+import { Hypothesis, AccountTag, FormError, Notice } from '../components/ui/ui.jsx';
+import { useLoad, useSubmit } from '../lib/hooks.js';
+import { CARD_METHOD } from '../../shared/rules.js';
+import { renewalWhatsAppText } from '../../shared/wallet.js';
+import { sendWhatsAppText } from './reservationDialogs.jsx';
 
 // ---------------------------------------------------------------- payment (full payment of selected lines)
 
+// The member card is offered first when it holds money: it pays what it can, and only then is a method asked for
+// the rest. The balance comes from the member's record (one member per payment).
 function PaymentDialog({ close, due, memberName, onDone }) {
   const methods = useSettings().payment_methods;
   const [key] = useState(newKey);
   const { busy, error, submit } = useSubmit();
   const navigate = useNavigate();
   const [checked, setChecked] = useState(() => new Set(due.map((c) => c.id)));
-  const [method, setMethod] = useState(methods[0] ?? '');
+  const [picked, setPicked] = useState(null); // null until the manager chooses: the card when it holds money
+  const [restMethod, setRestMethod] = useState(methods[0] ?? '');
   const [reference, setReference] = useState('');
+  const memberId = due[0]?.member_id;
+  const memberState = useLoad(() => (memberId ? api.get(`/api/members/${memberId}`) : Promise.resolve(null)), [memberId]);
+  const balance = memberState.data?.wallet?.balance ?? 0;
 
   const selected = due.filter((c) => checked.has(c.id));
   const by = { reservations: 0, alcool: 0, cigares: 0 };
   for (const c of selected) by[c.account] += c.amount;
   const total = by.reservations + by.alcool + by.cigares;
+  const method = picked ?? (balance > 0 ? CARD_METHOD : (methods[0] ?? ''));
+  const byCard = method === CARD_METHOD;
+  const cardPart = byCard ? Math.min(balance, total) : 0;
+  const rest = total - cardPart;
+  const loadingBalance = Boolean(memberId) && memberState.data === undefined && !memberState.error;
 
   const toggle = (id, on) => setChecked((prev) => {
     const next = new Set(prev);
@@ -38,7 +53,10 @@ function PaymentDialog({ close, due, memberName, onDone }) {
     submit(async () => {
       const ids = selected.map((c) => c.id);
       if (!ids.length) throw new Error('Cochez au moins une ligne.');
-      const res = await api.post('/api/payments', { charge_ids: ids, method, reference }, key);
+      const body = byCard
+        ? { charge_ids: ids, card: true, method: rest > 0 ? restMethod : undefined, reference }
+        : { charge_ids: ids, method, reference };
+      const res = await api.post('/api/payments', body, key);
       close();
       toast(`Encaissement enregistré : ${money(res.payment.amount)}.`);
       // The cash receipt is the next thing the manager needs: open its page (print, WhatsApp).
@@ -65,17 +83,30 @@ function PaymentDialog({ close, due, memberName, onDone }) {
         </table></div>
         <div id="pay-sum"><dl className="calc">
           {Object.entries(by).map(([k, v]) => <div key={k}><dt><AccountTag account={k} /></dt><dd>{money(v)}</dd></div>)}
-          <div className="total"><dt>Total encaissé</dt><dd>{money(total)}</dd></div></dl></div>
+          <div className="total"><dt>Total encaissé</dt><dd>{money(total)}</dd></div>
+          {byCard ? (
+            <>
+              <div><dt>Payé par la carte membre</dt><dd>{money(cardPart)}</dd></div>
+              <div><dt>Reste à payer</dt><dd>{money(rest)}</dd></div>
+            </>
+          ) : null}</dl></div>
         <div className="form-row">
           <label className="field"><span>Moyen de paiement</span>
-            <select name="method" required value={method} onChange={(e) => setMethod(e.target.value)}>
+            <select name="method" required value={method} onChange={(e) => setPicked(e.target.value)}>
+              {balance > 0 ? <option value={CARD_METHOD}>{`${CARD_METHOD} (${money(balance)} disponibles)`}</option> : null}
               {methods.map((x) => <option key={x}>{x}</option>)}</select></label>
+          {byCard && rest > 0 ? (
+            <label className="field"><span>{`Moyen pour le reste (${money(rest)})`}</span>
+              <select name="rest_method" required value={restMethod} onChange={(e) => setRestMethod(e.target.value)}>
+                {methods.map((x) => <option key={x}>{x}</option>)}</select></label>
+          ) : null}
           <label className="field"><span>Référence (facultatif)</span>
             <input name="reference" maxLength={80} placeholder="N° de transaction, de reçu…" value={reference} onChange={(e) => setReference(e.target.value)} /></label>
         </div>
+        {byCard ? <p className="subtle">Le ticket imprimé est à faire signer par le membre.</p> : null}
         <FormError error={error} />
         <div className="modal-actions"><button type="button" className="btn" onClick={close}>Annuler</button>
-          <button type="submit" className="btn btn-primary" id="pay-submit" disabled={busy || selected.length === 0} aria-busy={busy}>
+          <button type="submit" className="btn btn-primary" id="pay-submit" disabled={busy || loadingBalance || selected.length === 0} aria-busy={busy}>
             {selected.length ? `Encaisser ${money(total)}` : 'Encaisser'}</button></div>
       </form>
     </Modal>
@@ -164,3 +195,193 @@ export function cancelChargeDialog(charge, onDone) {
 }
 
 export const canRefund = () => isAdminNow() || !useStore.getState().settings.refunds_admin_only;
+
+// ---------------------------------------------------------------- member card: recharge, outside meal
+
+// Money paid at the till onto the card. The receipt opens next: it is printed for the member to sign, then sent
+// to him on WhatsApp from there.
+function RechargeDialog({ close, member, onDone }) {
+  const settings = useSettings();
+  const methods = settings.payment_methods;
+  const [key] = useState(newKey);
+  const { busy, error, submit } = useSubmit();
+  const navigate = useNavigate();
+  const [amountText, setAmountText] = useState('');
+  const [method, setMethod] = useState(methods[0] ?? '');
+  const [reference, setReference] = useState('');
+  const amount = parseMoney(amountText);
+  const balance = member.wallet?.balance ?? 0;
+
+  const onSubmit = (e) => {
+    e.preventDefault();
+    submit(async () => {
+      if (!amount) throw new Error('Indiquez le montant de la recharge.');
+      const res = await api.post(`/api/members/${member.id}/wallet/recharge`, { amount, method, reference }, key);
+      close();
+      toast(`Carte rechargée de ${money(amount)} : nouveau solde ${money(res.wallet.balance)}.${res.renewed?.length ? ' L’abonnement a été renouvelé sur la carte.' : ''}`);
+      onDone?.(res);
+      navigate(`/caisse/ticket/${res.payment.id}`);
+    });
+  };
+
+  return (
+    <Modal title="Recharger la carte" onClose={close}>
+      <form className="form-grid" onSubmit={onSubmit} noValidate>
+        <p className="muted">Membre : <strong>{member.name}</strong>. L’argent reçu à la caisse est crédité sur la carte, en {settings.currency.label} ; il n’est jamais rendu en espèces ni perdu.</p>
+        <div className="form-row">
+          <label className="field"><span>Montant reçu</span>
+            <input name="amount" inputMode="decimal" autoComplete="off" placeholder="100 000" required autoFocus value={amountText} onChange={(e) => setAmountText(e.target.value)} /></label>
+          <label className="field"><span>Moyen de paiement</span>
+            <select name="method" required value={method} onChange={(e) => setMethod(e.target.value)}>
+              {methods.map((x) => <option key={x}>{x}</option>)}</select></label>
+        </div>
+        <label className="field"><span>Référence (facultatif)</span>
+          <input name="reference" maxLength={80} placeholder="N° de transaction, de reçu…" value={reference} onChange={(e) => setReference(e.target.value)} /></label>
+        <dl className="calc">
+          <div><dt>Solde actuel</dt><dd>{money(balance)}</dd></div>
+          <div className="total"><dt>Nouveau solde</dt><dd>{money(balance + (amount ?? 0))}</dd></div>
+        </dl>
+        <p className="subtle">Le ticket s’ouvre ensuite : imprimez-le pour la signature du membre, puis envoyez-lui le reçu par WhatsApp.</p>
+        <FormError error={error} />
+        <div className="modal-actions"><button type="button" className="btn" onClick={close}>Annuler</button>
+          <button type="submit" className="btn btn-primary" disabled={busy || !amount} aria-busy={busy}>
+            {amount ? `Recharger ${money(amount)}` : 'Recharger'}</button></div>
+      </form>
+    </Modal>
+  );
+}
+
+export function openRechargeDialog(member, onDone) {
+  openDialog(RechargeDialog, { member, onDone });
+}
+
+// A meal ordered from an outside restaurant: the club pays the courier from the till, and the same exact amount is
+// taken from the member, the card first, another method for the rest. One action records both.
+function OutsideMealDialog({ close, member, onDone }) {
+  const methods = useSettings().payment_methods;
+  const [key] = useState(newKey);
+  const { busy, error, submit } = useSubmit();
+  const navigate = useNavigate();
+  const [amountText, setAmountText] = useState('');
+  const [label, setLabel] = useState('');
+  const [courier, setCourier] = useState(methods[0] ?? '');
+  const [restMethod, setRestMethod] = useState(methods[0] ?? '');
+  const [reference, setReference] = useState('');
+  // The member's booking in progress or to come, to tie the meal to it (optional).
+  const bookings = (member.reservations ?? []).filter((r) => r.member_id === member.id && ['reservee', 'en_cours'].includes(r.status));
+  const [reservationId, setReservationId] = useState(() => String(bookings.find((r) => r.status === 'en_cours')?.id ?? ''));
+  const amount = parseMoney(amountText);
+  const balance = member.wallet?.balance ?? 0;
+  const cardPart = Math.min(balance, amount ?? 0);
+  const rest = (amount ?? 0) - cardPart;
+
+  const onSubmit = (e) => {
+    e.preventDefault();
+    submit(async () => {
+      if (!amount) throw new Error('Indiquez le montant du repas.');
+      if (label.trim().length < 1) throw new Error('Indiquez le restaurant ou le plat.');
+      const body = {
+        amount, label, courier_method: courier, rest_method: rest > 0 ? restMethod : undefined, reference,
+        reservation_id: reservationId ? Number(reservationId) : undefined,
+      };
+      const res = await api.post(`/api/members/${member.id}/outside-meal`, body, key);
+      close();
+      toast(`Repas enregistré : ${money(amount)}, livreur payé depuis ${courier}.`);
+      onDone?.(res);
+      navigate(`/caisse/ticket/${res.payment.id}`);
+    });
+  };
+
+  return (
+    <Modal title="Repas commandé à l’extérieur" onClose={close}>
+      <form className="form-grid" onSubmit={onSubmit} noValidate>
+        <p className="muted">Membre : <strong>{member.name}</strong>. Le livreur est payé avec l’argent de la caisse, et le même montant exact est payé par la carte du membre.</p>
+        <div className="form-row">
+          <label className="field"><span>Prix payé au livreur</span>
+            <input name="amount" inputMode="decimal" autoComplete="off" placeholder="18 500" required autoFocus value={amountText} onChange={(e) => setAmountText(e.target.value)} /></label>
+          <label className="field"><span>Livreur payé depuis</span>
+            <select name="courier_method" required value={courier} onChange={(e) => setCourier(e.target.value)}>
+              {methods.map((x) => <option key={x}>{x}</option>)}</select></label>
+        </div>
+        <label className="field"><span>Restaurant ou plat</span>
+          <input name="label" maxLength={100} required placeholder="Ex. : Le Gourmet, poulet braisé" value={label} onChange={(e) => setLabel(e.target.value)} /></label>
+        {bookings.length ? (
+          <label className="field"><span>Réservation (facultatif)</span>
+            <select name="reservation_id" value={reservationId} onChange={(e) => setReservationId(e.target.value)}>
+              <option value="">Aucune</option>
+              {bookings.map((r) => <option key={r.id} value={r.id}>{`${r.room_name} · ${r.start_time} – ${r.end_time}${r.status === 'en_cours' ? ' (en cours)' : ''}`}</option>)}
+            </select></label>
+        ) : null}
+        <dl className="calc">
+          <div><dt>Solde de la carte</dt><dd>{money(balance)}</dd></div>
+          <div><dt>Payé par la carte</dt><dd>{money(cardPart)}</dd></div>
+          <div className="total"><dt>Reste à payer</dt><dd>{money(rest)}</dd></div>
+        </dl>
+        {rest > 0 ? (
+          <div className="form-row">
+            <label className="field"><span>{`Moyen pour le reste (${money(rest)})`}</span>
+              <select name="rest_method" required value={restMethod} onChange={(e) => setRestMethod(e.target.value)}>
+                {methods.map((x) => <option key={x}>{x}</option>)}</select></label>
+            <label className="field"><span>Référence (facultatif)</span>
+              <input name="reference" maxLength={80} value={reference} onChange={(e) => setReference(e.target.value)} /></label>
+          </div>
+        ) : null}
+        <FormError error={error} />
+        <div className="modal-actions"><button type="button" className="btn" onClick={close}>Annuler</button>
+          <button type="submit" className="btn btn-primary" disabled={busy || !amount} aria-busy={busy}>
+            {amount ? `Enregistrer le repas (${money(amount)})` : 'Enregistrer le repas'}</button></div>
+      </form>
+    </Modal>
+  );
+}
+
+export function openOutsideMealDialog(member, onDone) {
+  openDialog(OutsideMealDialog, { member, onDone });
+}
+
+// Administrator only, with a reason: the money leaves the till today and the card is debited; refused when the
+// money has already been spent from the card.
+export function openCancelRechargeDialog({ paymentId, amount, at }, onDone) {
+  const key = newKey();
+  actionDialog({
+    title: 'Annuler la recharge',
+    message: `Recharge de ${money(amount)} du ${dateTime(at)}.`,
+    body: <Notice kind="warn">Le montant sort de la caisse aujourd’hui et il est retiré de la carte. C’est refusé si cet argent a déjà été dépensé avec la carte.</Notice>,
+    reasonLabel: 'Motif de l’annulation',
+    danger: true,
+    confirmLabel: 'Annuler la recharge',
+    run: async (v) => {
+      const res = await api.post(`/api/payments/${paymentId}/cancel-recharge`, { reason: v.reason }, key);
+      toast(`Recharge annulée : nouveau solde ${money(res.wallet.balance)}.`);
+      onDone?.(res);
+    },
+  });
+}
+
+// Administrator only, with a reason: the courier's expense is cancelled, the card's part goes back on the card and
+// the part paid otherwise leaves the till today.
+export function openCancelMealDialog(payment, onDone) {
+  const key = newKey();
+  actionDialog({
+    title: 'Annuler le repas',
+    message: `${payment.label ?? 'Repas extérieur'} : ${money(payment.amount)} du ${dateTime(payment.paid_at)}.`,
+    reasonLabel: 'Motif de l’annulation',
+    danger: true,
+    confirmLabel: 'Annuler le repas',
+    run: async (v) => {
+      const res = await api.post(`/api/payments/${payment.id}/cancel-meal`, { reason: v.reason }, key);
+      toast(`Repas annulé : nouveau solde de la carte ${money(res.wallet.balance)}.`);
+      onDone?.(res);
+    },
+  });
+}
+
+// The renewal alert sent to the member on WhatsApp (shown, never sent, in the demo). `alert` is a renewal status
+// (memberDetail.renewal or a dashboard renewal alert).
+export function sendRenewalWhatsApp(alert, { firstName, phone }) {
+  const { club_name: clubName, currency } = useStore.getState().settings;
+  const text = renewalWhatsAppText({
+    clubName, firstName, planName: alert.plan_name, endDate: alert.end_date, balance: alert.balance, price: alert.price, state: alert.state, currency,
+  });
+  sendWhatsAppText(phone, text, { title: 'Alerte de renouvellement' });
+}

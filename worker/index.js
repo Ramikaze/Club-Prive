@@ -23,6 +23,11 @@ export class ClubDO extends DurableObject {
   demoContext(tokenHash) {
     return this.api.demoContext(tokenHash);
   }
+
+  // RPC of the daily scheduled task: renews the subscriptions due from the members' card credit.
+  runRenewals() {
+    return this.api.runRenewals();
+  }
 }
 
 // The demo space: the same API on its own database. Its one entry point is the RPC below, which serves a
@@ -73,5 +78,11 @@ export default {
     }
     if (url.pathname === '/login-smoke.mp4') return withRanges(request, env);
     return env.ASSETS.fetch(request);
+  },
+
+  // Every morning (wrangler.jsonc, 06:00 in Brazzaville, the start of the business day): the real club renews the
+  // subscriptions due from the card credit. The demo space has no task: its home page does it when it loads.
+  scheduled(controller, env, ctx) {
+    ctx.waitUntil(env.CLUB.get(env.CLUB.idFromName('club')).runRenewals());
   },
 };

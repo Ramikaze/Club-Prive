@@ -1,7 +1,8 @@
 // Formatting and labels. Amounts are integers in hundredths; dates are 'YYYY-MM-DD' in the club
 // time zone; every rule shared with the server comes from /shared.
 import { localParts, addDays } from '../../shared/time.js';
-import { bookingWindow, fmtDuration } from '../../shared/rules.js';
+import { bookingWindow, fmtDuration, CARD_METHOD } from '../../shared/rules.js';
+import { RECHARGE_LINE_LABEL } from '../../shared/ticket.js';
 import { useStore } from '../store/useStore.js';
 
 export { fmtDuration };
@@ -96,3 +97,26 @@ export const subStateLabel = (summary) => {
   if (summary.state === 'a_venir') return `${summary.plan_name} — débute le ${dayLabel(summary.start_date, 'short')}`;
   return `${summary.plan_name} — jusqu’au ${dayLabel(summary.end_date, 'short')}`;
 };
+
+// ---------------------------------------------------------------- payments in the lists
+
+// What a payment that has no line was for: a recharge of the card or an outside meal (its label); null for a
+// plain payment, whose lines say it.
+export function paymentPurpose(p) {
+  if (p.kind === 'recharge') return RECHARGE_LINE_LABEL;
+  if (p.kind === 'repas') return `Repas extérieur : ${p.label ?? ''}`;
+  return null;
+}
+
+// How a payment was paid: the card's part apart from the rest when the card paid only part of it.
+export function paymentMethodText(p) {
+  const card = p.card_amount ?? 0;
+  if (!card || p.method === CARD_METHOD) return p.method;
+  return `${CARD_METHOD} ${money(card)} + ${p.method} ${money(p.amount - card)}`;
+}
+
+// 'YYYY-MM-DDT…' instant -> '24/10' on the club's clock.
+export function dayMonth(iso) {
+  const p = parts(iso);
+  return `${p.date.slice(8, 10)}/${p.date.slice(5, 7)}`;
+}

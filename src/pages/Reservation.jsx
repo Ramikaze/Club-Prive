@@ -7,7 +7,7 @@ import { actionDialog } from '../components/ui/Modal.jsx';
 import SessionTimer, { isRunning } from '../components/ui/SessionTimer.jsx';
 import ConsumptionBreakdown, { ConsumerPicker, consumptionOf } from '../components/ui/ConsumptionBreakdown.jsx';
 import { api, newKey } from '../lib/api.js';
-import { money, fmtDuration, dayLabel, dateTime, ACCOUNT_LABEL } from '../lib/format.js';
+import { money, fmtDuration, dayLabel, dateTime, ACCOUNT_LABEL, paymentMethodText } from '../lib/format.js';
 import { ACTION_LABELS, auditSummary } from '../lib/audit.js';
 import { useBusy, useLoad } from '../lib/hooks.js';
 import { useIsAdmin, useRooms } from '../store/useStore.js';
@@ -271,8 +271,12 @@ function ReservationDetail({ d, products, reload }) {
             <div className="total"><dt>Supplément de temps</dt><dd>{money(r.supplement_amount)}</dd></div>
           </dl>
           <dl className="kv" style={{ marginTop: 14 }}>
-            <dt>Formule</dt><dd>{sub.plan_name} · {dayLabel(sub.start_date, 'short')} → {dayLabel(sub.end_date, 'short')}</dd>
-            <dt>Crédit du membre</dt><dd>{fmtDuration(sub.credit.available)} disponibles · {fmtDuration(sub.credit.committed)} engagées · {fmtDuration(sub.credit.consumed)} consommées</dd>
+            {sub ? (
+              <>
+                <dt>Formule</dt><dd>{sub.plan_name} · {dayLabel(sub.start_date, 'short')} → {dayLabel(sub.end_date, 'short')}</dd>
+                <dt>Crédit du membre</dt><dd>{fmtDuration(sub.credit.available)} disponibles · {fmtDuration(sub.credit.committed)} engagées · {fmtDuration(sub.credit.consumed)} consommées</dd>
+              </>
+            ) : <><dt>Formule</dt><dd>Aucune : le temps est payé avec la carte membre</dd></>}
             <dt>Tarif appliqué</dt><dd>{money(r.tariff.hour)} / h · {money(r.tariff.half)} / 30 min</dd>
             {r.off_hours ? <><dt>Hors horaires</dt><dd>Autorisé par {r.off_hours_authorized_by_name ?? '—'}</dd></> : null}
             {r.deposit_amount ? <><dt>Acompte (50 %)</dt><dd>{`${money(r.deposit_amount)}, acquis au club ; le solde se règle avant l’entrée en salle`}</dd></> : null}
@@ -290,7 +294,7 @@ function ReservationDetail({ d, products, reload }) {
           {d.payments.length ? (
             <div className="list">{d.payments.map((p) => (
               <div className="list-item" key={p.id}>
-                <div className="grow"><div className="title">{money(p.amount)} — {p.method}{p.reference ? <> <span className="subtle">{p.reference}</span></> : null}</div>
+                <div className="grow"><div className="title">{money(p.amount)} — {paymentMethodText(p)}{p.reference ? <> <span className="subtle">{p.reference}</span></> : null}</div>
                   <div className="meta">{dateTime(p.paid_at)} · {p.created_by_name ?? ''} · {Object.entries(p.by_account).filter(([, v]) => v).map(([k, v]) => `${ACCOUNT_LABEL[k]} ${money(v)}`).join(' · ')}</div></div>
                 <span className="chip chip-ok">n° {p.id}</span></div>
             ))}</div>
