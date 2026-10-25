@@ -1125,3 +1125,11 @@ test('effacer toutes les données vide aussi les mouvements de carte', async () 
   assert.equal(server.club.get('SELECT COUNT(*) AS n FROM wallet_movements').n, 0);
   assert.equal(server.club.walletLiability(), 0);
 });
+
+test('carte dès la création : un nouveau membre a une carte virtuelle active, sans formule', async () => {
+  const zoe = await newMember('Zoé');
+  assert.equal(zoe.subscription.state, 'aucun');
+  assert.equal(zoe.cards.length, 1);
+  assert.equal(zoe.cards[0].kind, 'virtuelle');
+  assert.equal(zoe.cards[0].status, 'active');
+});

@@ -164,7 +164,7 @@ test('accès salle : seuls les membres avec carte active, formule active et cré
   // Bruno : crédit épuisé par un ajustement administrateur.
   ok(await admin.post(`/api/subscriptions/${members[1].subId}/adjust`, { minutes: -credit(members[1]).available, reason: 'Crédit épuisé (test)' }));
   assert.equal(credit(members[1]).available, 0);
-  // Camille : carte désactivée (carte virtuelle émise automatiquement à l'activation de la formule).
+  // Camille : carte désactivée (carte virtuelle émise automatiquement à la création du membre).
   const camille = ok(await manager.get(`/api/members/${members[2].id}`));
   assert.equal(camille.cards.length, 1);
   assert.equal(camille.can_enter_room, true);

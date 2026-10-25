@@ -244,6 +244,11 @@ export class Club {
         }
         this.run("INSERT INTO meta (key, value) VALUES ('names_formatted', ?)", this.nowIso());
       }
+      // Active members recorded before every member had a card get their virtual card once.
+      if (!this.get("SELECT 1 AS x FROM meta WHERE key = 'cards_for_all'")) {
+        for (const m of this.all('SELECT id FROM members WHERE active = 1')) this.ensureCard(SYSTEM_ACTOR, m.id);
+        this.run("INSERT INTO meta (key, value) VALUES ('cards_for_all', ?)", this.nowIso());
+      }
       if (!this.get('SELECT 1 AS x FROM categories LIMIT 1')) {
         for (const [kind, names] of Object.entries(DEFAULT_CATEGORIES)) {
           for (const name of names) this.run('INSERT INTO categories (kind, name, created_at) VALUES (?, ?, ?)', kind, name, this.nowIso());
@@ -640,6 +645,7 @@ export class Club {
       memberNo, f.first, f.last, f.phone, f.email, f.notes, demo ? 1 : 0, this.nowIso(), actor.id,
     );
     this.audit(actor, 'membre.creer', 'member', id, { member_no: memberNo, nom: `${f.first} ${f.last}` });
+    this.ensureCard(actor, id);
     return this.memberDetail(id);
   }
 
@@ -1112,14 +1118,7 @@ export class Club {
       m.id, plan.id, plan.name, plan.duration_months, start, end, plan.included_minutes, mode,
       plan.price, plan.price_validated ? 1 : 0, previous?.id ?? null, this.nowIso(), actor.id,
     );
-    // Ensure the member has an active card on subscription activation if they never had a card issued yet.
-    if (!this.get('SELECT 1 AS x FROM cards WHERE member_id = ?', m.id)) {
-      const code = this.generateCardCode('virtuelle');
-      this.insert(
-        'INSERT INTO cards (member_id, kind, code, status, issued_at, issued_by) VALUES (?, ?, ?, ?, ?, ?)',
-        m.id, 'virtuelle', code, 'active', this.nowIso(), actor.id,
-      );
-    }
+    this.ensureCard(actor, m.id);
     let chargeId = null;
     if (plan.price > 0) {
       chargeId = this.insertCharge(actor, {
@@ -1299,6 +1298,16 @@ export class Club {
       if (!this.get('SELECT 1 AS x FROM cards WHERE code = ?', code)) return code;
     }
     throw new Error('Impossible de générer un code de carte unique.');
+  }
+
+  // Every member has a card from the start: a virtual one (there are no physical cards yet) when they never had
+  // one issued. It carries their CFA credit and their QR code before any subscription.
+  ensureCard(actor, memberId) {
+    if (this.get('SELECT 1 AS x FROM cards WHERE member_id = ?', memberId)) return;
+    this.insert(
+      'INSERT INTO cards (member_id, kind, code, status, issued_at, issued_by) VALUES (?, ?, ?, ?, ?, ?)',
+      memberId, 'virtuelle', this.generateCardCode('virtuelle'), 'active', this.nowIso(), actor.id,
+    );
   }
 
   issueCard(actor, memberId, input) {
