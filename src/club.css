@@ -885,6 +885,10 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 }
 .c3d-face::before { content: ""; position: absolute; inset: 0; border-radius: inherit; border: 1px solid rgba(201, 160, 99, .35); pointer-events: none; }
 .c3d-back { transform: rotateY(180deg); }
+/* The flat card (print, still views): one face, no rotation and no 3D context. */
+.c3d.c3d-flat { transform: none; transform-style: flat; transition: none; }
+.c3d-flat .c3d-face { backface-visibility: visible; -webkit-backface-visibility: visible; }
+.c3d-flat .c3d-back { transform: none; }
 .c3d-logo { position: absolute; left: 50%; top: 12%; transform: translateX(-50%); width: 64%; mix-blend-mode: screen; pointer-events: none; }
 .c3d-chip { position: absolute; left: 7%; top: 38%; width: 12%; aspect-ratio: 1.3; border-radius: 1.2cqw; background: linear-gradient(135deg, #f1d79c, #b48a4a 45%, #e6c789 60%, #9b7239); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .25); }
 .c3d-name {

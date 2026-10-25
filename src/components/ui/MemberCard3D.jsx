@@ -6,7 +6,7 @@
 //
 // `qrPath` is the route the QR code opens in the app (`/membres/12?card=CODE`); it is made into a full link on
 // this site, as the printed card does. Only an active card has a back: without a code (a member with no card) or
-// for a deactivated card, the card is drawn greyed, with no QR and no turn. `interactive={false}` draws it flat and still, showing `side` ('front' or 'back'), for print.
+// for a deactivated card, the card is drawn greyed, with no QR and no turn. `interactive={false}` draws it flat and still, showing `side` ('front' or 'back'): only that face is drawn, with no 3D at all (for print).
 import { useMemo, useRef, useState } from 'react';
 import { encodeQrMatrix, qrSvgPath } from '../../lib/qrcode.js';
 
@@ -112,9 +112,13 @@ export default function MemberCard3D({ name, code, active = true, qrPath, intera
 
   const className = `c3d ${turned ? 'is-turned' : ''} ${active ? '' : 'is-inactive'} ${interactive ? 'is-interactive' : ''}`;
   if (!interactive) {
+    // Flat: only the requested face is drawn, with no rotation and no hidden back, so a printout never depends on
+    // the browser's handling of 3D transforms.
     return (
       <div className="c3d-stage">
-        <div className={className} role="img" aria-label={`Carte de membre de ${name}${code ? `, ${code}` : ''}`}>{front}{back}</div>
+        <div className={`c3d c3d-flat ${active ? '' : 'is-inactive'}`} role="img" aria-label={`Carte de membre de ${name}${code ? `, ${code}` : ''}${turned ? ', verso' : ''}`}>
+          {turned ? back : front}
+        </div>
       </div>
     );
   }
