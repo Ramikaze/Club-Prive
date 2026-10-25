@@ -20,7 +20,7 @@ function instantText(iso, timezone) {
 const signature = (clubName) => (clean(clubName) ? `L’équipe ${clean(clubName)}` : '').trim();
 
 const ticketLines = (number, verifyUrl) => [
-  number ? `Ticket ${clean(number)}` : '',
+  number ? `Ticket ${clean(number)} (ci-dessous)` : '',
   verifyUrl ? `Vérifier le ticket : ${verifyUrl}` : '',
 ];
 
