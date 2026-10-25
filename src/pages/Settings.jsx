@@ -187,7 +187,7 @@ function ClubSection({ save }) {
             <input name="club_name" defaultValue={s.club_name} required maxLength={80} /></label>
           <label className="field"><span>Numéro WhatsApp du club</span>
             <input type="tel" name="club_whatsapp" defaultValue={s.club_whatsapp ?? ''} maxLength={30} autoComplete="off" placeholder="+242 06 000 00 00" />
-            <span className="help">Au format international. Il figure en bas du message de confirmation WhatsApp envoyé aux clients ; laissé vide, il est omis.</span></label>
+            <span className="help">Au format international. Il ne figure pas dans les messages envoyés aux clients.</span></label>
         </div>
         <div className="form-row">
           <label className="field"><span>Libellé de la devise</span>

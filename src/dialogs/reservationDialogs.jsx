@@ -13,7 +13,7 @@ import { useLoad, useSubmit } from '../lib/hooks.js';
 import { openPaymentDialog } from './moneyDialogs.jsx';
 import { daysBetween, parseHHMM } from '../../shared/time.js';
 import { minDurationFor, supplementDetail } from '../../shared/rules.js';
-import { waDigits, waLink, bookingConfirmationText } from '../../shared/whatsapp.js';
+import { waDigits, waLink } from '../../shared/whatsapp.js';
 
 export function supplementText(paid, tariff) {
   if (!paid) return 'aucun';
@@ -350,9 +350,9 @@ function BookingDialog({ close, preset, onDone }) {
       if (body.pay_with_card && !body.deposit_method && !restLaterAllowed) body.deposit_method = s.payment_methods[0];
       const detail = await api.post('/api/reservations', body, key);
       close();
-      // A booking for later offers the confirmation to the member, one click away in the toast (members
-      // installed in the room right now have nothing to be told). The dialog closes as it always did; the
-      // booking's page keeps a « Renvoyer la confirmation » button.
+      // A booking for later offers its confirmation page (print it, or send it to the member on WhatsApp), one
+      // click away in the toast (members installed in the room right now have nothing to be told). The dialog
+      // closes as it always did; the booking's page keeps a « Confirmation » button to the same page.
       const confirmation = detail.reservation.status === 'reservee' ? confirmationToastAction(detail) : null;
       toast(`${detail.reservation.status === 'en_cours' ? 'Membres installés' : 'Réservation confirmée'} : ${detail.reservation.member_name} (${detail.reservation.room_name}, ${detail.reservation.party_size} membre(s)).`, 'ok', confirmation);
       onDone?.(detail);
@@ -534,28 +534,10 @@ export function openBookingDialog(preset = {}, onDone) {
   openDialog(BookingDialog, { preset: preset ?? {}, onDone });
 }
 
-// ---------------------------------------------------------------- WhatsApp confirmation
-
-// What the confirmation says, from a booking's detail (the server's answer when it is made, or its page) and the
-// club's settings. The day is the one the session starts on, as the member reads it in his calendar: a session
-// at 01:00 after a Friday evening is Saturday's.
-function confirmationText(detail) {
-  const r = detail.reservation;
-  const { club_name: clubName, club_whatsapp: clubWhatsapp } = useStore.getState().settings;
-  return bookingConfirmationText({
-    firstName: detail.member_first_name,
-    dayLabel: dayLabel(r.start_date, 'title').toLowerCase(),
-    startTime: r.start_time,
-    endTime: r.end_time,
-    roomName: r.room_name,
-    partySize: r.party_size,
-    clubName,
-    clubWhatsapp,
-  });
-}
+// ---------------------------------------------------------------- WhatsApp messages
 
 // The demo shows the message and sends nothing. The receipt page reuses it with its own title.
-export function DemoMessageDialog({ close, text, title = 'Confirmation WhatsApp' }) {
+export function DemoMessageDialog({ close, text, title = 'Message WhatsApp' }) {
   return (
     <Modal title={title} onClose={close}>
       <div className="form-grid">
@@ -568,15 +550,6 @@ export function DemoMessageDialog({ close, text, title = 'Confirmation WhatsApp'
   );
 }
 
-// The only way a confirmation leaves the application, and only on the manager's click: WhatsApp opens on the
-// message, addressed to the member's number, and waits for him to press « Envoyer ». A number that cannot be
-// used opens WhatsApp without a recipient, and he picks the contact. The demo never opens the link: it shows
-// the message. `demo` is whether the booking belongs to the demo: a button pressed on the page asks the store,
-// a toast's button passes the answer it was made with.
-export function sendWhatsAppConfirmation(detail, demo = useStore.getState().demo) {
-  sendWhatsAppText(detail.member_phone, confirmationText(detail), { demo });
-}
-
 // Any message to a member the same way: WhatsApp opens on it, addressed to `phone` (to nobody when the number
 // cannot be used); the demo shows it under `title` and opens nothing.
 export function sendWhatsAppText(phone, text, { title, demo = useStore.getState().demo } = {}) {
@@ -587,11 +560,12 @@ export function sendWhatsAppText(phone, text, { title, demo = useStore.getState(
   window.open(waLink(waDigits(phone), text), '_blank', 'noopener');
 }
 
-// The button of the toast shown after a booking for later. It stays 20 seconds, long enough for the session to
-// change under it, so it keeps the space it was made in: made in the demo, it can never open WhatsApp.
+// The button of the toast shown after a booking for later: the booking's confirmation page, the one way a
+// confirmation goes out (printed, or its picture and message on WhatsApp). The page asks the store whether the
+// session is the demo; signing out removes the toast (clearActionToasts), so it never outlives its session.
 export function confirmationToastAction(detail) {
-  const demo = useStore.getState().demo;
-  return { label: 'Envoyer la confirmation WhatsApp', icon: 'message', onClick: () => sendWhatsAppConfirmation(detail, demo) };
+  const id = detail.reservation.id;
+  return { label: 'Confirmation', icon: 'receipt', onClick: () => { window.location.hash = `#/reservations/${id}/confirmation`; } };
 }
 
 // ---------------------------------------------------------------- add/remove member in room

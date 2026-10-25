@@ -1,6 +1,6 @@
-// The booking confirmation a manager sends to a member on WhatsApp. These pure functions build the number,
-// the message and the wa.me link in the browser; nothing here sends anything: the link is opened by the
-// manager's own click, and WhatsApp waits for him to press « Envoyer ».
+// The messages a manager sends to a member on WhatsApp. These pure functions build the number and the wa.me
+// link in the browser (the messages themselves are in shared/wallet.js); nothing here sends anything: the link is
+// opened by the manager's own click, and WhatsApp waits for him to press « Envoyer ».
 
 const clean = (value) => String(value ?? '').trim();
 
@@ -16,20 +16,6 @@ export function waDigits(phone) {
   if (digits.startsWith('00')) digits = digits.slice(2);
   else if (!raw.startsWith('+') && digits.length === 9 && digits.startsWith('0')) digits = `242${digits}`;
   return digits.length >= 8 && digits.length <= 15 && !digits.startsWith('0') ? digits : null;
-}
-
-// The message, in French, written to the member. `dayLabel` is the day as the club writes it (« vendredi
-// 24 octobre »), the times are HH:MM. The last sentence gives the club's number and is left out without one.
-export function bookingConfirmationText({
-  firstName, dayLabel, startTime, endTime, roomName, partySize, clubName, clubWhatsapp,
-}) {
-  const people = Math.max(1, Number(partySize) || 1);
-  const where = [clean(roomName), `${people} personne${people > 1 ? 's' : ''}`].filter(Boolean).join(', ');
-  const when = [clean(dayLabel), `de ${startTime} à ${endTime}`].filter(Boolean).join(', ');
-  const hello = clean(firstName) ? `Bonjour ${clean(firstName)}` : 'Bonjour';
-  const club = clean(clubName) ? `au club ${clean(clubName)}` : 'au club';
-  const question = clean(clubWhatsapp) ? ` Pour toute question : ${clean(clubWhatsapp)}.` : '';
-  return `${hello}, votre réservation ${club} est confirmée : ${when} (${where}).${question}`;
 }
 
 // The wa.me link that opens WhatsApp on the message, written to `digits` (from waDigits) or, without a

@@ -1,10 +1,10 @@
-// The WhatsApp booking confirmation: the pure helpers shared with the browser (shared/whatsapp.js), then
+// The WhatsApp messages: the pure helpers shared with the browser (shared/whatsapp.js), then
 // what the server hands the browser to build the message (the club's number setting, the member's first name
 // and phone in a booking's detail). The club's real number is never written in the repository: the examples
 // use +242 06 000 00 00, and the other numbers are made up.
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { waDigits, bookingConfirmationText, waLink } from '../shared/whatsapp.js';
+import { waDigits, waLink } from '../shared/whatsapp.js';
 import { Server, Client, ok } from './harness.js';
 
 // ---------------------------------------------------------------- waDigits
@@ -43,46 +43,6 @@ test('waDigits : un numéro vide, sans chiffres ou inutilisable donne null', () 
   assert.equal(waDigits('+000 000000'), null);
 });
 
-// ---------------------------------------------------------------- bookingConfirmationText
-
-const booking = {
-  firstName: 'Jean-Pierre', dayLabel: 'vendredi 24 octobre', startTime: '18:00', endTime: '20:00',
-  roomName: 'Salon Principal', partySize: 2, clubName: 'Limen', clubWhatsapp: '+242 06 000 00 00',
-};
-
-test('bookingConfirmationText : le message complet, numéro du club compris', () => {
-  assert.equal(
-    bookingConfirmationText(booking),
-    'Bonjour Jean-Pierre, votre réservation au club Limen est confirmée : vendredi 24 octobre, de 18:00 à 20:00 (Salon Principal, 2 personnes). Pour toute question : +242 06 000 00 00.',
-  );
-});
-
-test('bookingConfirmationText : sans numéro du club, la dernière phrase disparaît', () => {
-  const bare = 'Bonjour Jean-Pierre, votre réservation au club Limen est confirmée : vendredi 24 octobre, de 18:00 à 20:00 (Salon Principal, 2 personnes).';
-  for (const clubWhatsapp of ['', '   ', null, undefined]) {
-    assert.equal(bookingConfirmationText({ ...booking, clubWhatsapp }), bare, JSON.stringify(clubWhatsapp));
-  }
-  const { clubWhatsapp: left, ...without } = booking;
-  assert.equal(left, '+242 06 000 00 00');
-  assert.equal(bookingConfirmationText(without), bare);
-});
-
-test('bookingConfirmationText : une seule personne s’écrit au singulier', () => {
-  assert.match(bookingConfirmationText({ ...booking, partySize: 1 }), /\(Salon Principal, 1 personne\)\./);
-  assert.match(bookingConfirmationText({ ...booking, partySize: 3 }), /\(Salon Principal, 3 personnes\)\./);
-});
-
-test('bookingConfirmationText : le numéro du club est repris tel que saisi, sans espaces en trop', () => {
-  assert.match(bookingConfirmationText({ ...booking, clubWhatsapp: '  +242 06 000 00 00  ' }), /Pour toute question : \+242 06 000 00 00\.$/);
-});
-
-test('bookingConfirmationText : un prénom ou un nom de salle manquant ne laisse pas de trou', () => {
-  assert.equal(
-    bookingConfirmationText({ ...booking, firstName: '', roomName: '' }),
-    'Bonjour, votre réservation au club Limen est confirmée : vendredi 24 octobre, de 18:00 à 20:00 (2 personnes). Pour toute question : +242 06 000 00 00.',
-  );
-});
-
 // ---------------------------------------------------------------- waLink
 
 test('waLink : le lien wa.me, avec ou sans destinataire', () => {
@@ -100,7 +60,7 @@ test('waLink : le texte est encodé, accents, deux-points, esperluette et plus c
 });
 
 test('numéro du membre au format libre : le lien reste toujours ouvrable', () => {
-  const text = bookingConfirmationText(booking);
+  const text = 'Bonjour Jean-Pierre,\nVotre réservation au Salon Principal est confirmée pour le ven. 23/10/2026 de 18:00 à 20:00 (2 personnes).';
   const forms = ['06 000 00 00', '+242 06 000 00 00', '00242060000000', '(242) 06-000-00-00', '+33 6 12 34 56 78',
     '06 00 00 00 00', '06', 'abc', '', '   ', null, undefined];
   for (const phone of forms) {

@@ -66,8 +66,8 @@ export const SYSTEM_ACTOR = { id: null, name: 'Renouvellement automatique', role
 export function defaultSettings() {
   return {
     club_name: 'Limen',
-    // The club's WhatsApp number, as an administrator types it. It closes the booking confirmation sent to members
-    // (« Pour toute question : … ») and is left out of the message while empty. Set in Settings, never in the code.
+    // The club's WhatsApp number, as an administrator types it. No message to members carries it any more (the
+    // booking confirmation is now its ticket and short message). Set in Settings, never in the code.
     club_whatsapp: '',
     // Free text printed above and below the items of the cash receipt (4 and 2 lines at most).
     ticket_header: '',
