@@ -906,8 +906,9 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .c3d.is-interactive:focus-visible { outline: none; }
 .c3d.is-interactive:focus-visible .c3d-face { box-shadow: var(--focus-ring), 0 22px 40px -12px rgba(0, 0, 0, .55); }
 .c3d.is-turned { transform: rotateY(180deg); }
-.c3d.is-inactive { filter: grayscale(1); opacity: .55; }
-.c3d.is-inactive.is-interactive { cursor: default; }
+/* On the faces, not on .c3d: a filter or an opacity there would flatten its 3D (transform-style: flat). */
+.c3d.is-inactive .c3d-face { filter: grayscale(1); opacity: .55; }
+.c3d.is-interactive:not([role="button"]) { cursor: default; }
 .c3d-face {
   position: absolute; inset: 0; border-radius: 4.2cqw; overflow: hidden; backface-visibility: hidden; -webkit-backface-visibility: hidden; color: #c9a063;
   background: radial-gradient(120% 90% at 20% 0%, #24211d 0%, #0b0a09 55%, #050505 100%);
