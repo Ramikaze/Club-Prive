@@ -972,8 +972,8 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 
 /* Agenda day view: the timeline and, beside it, the day's bookings. */
 .day-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); gap: 16px; align-items: start; }
-.day-panel { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; }
-@media (max-width: 1100px) { .day-layout { grid-template-columns: minmax(0, 1fr); } .day-panel { position: static; max-height: none; } }
-.day-panel .list-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; align-items: start; }
-.day-panel .list-item .time { grid-column: 1 / -1; font-weight: 650; }
-.day-panel .list-item .chip { grid-column: 2; grid-row: 2; }
+.day-side { display: flex; flex-direction: column; gap: 16px; position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; }
+@media (max-width: 1100px) { .day-layout { grid-template-columns: minmax(0, 1fr); } .day-side { position: static; max-height: none; } }
+.day-side .list-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; align-items: start; }
+.day-side .list-item .time { grid-column: 1 / -1; font-weight: 650; }
+.day-side .list-item .chip { grid-column: 2; grid-row: 2; }
