@@ -841,6 +841,7 @@ test('ticket d’une recharge : une ligne, solde juste après elle, signature ; 
   assert.equal(t.time_available, null); // no subscription
   assert.equal(t.signature_required, true);
   assert.equal(t.status, 'valide');
+  assert.equal(t.member_first_name, 'Victor'); // for the WhatsApp receipt of the recharge
   assert.equal((await ticketOf(second.id)).wallet_balance_after, 150000 * UM);
 
   const pub = publicOf(first.id);

@@ -68,6 +68,17 @@ export default function Treasury() {
               {t.opening_date && (
                 <p className="subtle section-gap">Soldes suivis depuis le {dayLabel(t.opening_date)} ; les mouvements antérieurs ne sont pas comptés.</p>
               )}
+              {t.wallet_liability != null && (
+                <div className="card section-gap">
+                  <dl className="calc">
+                    <div className="total"><dt>Crédits CFA des membres (dus en consommations)</dt><dd>{money(t.wallet_liability)}</dd></div>
+                  </dl>
+                  <p className="subtle" style={{ marginTop: 8 }}>
+                    Argent déjà rechargé sur les cartes au {dayLabel(t.to, 'short')}, que le club doit encore aux membres en consommations.
+                    Il est compté en trésorerie à la recharge, en recette seulement quand la carte paie.
+                  </p>
+                </div>
+              )}
               <div className="grid-2 section-gap">
                 <div className="card">
                   <div className="card-head"><h2>Résultat de la période</h2></div>

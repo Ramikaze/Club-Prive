@@ -64,6 +64,7 @@ function CloseDialog({ close, month, onDone }) {
                 <div key={a.method}><dt>{a.method}</dt><dd>{money(a.closing)}</dd></div>
               ))}
               <div className="total"><dt>Trésorerie en fin de mois</dt><dd>{money(t.total.closing)}</dd></div>
+              {t.wallet_liability != null && <div><dt>Crédits CFA des membres (dus en consommations)</dt><dd>{money(t.wallet_liability)}</dd></div>}
             </dl>
           </div>
         )}
@@ -164,7 +165,7 @@ export default function Closing() {
                   <div className="table-wrap">
                     <table className="table stack-sm">
                       <thead>
-                        <tr><th>Mois</th><th className="num">Encaissé net</th><th className="num">Dépenses</th><th className="num">Résultat</th><th className="num">Trésorerie fin</th></tr>
+                        <tr><th>Mois</th><th className="num">Encaissé net</th><th className="num">Dépenses</th><th className="num">Résultat</th><th className="num">Trésorerie fin</th><th className="num">Crédits CFA des membres</th></tr>
                       </thead>
                       <tbody>
                         {data.closed.map((c) => (
@@ -174,6 +175,8 @@ export default function Closing() {
                             <td data-label="Dépenses" className="num">{money(c.summary.result.expenses)}</td>
                             <td data-label="Résultat" className={`num ${c.summary.result.result < 0 ? 'amount-out' : ''}`}>{money(c.summary.result.result)}</td>
                             <td data-label="Trésorerie fin" className="num">{money(c.summary.treasury.total.closing)}</td>
+                            {/* Closings made before the member card have no such figure. */}
+                            <td data-label="Crédits CFA des membres" className="num">{c.summary.wallet_liability == null ? '—' : money(c.summary.wallet_liability)}</td>
                           </tr>
                         ))}
                       </tbody>

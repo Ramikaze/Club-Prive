@@ -2637,6 +2637,7 @@ export class Club {
       ...this.paymentDTO(p),
       number: formatTicketNumber(p.id),
       member_phone: p.member_phone ?? '',
+      member_first_name: p.first_name,
       refunded_amount: refunds.reduce((sum, r) => sum + r.amount, 0),
       refunds,
       status: this.ticketStatus(p),

@@ -896,6 +896,67 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
   transform: translate(-50%, -50%) rotate(-35deg); font-size: 20pt; font-weight: 900; color: rgba(0, 0, 0, 0.16); pointer-events: none;
 }
 
+/* ------------------------------------------------------------------ member card in 3D (MemberCard3D) */
+
+/* The card keeps its own black and gold in both themes: it is the plastic card, not a surface of the page. Sizes
+   follow the card's width (container units), so the phone shows the same card, smaller. */
+.c3d-stage { container-type: inline-size; perspective: 1100px; width: 100%; max-width: 420px; margin: 0 auto; }
+.c3d { position: relative; width: 100%; aspect-ratio: 85.6 / 54; transform-style: preserve-3d; transition: transform .5s cubic-bezier(.23, 1, .32, 1); --gx: 30%; --gy: 20%; }
+.c3d.is-interactive { cursor: pointer; touch-action: pan-y; -webkit-tap-highlight-color: transparent; }
+.c3d.is-interactive:focus-visible { outline: none; }
+.c3d.is-interactive:focus-visible .c3d-face { box-shadow: var(--focus-ring), 0 22px 40px -12px rgba(0, 0, 0, .55); }
+.c3d.is-turned { transform: rotateY(180deg); }
+.c3d.is-inactive { filter: grayscale(1); opacity: .55; }
+.c3d.is-inactive.is-interactive { cursor: default; }
+.c3d-face {
+  position: absolute; inset: 0; border-radius: 4.2cqw; overflow: hidden; backface-visibility: hidden; -webkit-backface-visibility: hidden; color: #c9a063;
+  background: radial-gradient(120% 90% at 20% 0%, #24211d 0%, #0b0a09 55%, #050505 100%);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .08) inset, 0 -1px 0 rgba(0, 0, 0, .6) inset, 0 22px 40px -12px rgba(0, 0, 0, .55), 0 6px 14px rgba(0, 0, 0, .25);
+  -webkit-print-color-adjust: exact; print-color-adjust: exact; user-select: none;
+}
+.c3d-face::before { content: ""; position: absolute; inset: 0; border-radius: inherit; border: 1px solid rgba(201, 160, 99, .35); pointer-events: none; }
+.c3d-back { transform: rotateY(180deg); }
+.c3d-logo { position: absolute; left: 50%; top: 12%; transform: translateX(-50%); width: 64%; mix-blend-mode: screen; pointer-events: none; }
+.c3d-chip { position: absolute; left: 7%; top: 38%; width: 12%; aspect-ratio: 1.3; border-radius: 1.2cqw; background: linear-gradient(135deg, #f1d79c, #b48a4a 45%, #e6c789 60%, #9b7239); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .25); }
+.c3d-name {
+  position: absolute; left: 7%; right: 7%; bottom: 13%; font-size: 4cqw; letter-spacing: .1em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  text-shadow: 0 1px 0 #000, 0 -1px 0 rgba(255, 230, 180, .25);
+}
+.c3d-code { position: absolute; left: 7%; bottom: 6%; font-family: var(--mono); font-size: 2.9cqw; letter-spacing: .12em; opacity: .8; }
+.c3d-qr { position: absolute; left: 50%; top: 45%; width: 42%; aspect-ratio: 1; transform: translate(-50%, -50%); padding: 2cqw; box-sizing: border-box; border-radius: 2.4cqw; background: #f4ead8; }
+.c3d-qr svg { display: block; width: 100%; height: 100%; }
+.c3d-note { position: absolute; left: 0; right: 0; bottom: 7%; text-align: center; font-size: 2.5cqw; letter-spacing: .25em; opacity: .7; }
+.c3d-glare { position: absolute; inset: 0; pointer-events: none; mix-blend-mode: soft-light; background: radial-gradient(circle at var(--gx) var(--gy), rgba(255, 240, 210, .6), rgba(255, 240, 210, 0) 45%); }
+.c3d-shine {
+  position: absolute; inset: 0; pointer-events: none; opacity: .35;
+  background: linear-gradient(115deg, transparent 30%, rgba(201, 160, 99, .4) 45%, transparent 55%); background-size: 250% 250%; background-position: var(--gx) 50%;
+}
+.c3d-hint { margin: 10px 0 0; text-align: center; font-size: 0.8rem; color: var(--text-3); }
+@media (prefers-reduced-motion: reduce) { .c3d { transition: none; } }
+
+/* ------------------------------------------------------------------ « Carte » tile of the member page */
+
+.card-tile .c3d-stage { margin: 4px auto 0; }
+.tile-actions-main { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.tile-actions-minor { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 8px; }
+.tile-bar { margin-top: 18px; }
+.tile-bar-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.tile-bar-top .k { font-size: 0.75rem; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.05em; }
+.tile-bar-top .v { font-weight: 650; font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+.tile-bar .gauge { margin: 6px 0 5px; }
+.gauge .g-cfa { background: var(--logo-gold); }
+.tile-bar .subtle { margin: 0; }
+.tile-alert { margin-top: 16px; }
+.tile-alert .row { margin-top: 8px; }
+.tile-fold { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 10px; }
+.tile-fold > summary { cursor: pointer; font-weight: 600; color: var(--text-2); font-size: 0.9rem; padding: 4px 0; }
+.tile-fold > summary:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 6px; }
+.tile-fold .list { margin-top: 8px; }
+.is-cancelled .title { text-decoration: line-through; text-decoration-thickness: 1px; }
+/* A row with several buttons: on a phone they go under the text instead of squeezing it. */
+.list-item-wrap { flex-wrap: wrap; }
+.list-item-wrap .grow { flex-basis: 12rem; }
+
 /* ------------------------------------------------------------------ print */
 
 @media print {

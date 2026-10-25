@@ -14,6 +14,7 @@ import {
   openQuickPayReservation,
   quickStartReservation,
   quickFinishReservation,
+  sendRenewalWhatsApp,
 } from '../dialogs/index.js';
 
 const PERIODS = [['jour', 'Jour'], ['semaine', '7 jours'], ['mois', 'Mois']];
@@ -112,6 +113,33 @@ function LiveRoom({ rm, bizDay, onReload }) {
         </>
       )}
     </article>
+  );
+}
+
+// The automatic renewals the card's money does not cover: soon (3 days ahead) or already blocked (up to 30 days
+// after the end). Each one has its message to the member, one click away.
+function RenewalAlerts({ alerts }) {
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>Renouvellements par la carte</h2>
+        <span className="chip chip-warn">{`${alerts.length} à recharger`}</span>
+      </div>
+      <div className="list">{alerts.map((a) => (
+        <div className="list-item list-item-wrap" key={a.member_id}>
+          <div className="grow">
+            <div className="title"><Link to={`/membres/${a.member_id}`}>{a.member_name}</Link></div>
+            <div className="meta">{a.state === 'bloque'
+              ? `Renouvellement impossible : formule ${a.plan_name} terminée le ${dayLabel(a.end_date, 'short')} · ${money(a.balance)} sur la carte, ${money(a.price)} nécessaires`
+              : `Formule ${a.plan_name} jusqu’au ${dayLabel(a.end_date, 'short')} · ${money(a.balance)} sur la carte, ${money(a.price)} nécessaires`}</div>
+          </div>
+          <span className={`chip ${a.state === 'bloque' ? 'chip-danger' : 'chip-warn'}`}>{`il manque ${money(a.missing)}`}</span>
+          <button type="button" className="btn btn-sm" onClick={() => sendRenewalWhatsApp(a, { firstName: a.first_name, phone: a.phone })}
+            title={a.phone_ok ? `Prévenir ${a.member_name} par WhatsApp` : 'Numéro inutilisable : WhatsApp s’ouvrira sans destinataire'}>
+            <Icon name="message" /> WhatsApp</button>
+        </div>
+      ))}</div>
+    </section>
   );
 }
 
@@ -215,6 +243,7 @@ export default function Dashboard() {
               </div>
 
               <div className="stack-cards">
+                {d.renewal_alerts?.length ? <RenewalAlerts alerts={d.renewal_alerts} /> : null}
                 <section className="card">
                   <div className="card-head">
                     <h2>Points d’attention</h2>

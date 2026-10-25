@@ -3,7 +3,7 @@ import Icon from '../components/ui/Icon.jsx';
 import { AccountTag, CashTabs, Empty, Loaded, PageHead, Segmented } from '../components/ui/ui.jsx';
 import { DateInput } from '../components/ui/PeriodPicker.jsx';
 import { api, qs } from '../lib/api.js';
-import { ACCOUNT_LABEL, bizToday, dateTime, dayLabel, money } from '../lib/format.js';
+import { ACCOUNT_LABEL, bizToday, dateTime, dayLabel, money, paymentMethodText, paymentPurpose } from '../lib/format.js';
 import { useBusy, useLoad } from '../lib/hooks.js';
 import { useIsAdmin, useSettings } from '../store/useStore.js';
 import { downloadExcel } from '../utils/exportExcel.js';
@@ -22,12 +22,15 @@ function JournalTable({ payments }) {
     <div className="table-wrap"><table className="table stack-sm">
       <thead><tr><th>Date</th><th>N°</th><th>Membre</th><th>Moyen</th><th>Ventilation</th><th className="num">Total</th><th>Par</th><th><span className="sr-only">Ticket</span></th></tr></thead>
       <tbody>{payments.map((p) => (
-        <tr key={p.id}>
+        <tr key={p.id} className={p.cancelled_at ? 'is-muted' : ''}>
           <td data-label="Date" className="nowrap">{dateTime(p.paid_at)}</td>
           <td data-label="N°">{p.reservation_id ? <Link to={`/reservations/${p.reservation_id}`}>{p.id}</Link> : p.id}</td>
           <td data-label="Membre"><Link to={`/membres/${p.member_id}`}>{p.member_name}</Link></td>
-          <td data-label="Moyen">{p.method}{p.reference && <> <span className="subtle">{p.reference}</span></>}</td>
-          <td data-label="Ventilation"><Ventilation byAccount={p.by_account} /></td>
+          <td data-label="Moyen">{paymentMethodText(p)}{p.reference && <> <span className="subtle">{p.reference}</span></>}</td>
+          <td data-label="Ventilation">
+            {paymentPurpose(p) ?? <Ventilation byAccount={p.by_account} />}
+            {p.cancelled_at ? <> <span className="chip chip-danger" title={p.cancel_reason ?? ''}>{`annulé le ${dateTime(p.cancelled_at)}`}</span></> : null}
+          </td>
           <td data-label="Total" className="num"><strong>{money(p.amount)}</strong></td>
           <td data-label="Par">{p.created_by_name ?? ''}</td>
           <td className="num"><Link className="btn btn-sm" to={`/caisse/ticket/${p.id}`}>Ticket</Link></td>

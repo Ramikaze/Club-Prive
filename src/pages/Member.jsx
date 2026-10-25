@@ -4,60 +4,139 @@ import { AccountTag, Chip, DemoChip, Empty, Loaded, Notice, PageHead } from '../
 import { toast } from '../components/ui/toast.jsx';
 import { actionDialog } from '../components/ui/Modal.jsx';
 import { api, newKey } from '../lib/api.js';
-import { money, fmtDuration, dayLabel, dateTime } from '../lib/format.js';
+import MemberCard3D from '../components/ui/MemberCard3D.jsx';
+import { money, fmtDuration, dayLabel, dateTime, dayMonth, paymentPurpose, paymentMethodText } from '../lib/format.js';
 import { useLoad } from '../lib/hooks.js';
 import { useIsAdmin } from '../store/useStore.js';
 import {
   openBookingDialog, openMemberDialog, openSubscriptionDialog, openCardDialog, openAdjustCreditDialog, openPaymentDialog,
-  openDeactivateMemberDialog, openReactivateMemberDialog, memberRoomEligibility,
+  openDeactivateMemberDialog, openReactivateMemberDialog, memberRoomEligibility, openRechargeDialog, openOutsideMealDialog,
+  openCancelRechargeDialog, openCancelMealDialog, sendRenewalWhatsApp,
 } from '../dialogs/index.js';
 
-function CreditBlock({ credit }) {
-  const total = Math.max(credit.granted, credit.committed + credit.consumed + credit.available, 1);
+const plural = (minutes) => (minutes > 1 && minutes !== 60 ? 's' : '');
+
+// The plan's hours: available in large, the gauge (consumed, committed, available), then the detail line.
+function TimeBar({ current, summary }) {
+  if (!current) {
+    let text = 'Aucune formule : les réservations sont payées avec le crédit CFA.';
+    if (summary.state === 'expiree') text = `Formule expirée le ${dayLabel(summary.end_date, 'short')} : les réservations sont payées avec le crédit CFA.`;
+    if (summary.state === 'a_venir') text = `Formule ${summary.plan_name} à partir du ${dayLabel(summary.start_date, 'short')} ; d’ici là, les réservations sont payées avec le crédit CFA.`;
+    return (
+      <div className="tile-bar">
+        <div className="tile-bar-top"><span className="k">Crédit temps</span><span className="v">—</span></div>
+        <div className="gauge" aria-hidden="true" />
+        <p className="subtle">{text}</p>
+      </div>
+    );
+  }
+  const c = current.credit;
+  const total = Math.max(c.granted, c.committed + c.consumed + c.available, 1);
   const pct = (v) => `${Math.round((v / total) * 1000) / 10}%`;
   return (
-    <>
-      <div className="gauge" role="img" aria-label={`Crédit : ${fmtDuration(credit.consumed)} consommées, ${fmtDuration(credit.committed)} engagées, ${fmtDuration(credit.available)} disponibles`}>
-        <span className="g-consumed" style={{ width: pct(credit.consumed) }} />
-        <span className="g-committed" style={{ width: pct(credit.committed) }} />
-        <span className="g-available" style={{ width: pct(credit.available) }} />
+    <div className="tile-bar">
+      <div className="tile-bar-top"><span className="k">Crédit temps</span><span className="v">{`${fmtDuration(c.available)} disponible${plural(c.available)}`}</span></div>
+      <div className="gauge" role="img" aria-label={`Crédit temps : ${fmtDuration(c.consumed)} consommées, ${fmtDuration(c.committed)} engagées, ${fmtDuration(c.available)} disponibles`}>
+        <span className="g-consumed" style={{ width: pct(c.consumed) }} />
+        <span className="g-committed" style={{ width: pct(c.committed) }} />
+        <span className="g-available" style={{ width: pct(c.available) }} />
       </div>
-      <div className="credit-legend">
-        <div><span className="k">Attribuées</span><span className="v">{fmtDuration(credit.granted)}</span></div>
-        <div><span className="k">Engagées</span><span className="v">{fmtDuration(credit.committed)}</span></div>
-        <div><span className="k">Consommées</span><span className="v">{fmtDuration(credit.consumed)}</span></div>
-        <div><span className="k">Disponibles</span><span className="v">{fmtDuration(credit.available)}</span></div>
-      </div>
-      {credit.adjustments ? <p className="subtle" style={{ marginTop: 6 }}>Dont ajustements manuels : {credit.adjustments > 0 ? '+' : '−'}{fmtDuration(Math.abs(credit.adjustments))}</p> : null}
-      {credit.allocation_mode === 'mensuelle' ? <p className="subtle" style={{ marginTop: 6 }}>Attribution mensuelle : {fmtDuration(credit.allocated)} attribuées à ce jour sur {fmtDuration(credit.included)}.</p> : null}
-    </>
+      <p className="subtle">
+        {`${fmtDuration(c.granted)} attribuées · ${fmtDuration(c.committed)} engagées · ${fmtDuration(c.consumed)} consommées · ${current.plan_name} jusqu’au ${dayLabel(current.end_date, 'short')}`}
+        {summary.state === 'expire_bientot' ? <>{' '}<span className="chip chip-warn">{summary.days_left === 0 ? 'dernier jour' : `encore ${summary.days_left} j`}</span></> : null}
+      </p>
+      {c.adjustments ? <p className="subtle">Dont ajustements manuels : {c.adjustments > 0 ? '+' : '−'}{fmtDuration(Math.abs(c.adjustments))}</p> : null}
+      {c.allocation_mode === 'mensuelle' ? <p className="subtle">Attribution mensuelle : {fmtDuration(c.allocated)} attribuées à ce jour sur {fmtDuration(c.included)}.</p> : null}
+    </div>
   );
 }
 
-function MemberDetail({ m, reload }) {
+// The card's money: the balance in large, the bar against the last recharge.
+function CfaBar({ wallet }) {
+  const last = wallet.last_recharge;
+  const ratio = last ? Math.min(1, wallet.balance / last.amount) : (wallet.balance > 0 ? 1 : 0);
+  return (
+    <div className="tile-bar">
+      <div className="tile-bar-top"><span className="k">Crédit CFA</span><span className="v">{money(wallet.balance)}</span></div>
+      <div className="gauge" role="img" aria-label={`Crédit CFA : ${money(wallet.balance)}${last ? ` sur ${money(last.amount)} rechargés` : ''}`}>
+        <span className="g-cfa" style={{ width: `${Math.round(ratio * 1000) / 10}%` }} />
+      </div>
+      <p className="subtle">{last ? `sur ${money(last.amount)} rechargés le ${dayMonth(last.at)}` : 'Aucune recharge pour l’instant.'}</p>
+    </div>
+  );
+}
+
+// The automatic renewal that the card's money does not cover (soon, or already blocked), with the message to send.
+function RenewalAlert({ m }) {
+  const r = m.renewal;
+  if (!r) return null;
+  const end = dayLabel(r.end_date, 'short');
+  return (
+    <div className="tile-alert">
+      <Notice kind={r.state === 'bloque' ? 'danger' : 'warn'}>
+        {r.state === 'bloque'
+          ? `Renouvellement impossible : ${money(r.balance)} sur la carte, ${money(r.price)} nécessaires (formule ${r.plan_name} terminée le ${end}). Il manque ${money(r.missing)} : l’abonnement sera renouvelé dès la recharge.`
+          : `La formule ${r.plan_name} se termine le ${end} : ${money(r.balance)} sur la carte, ${money(r.price)} nécessaires pour la renouveler. Il manque ${money(r.missing)}.`}
+        <div className="row">
+          <button type="button" className="btn btn-sm" onClick={() => sendRenewalWhatsApp(r, { firstName: m.first_name, phone: m.phone })}>
+            <Icon name="message" /> Prévenir par WhatsApp</button>
+        </div>
+      </Notice>
+    </div>
+  );
+}
+
+const MOVE_LABEL = {
+  recharge: 'Recharge', paiement: 'Payé par la carte', remboursement: 'Rendu sur la carte', annulation_recharge: 'Recharge annulée',
+};
+
+function WalletMovements({ m, reload }) {
+  const isAdmin = useIsAdmin();
+  const moves = m.wallet.movements;
+  const payments = new Map(m.payments.map((p) => [p.id, p]));
+  const cancelled = new Set(moves.filter((w) => w.kind === 'annulation_recharge').map((w) => w.payment_id));
+  return (
+    <details className="tile-fold">
+      <summary>{`Mouvements de la carte (${moves.length}${moves.length === 50 ? ' derniers' : ''})`}</summary>
+      {moves.length ? (
+        <div className="list">{moves.map((w) => {
+          const isCancelled = w.kind === 'recharge' && (cancelled.has(w.payment_id) || Boolean(payments.get(w.payment_id)?.cancelled_at));
+          return (
+            <div className={`list-item list-item-wrap ${isCancelled ? 'is-cancelled' : ''}`} key={w.id}>
+              <div className="grow">
+                <div className="title">{MOVE_LABEL[w.kind] ?? w.kind}{' '}
+                  <span className={w.amount > 0 ? 'amount-in' : ''}>{`${w.amount > 0 ? '+' : '−'}${money(Math.abs(w.amount))}`}</span></div>
+                <div className="meta">{`${dateTime(w.at)} · solde ${money(w.balance_after)}${w.by_name ? ` · ${w.by_name}` : ''}${w.reason ? ` · ${w.reason}` : ''}`}</div>
+              </div>
+              {isCancelled ? <span className="chip">annulée</span> : null}
+              {w.payment_id ? <Link className="btn btn-sm" to={`/caisse/ticket/${w.payment_id}`}>Ticket</Link> : null}
+              {isAdmin && w.kind === 'recharge' && !isCancelled ? (
+                <button type="button" className="btn btn-sm btn-ghost"
+                  onClick={() => openCancelRechargeDialog({ paymentId: w.payment_id, amount: w.amount, at: w.at }, reload)}>Annuler la recharge</button>
+              ) : null}
+            </div>
+          );
+        })}</div>
+      ) : <Empty icon="wallet">Aucun mouvement sur la carte.</Empty>}
+    </details>
+  );
+}
+
+// The « Carte » tile: the card itself (turned over for its QR code), the two credits under it, then the actions.
+function CardTile({ m, current, summary, reload, book }) {
   const navigate = useNavigate();
   const isAdmin = useIsAdmin();
-  const summary = m.subscription;
-  const current = m.subscriptions.find((s) => s.id === summary.id && ['active', 'expire_bientot'].includes(summary.state));
-  const elig = memberRoomEligibility(m);
-  const due = m.charges.filter((c) => c.status === 'due');
-  const dueTotal = due.reduce((sum, c) => sum + c.amount, 0);
-  const memberForDialogs = { ...m };
-
-  const book = () => {
-    if (!elig.ok) {
-      toast(`Accès salle refusé pour ${m.name} : ${elig.reason}.`, 'error');
-      return;
-    }
-    openBookingDialog({ member: { id: m.id, name: m.name, member_no: m.member_no, subscription: summary }, lockMember: true },
-      (det) => navigate(`/reservations/${det.reservation.id}`));
-  };
+  const shown = m.cards.find((c) => c.status === 'active') ?? m.cards[0] ?? null;
+  const older = m.cards.filter((c) => c !== shown);
+  const activeCard = shown?.status === 'active' ? shown : null;
+  const issueCard = () => openCardDialog({ ...m }, (res) => (res?.card_id ? navigate(`/cartes/${res.card_id}`) : reload()));
+  const inactiveTitle = m.active ? undefined : 'Membre désactivé';
 
   const cancelSub = () => {
     const key = newKey();
     actionDialog({
       title: 'Annuler l’abonnement',
-      message: `${current.plan_name} (${dayLabel(current.start_date, 'short')} → ${dayLabel(current.end_date, 'short')}). La ligne d’abonnement non encaissée sera annulée ; un remboursement éventuel est une action distincte.`,
+      message: `${current.plan_name} (${dayLabel(current.start_date, 'short')} → ${dayLabel(current.end_date, 'short')}). La ligne d’abonnement non encaissée sera annulée ; un remboursement éventuel est une action distincte. L’abonnement ne sera plus renouvelé sur la carte.`,
       reasonLabel: 'Motif', danger: true, confirmLabel: 'Annuler l’abonnement',
       run: async (v) => {
         await api.post(`/api/subscriptions/${current.id}/cancel`, { reason: v.reason }, key);
@@ -70,14 +149,88 @@ function MemberDetail({ m, reload }) {
   const deactivate = (card) => {
     const key = newKey();
     actionDialog({
-      title: 'Désactiver la carte', message: `Carte ${card.kind} ${card.code}.`, reasonLabel: 'Motif (perte, remplacement…)',
-      danger: true, confirmLabel: 'Désactiver',
+      title: 'Désactiver la carte', message: `Carte ${card.kind} ${card.code}. Le crédit CFA reste au membre : il passe sur sa prochaine carte.`,
+      reasonLabel: 'Motif (perte, remplacement…)', danger: true, confirmLabel: 'Désactiver',
       run: async (v) => {
         await api.post(`/api/cards/${card.id}/deactivate`, { reason: v.reason }, key);
         toast('Carte désactivée.');
         reload();
       },
     });
+  };
+
+  return (
+    <section className="card card-tile">
+      <div className="card-head"><h2>Carte</h2>
+        {activeCard ? <span className="chip chip-ok">active</span> : shown ? <span className="chip">désactivée</span> : <span className="chip">aucune carte</span>}</div>
+      <MemberCard3D
+        name={m.name}
+        code={shown?.code ?? null}
+        active={Boolean(activeCard)}
+        qrPath={shown ? `/membres/${m.id}?card=${encodeURIComponent(shown.code)}` : null}
+      />
+      {!activeCard ? (
+        <div className="row" style={{ justifyContent: 'center', marginTop: 10 }}>
+          <button type="button" className="btn btn-sm btn-primary" onClick={issueCard}><Icon name="card" /> Émettre une carte</button>
+        </div>
+      ) : null}
+
+      <TimeBar current={current} summary={summary} />
+      <CfaBar wallet={m.wallet} />
+      <RenewalAlert m={m} />
+
+      <div className="tile-actions-main">
+        <button type="button" className="btn btn-primary" onClick={() => openRechargeDialog(m, reload)} disabled={!m.active} title={inactiveTitle}>
+          <Icon name="wallet" /> Recharger</button>
+        <button type="button" className="btn" onClick={book}><Icon name="calendar" /> Réserver</button>
+        <button type="button" className="btn" onClick={() => openOutsideMealDialog(m, reload)} disabled={!m.active} title={inactiveTitle}>
+          <Icon name="receipt" /> Repas extérieur</button>
+        {shown ? <Link className="btn" to={`/cartes/${shown.id}`}><Icon name="printer" /> Imprimer la carte</Link> : null}
+      </div>
+      <div className="tile-actions-minor">
+        {isAdmin && current ? <button type="button" className="btn btn-sm btn-ghost" onClick={() => openAdjustCreditDialog(m, current, reload)}>Ajuster le crédit temps</button> : null}
+        {activeCard ? <button type="button" className="btn btn-sm btn-ghost" onClick={() => deactivate(activeCard)}>Désactiver la carte</button> : null}
+        {activeCard ? <button type="button" className="btn btn-sm btn-ghost" onClick={issueCard}>Émettre une autre carte</button> : null}
+        <button type="button" className="btn btn-sm btn-ghost" onClick={() => openSubscriptionDialog({ ...m }, reload)}>{summary.state === 'aucun' ? 'Activer une formule' : 'Renouveler la formule'}</button>
+        {isAdmin && current ? <button type="button" className="btn btn-sm btn-ghost" onClick={cancelSub}>Annuler l’abonnement</button> : null}
+      </div>
+
+      <WalletMovements m={m} reload={reload} />
+      {older.length ? (
+        <details className="tile-fold">
+          <summary>{`Anciennes cartes (${older.length})`}</summary>
+          <div className="list">{older.map((c) => (
+            <div className="list-item list-item-wrap" key={c.id}>
+              <div className="grow"><div className="title"><span className="mono">{c.code}</span></div>
+                <div className="meta">Carte {c.kind} · émise le {dateTime(c.issued_at)}{c.deactivation_reason ? ` · ${c.deactivation_reason}` : ''}</div></div>
+              {c.status === 'active' ? <span className="chip chip-ok">active</span> : <span className="chip">désactivée</span>}
+              <Link className="btn btn-sm" to={`/cartes/${c.id}`} aria-label={`Afficher ou imprimer la carte ${c.code} avec son QR code`}><Icon name="printer" /> Carte & QR</Link>
+              {c.status === 'active' ? <button type="button" className="btn btn-sm btn-ghost" onClick={() => deactivate(c)}>Désactiver</button> : null}
+            </div>
+          ))}</div>
+        </details>
+      ) : null}
+    </section>
+  );
+}
+
+function MemberDetail({ m, reload }) {
+  const navigate = useNavigate();
+  const isAdmin = useIsAdmin();
+  const summary = m.subscription;
+  const current = m.subscriptions.find((s) => s.id === summary.id && ['active', 'expire_bientot'].includes(summary.state));
+  // The booking member may pay the room with his card when his plan has no time left, or when he has none.
+  const elig = memberRoomEligibility(m, { card: true });
+  const due = m.charges.filter((c) => c.status === 'due');
+  const dueTotal = due.reduce((sum, c) => sum + c.amount, 0);
+
+  const book = () => {
+    if (!elig.ok) {
+      toast(`Accès salle refusé pour ${m.name} : ${elig.reason}.`, 'error');
+      return;
+    }
+    openBookingDialog({ member: { id: m.id, name: m.name, member_no: m.member_no, subscription: summary }, lockMember: true },
+      (det) => navigate(`/reservations/${det.reservation.id}`));
   };
 
   return (
@@ -117,75 +270,30 @@ function MemberDetail({ m, reload }) {
       )}
 
       <div className="grid-2">
-        <section className="card">
-          <div className="card-head"><h2>Abonnement</h2>
-            <button type="button" className={`btn btn-sm ${current ? '' : 'btn-primary'}`} onClick={() => openSubscriptionDialog(memberForDialogs, reload)}>{summary.state === 'aucun' ? 'Activer une formule' : 'Renouveler'}</button></div>
-          {current ? (
-            <>
-              <p><strong>{current.plan_name}</strong> · du {dayLabel(current.start_date, 'short')} au {dayLabel(current.end_date, 'short')}
-                {summary.state === 'expire_bientot' ? <>{' '}<span className="chip chip-warn">{summary.days_left === 0 ? 'dernier jour' : `encore ${summary.days_left} j`}</span></> : null}</p>
-              <CreditBlock credit={current.credit} />
-              {isAdmin ? (
-                <div className="row" style={{ marginTop: 12 }}>
-                  <button type="button" className="btn btn-sm" onClick={() => openAdjustCreditDialog(m, current, reload)}>Ajuster le crédit</button>
-                  <button type="button" className="btn btn-sm btn-danger" onClick={cancelSub}>Annuler l’abonnement</button></div>
-              ) : null}
-            </>
-          ) : (
-            <Notice kind={summary.state === 'expiree' ? 'danger' : 'info'}>
-              {summary.state === 'expiree'
-                ? `Formule expirée le ${dayLabel(summary.end_date, 'short')} : les réservations sont refusées jusqu’au renouvellement.`
-                : summary.state === 'a_venir' ? `Formule ${summary.plan_name} à partir du ${dayLabel(summary.start_date, 'short')}.` : 'Aucune formule : activez une formule pour permettre les réservations.'}
-            </Notice>
-          )}
-        </section>
+        <CardTile m={m} current={current} summary={summary} reload={reload} book={book} />
 
-        <section className="card">
-          <div className="card-head">
-            <h2>Cartes</h2>
-            <button
-              type="button"
-              className="btn btn-sm"
-              onClick={() => openCardDialog(memberForDialogs, (res) => (res?.card_id ? navigate(`/cartes/${res.card_id}`) : reload()))}
-            >
-              <Icon name="card" /> Émettre une carte
-            </button>
-          </div>
-          {m.cards.length ? (
-            <div className="list">{m.cards.map((c) => (
-              <div className="list-item" key={c.id}>
-                <div className="grow"><div className="title"><span className="mono">{c.code}</span></div>
-                  <div className="meta">Carte {c.kind} · émise le {dateTime(c.issued_at)}{c.deactivation_reason ? ` · ${c.deactivation_reason}` : ''}</div></div>
-                {c.status === 'active' ? <span className="chip chip-ok">active</span> : <span className="chip">désactivée</span>}
-                <Link className="btn btn-sm" to={`/cartes/${c.id}`} aria-label={`Afficher ou imprimer la carte ${c.code} avec son QR code`}>
-                  <Icon name="printer" /> Carte & QR
-                </Link>
-                {c.status === 'active' ? <button type="button" className="btn btn-sm btn-ghost" onClick={() => deactivate(c)}>Désactiver</button> : null}
-              </div>
-            ))}</div>
-          ) : <Empty icon="card">Aucune carte émise.</Empty>}
-        </section>
+        <div className="stack-cards">
+          <section className="card">
+            <div className="card-head"><h2>Coordonnées</h2></div>
+            <dl className="kv">
+              <dt>Téléphone</dt><dd>{m.phone}</dd>
+              <dt>Courriel</dt><dd>{m.email ?? '—'}</dd>
+              <dt>Notes</dt><dd>{m.notes ?? '—'}</dd>
+              <dt>Membre depuis</dt><dd>{dateTime(m.created_at)}</dd>
+            </dl>
+          </section>
 
-        <section className="card">
-          <div className="card-head"><h2>Coordonnées</h2></div>
-          <dl className="kv">
-            <dt>Téléphone</dt><dd>{m.phone}</dd>
-            <dt>Courriel</dt><dd>{m.email ?? '—'}</dd>
-            <dt>Notes</dt><dd>{m.notes ?? '—'}</dd>
-            <dt>Membre depuis</dt><dd>{dateTime(m.created_at)}</dd>
-          </dl>
-        </section>
-
-        <section className="card">
-          <div className="card-head"><h2>À encaisser</h2>{due.length ? <button type="button" className="btn btn-sm btn-primary" onClick={() => openPaymentDialog({ lines: due, memberName: m.name }, reload)}>Encaisser {money(dueTotal)}</button> : null}</div>
-          {due.length ? (
-            <div className="list">{due.map((c) => (
-              <div className="list-item" key={c.id}>
-                <div className="grow"><div className="title">{c.label}{c.quantity > 1 ? ` × ${c.quantity}` : ''}</div><div className="meta"><AccountTag account={c.account} />{c.reservation_id ? <> · <Link to={`/reservations/${c.reservation_id}`}>réservation n° {c.reservation_id}</Link></> : null}</div></div>
-                <span className="num">{money(c.amount)}</span></div>
-            ))}</div>
-          ) : <Empty icon="check">Rien à encaisser.</Empty>}
-        </section>
+          <section className="card">
+            <div className="card-head"><h2>À encaisser</h2>{due.length ? <button type="button" className="btn btn-sm btn-primary" onClick={() => openPaymentDialog({ lines: due, memberName: m.name }, reload)}>Encaisser {money(dueTotal)}</button> : null}</div>
+            {due.length ? (
+              <div className="list">{due.map((c) => (
+                <div className="list-item" key={c.id}>
+                  <div className="grow"><div className="title">{c.label}{c.quantity > 1 ? ` × ${c.quantity}` : ''}</div><div className="meta"><AccountTag account={c.account} />{c.reservation_id ? <> · <Link to={`/reservations/${c.reservation_id}`}>réservation n° {c.reservation_id}</Link></> : null}</div></div>
+                  <span className="num">{money(c.amount)}</span></div>
+              ))}</div>
+            ) : <Empty icon="check">Rien à encaisser.</Empty>}
+          </section>
+        </div>
 
         <section className="card span-2">
           <div className="card-head"><h2>Réservations</h2></div>
@@ -221,10 +329,15 @@ function MemberDetail({ m, reload }) {
           <div className="card-head"><h2>Paiements</h2></div>
           {m.payments.length ? (
             <div className="list">{m.payments.map((p) => (
-              <div className="list-item" key={p.id}>
-                <div className="grow"><div className="title">{money(p.amount)} — {p.method}</div>
-                  <div className="meta">{dateTime(p.paid_at)}{p.reservation_id ? <> · <Link to={`/reservations/${p.reservation_id}`}>réservation n° {p.reservation_id}</Link></> : ' · abonnement'}</div></div>
-                <span className="chip chip-ok">n° {p.id}</span>
+              <div className={`list-item list-item-wrap ${p.cancelled_at ? 'is-cancelled' : ''}`} key={p.id}>
+                <div className="grow"><div className="title">{money(p.amount)} — {paymentMethodText(p)}</div>
+                  <div className="meta">{dateTime(p.paid_at)}
+                    {paymentPurpose(p) ? ` · ${paymentPurpose(p)}` : null}
+                    {p.reservation_id ? <> · <Link to={`/reservations/${p.reservation_id}`}>réservation n° {p.reservation_id}</Link></> : (paymentPurpose(p) ? null : ' · abonnement')}
+                    {p.cancelled_at ? ` · annulé le ${dateTime(p.cancelled_at)} : ${p.cancel_reason}` : null}</div></div>
+                {p.cancelled_at ? <span className="chip">annulé</span> : <span className="chip chip-ok">n° {p.id}</span>}
+                {isAdmin && p.kind === 'repas' && !p.cancelled_at
+                  ? <button type="button" className="btn btn-sm btn-ghost" onClick={() => openCancelMealDialog(p, reload)}>Annuler le repas</button> : null}
                 <Link className="btn btn-sm" to={`/caisse/ticket/${p.id}`}>Ticket</Link></div>
             ))}</div>
           ) : <Empty icon="wallet">Aucun paiement.</Empty>}

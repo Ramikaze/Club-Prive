@@ -16,6 +16,7 @@ import { useLoad } from '../lib/hooks.js';
 import { useStore } from '../store/useStore.js';
 import { DemoMessageDialog } from '../dialogs/reservationDialogs.jsx';
 import { paymentLines, ticketVerifyUrl, ticketWhatsAppText } from '../../shared/ticket.js';
+import { rechargeWhatsAppText } from '../../shared/wallet.js';
 import { waDigits, waLink } from '../../shared/whatsapp.js';
 
 // The injected <style> that sets the roll's paper size, and the body class that lets the paper print. The paper
@@ -38,8 +39,19 @@ function setRollLength() {
 
 const KIND_LABEL = { impression: 'Impression demandée', whatsapp: 'WhatsApp' };
 
+// A recharge sends the member its short receipt instead (amount, new balance, when), unless it was cancelled:
+// that one goes out as the ticket, which says so.
+const isRechargeReceipt = (ticket) => ticket.kind === 'recharge' && !ticket.cancelled_at;
+
 // The text sent on WhatsApp for one copy: the same content as the sheet. The demo has no verification link.
 function whatsAppText(ticket, copyNo) {
+  if (isRechargeReceipt(ticket)) {
+    const { timezone, currency } = useStore.getState().settings;
+    return rechargeWhatsAppText({
+      clubName: ticket.club_name, firstName: ticket.member_first_name, amount: ticket.amount, balance: ticket.wallet_balance_after,
+      at: ticket.paid_at, timezone, currency,
+    });
+  }
   const verifiable = !ticket.demo && Boolean(ticket.ticket_code);
   return ticketWhatsAppText({
     clubName: ticket.club_name,
@@ -165,7 +177,7 @@ function TicketPage({ data, reload }) {
   const sendWhatsApp = () => {
     if (ticket.demo) {
       // The demo shows the message and sends nothing, records nothing.
-      openDialog(DemoMessageDialog, { text: whatsAppText(ticket, sheet.copyNo), title: 'Ticket par WhatsApp' });
+      openDialog(DemoMessageDialog, { text: whatsAppText(ticket, sheet.copyNo), title: isRechargeReceipt(ticket) ? 'Reçu de recharge par WhatsApp' : 'Ticket par WhatsApp' });
       return;
     }
     if (!digits || working.current) return;
@@ -202,8 +214,9 @@ function TicketPage({ data, reload }) {
               <button type="button" className="btn btn-primary" onClick={print} disabled={busy !== null} aria-busy={busy === 'impression'}>
                 <Icon name="printer" /> Imprimer</button>
               <button type="button" className="btn" onClick={sendWhatsApp} disabled={busy !== null || (!ticket.demo && !digits)} aria-busy={busy === 'whatsapp'}>
-                <Icon name="message" /> Envoyer par WhatsApp</button>
+                <Icon name="message" /> {isRechargeReceipt(ticket) ? 'Envoyer le reçu par WhatsApp' : 'Envoyer par WhatsApp'}</button>
               <Link className="btn" to="/caisse"><Icon name="left" /> Retour à la caisse</Link>
+              <Link className="btn" to={`/membres/${ticket.member_id}`}><Icon name="users" /> Fiche du membre</Link>
             </>
           )}
         />
