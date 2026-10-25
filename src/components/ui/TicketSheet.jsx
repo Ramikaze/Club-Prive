@@ -1,6 +1,6 @@
 // The cash receipt as paper: an 80 mm roll, black on white, whatever the theme. The preview on screen and the
-// printed copy are this same component. `copyNo` 1 is the original, then « Duplicata n°X »; `printedBy` and
-// `printedAt` say who asked for this copy and when. In the demo the sheet carries a watermark and neither the
+// printed copy are this same component. `copyNo` 1 is the original, then « Duplicata n°X » (who printed each copy is kept in the app,
+// not on the paper; the cashier closes the ticket). In the demo the sheet carries a watermark and neither the
 // QR code nor the check code, so it cannot pass for a real receipt. A receipt the member card had a part in
 // shows the card's share and the rest with its method, the balances after it, and a box for the member's
 // signature when the movement was made by the staff.
@@ -23,7 +23,7 @@ function TicketQr({ value }) {
   );
 }
 
-export default function TicketSheet({ ticket, copyNo, printedBy, printedAt }) {
+export default function TicketSheet({ ticket, copyNo }) {
   const verifiable = !ticket.demo && Boolean(ticket.ticket_code);
   const verifyUrl = verifiable ? ticketVerifyUrl(window.location.origin, ticket.id, ticket.ticket_code) : null;
   const header = String(ticket.header ?? '').trim();
@@ -72,8 +72,6 @@ export default function TicketSheet({ ticket, copyNo, printedBy, printedAt }) {
             {rest > 0 && <div><dt>Reste payé ({paidBy})</dt><dd>{money(rest)}</dd></div>}
           </>
         ) : <div><dt>Payé</dt><dd>{paidBy}</dd></div>}
-        {ticket.created_by_name && <div><dt>Encaissé par</dt><dd>{ticket.created_by_name}</dd></div>}
-        <div><dt>Imprimé par</dt><dd>{printedBy}, le {dateTime(printedAt)}</dd></div>
       </dl>
 
       {ticket.wallet_balance_after !== null && (
@@ -110,6 +108,8 @@ export default function TicketSheet({ ticket, copyNo, printedBy, printedAt }) {
         </div>
       )}
 
+      {/* Who took the money closes the ticket; who printed each copy is kept in the app (ticket history). */}
+      {ticket.created_by_name && <p className="ts-cashier">Encaissé par {ticket.created_by_name}</p>}
       {footer && <p className="ts-footer">{footer}</p>}
       {ticket.demo && <div className="ts-demo" role="note">DÉMO — SANS VALEUR</div>}
     </article>
