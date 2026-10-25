@@ -33,7 +33,7 @@ Comptes **fictifs, réservés au développement local** :
 | gerant | demo-gerant-2026 | Gérant |
 | admin | admin-club-2026 | Administrateur (accès rapide en local) |
 
-`DEMO_ACCOUNTS=1` ne crée que ces comptes, et seulement dans une base sans utilisateurs : le club reste vide. Une base existante reste inchangée. Pour s’exercer sur des données fictives, se connecter puis ouvrir le mode démo (voir « Mode démo (entraînement) »).
+`DEMO_ACCOUNTS=1` ne crée que ces comptes, et seulement dans une base sans utilisateurs : le club reste vide. Une base existante reste inchangée. Pour s’exercer sans toucher au vrai club, se connecter puis ouvrir le mode démo (voir « Mode démo (entraînement) »).
 
 Pour développer avec rechargement immédiat, lancer dans deux terminaux :
 
@@ -53,7 +53,7 @@ Ouvrir ensuite `http://localhost:5173`. Les appels `/api` sont transmis au serve
 - **Produits et caisse** : cigares et bouteilles, avec leur photo (les administrateurs l’ajoutent, la changent ou la retirent depuis la fiche du produit), entrées de stock, ventes liées aux réservations, encaissements, remboursements et ventilation par activité. Chaque encaissement donne un ticket de caisse (voir « Ticket de caisse »).
 - **Administration** : dépenses, trésorerie, grand livre, clôtures mensuelles, rôles, journal d’audit, paramètres et exports Excel.
 - **Carte de débit** : un crédit en FCFA approvisionné sur la carte du membre, qui paie les consommations, les salles et le renouvellement de l’abonnement (voir « Carte de débit »).
-- **Mode démo** : un espace d’entraînement aux données fictives, séparé du vrai club.
+- **Mode démo** : un espace d’entraînement qui part d’une base vide, séparé du vrai club.
 
 ### Fonctionnement de la cave
 
@@ -111,15 +111,15 @@ Chaque membre a, en plus de son temps de salle, un **crédit en FCFA** : il appa
 
 ### Mode démo (entraînement)
 
-Le mode démo est un espace d’entraînement intégré au site : on y apprend l’application, ou on essaie une manipulation, sans risque pour le vrai club. Il a sa **propre base de données**. On y retrouve le **catalogue réel du club** (les mêmes produits, avec leurs photos et un stock fictif de 10 pour chacun), à côté de données fictives : membres « Client Test », réservations, encaissements, relevés de cave et quelques produits d’exemple. Il reprend aussi les réglages du club : prix, formules, salles, moyens de paiement et catégories.
+Le mode démo est un espace d’entraînement intégré au site : on y apprend l’application, ou on essaie une manipulation, sans risque pour le vrai club. Il a sa **propre base de données**. Il part d’une **base vide** : aucun client, aucune réservation, aucun encaissement, aucune dépense ni historique de trésorerie, pour essayer le déroulement du début à la fin. On y retrouve le **catalogue réel du club** (les mêmes produits, avec leurs photos et un stock fictif de 10 pour chacun, pour pouvoir vendre tout de suite). Il reprend aussi les réglages du club : prix, formules, salles, moyens de paiement et catégories.
 
 - **Qui** : le gérant et les administrateurs, avec leur propre compte. Aucun compte à mot de passe connu n’existe en ligne.
-- **Entrer** : une fois connecté, cliquer sur le chapeau de diplômé orange « Mode démo (entraînement) », en bas du menu latéral ; sur téléphone, il se trouve dans le menu en haut à droite. La démo se crée et se remplit toute seule à la première entrée, et la visite guidée se propose à la première entrée dans un navigateur.
+- **Entrer** : une fois connecté, cliquer sur le chapeau de diplômé orange « Mode démo (entraînement) », en bas du menu latéral ; sur téléphone, il se trouve dans le menu en haut à droite. La démo se prépare toute seule à la première entrée, et la visite guidée se propose à la première entrée dans un navigateur.
 - **Reconnaître la démo** : un cadre orange entoure l’écran, le mot « DÉMO » apparaît en filigrane, un bandeau rayé « MODE DÉMO » reste en haut de chaque page et le titre de l’onglet commence par « [DÉMO] ». Les fichiers exportés en démo commencent par `DEMO_`.
 - **Quitter** : le bouton « Quitter » du bandeau, ou « Quitter la démo » à la place du bouton d’entrée. Une page rechargée reste en démo ; se déconnecter ramène toujours au vrai site à la connexion suivante.
 - **Rien de réel n’est touché** : ce qui se fait en démo (réservations, encaissements, réglages, exports) reste dans la démo, et rien de ce qui se fait dans le vrai club n’y apparaît. Du vrai club, la démo ne copie que les réglages, le nom et le rôle des comptes, et les produits en vente (sans leur stock, fictif en démo). Les photos restent dans le vrai club, qui les affiche aussi dans la démo ; elles se gèrent hors du mode démo. Le vrai site n’est jamais en mode démo : un tarif non validé y est refusé, alors que la démo l’accepte.
 - **Comptes** : la gestion des comptes (créer ou modifier un compte, changer un mot de passe) se fait hors du mode démo ; Paramètres le rappelle : « Les comptes se gèrent hors du mode démo. » L’effacement complet des données n’existe pas non plus en démo, qui a sa propre remise à neuf.
-- **Remettre la démo à neuf** (administrateurs) : dans Paramètres, onglet « Équipe & Système », carte « Espace démo ». Après confirmation, la démo est vidée puis remplie de nouveau de données fictives, avec les réglages et le catalogue actuels du vrai club. Il n’y a qu’une démo, la même pour tous : chacun y retrouve les essais des autres, jusqu’à la prochaine remise à neuf. C’est aussi le seul moment où un changement de réglage ou de produit du vrai club passe dans la démo.
+- **Remettre la démo à neuf** (administrateurs) : dans Paramètres, onglet « Équipe & Système », carte « Espace démo ». Après confirmation, la démo est vidée (sans clients ni opérations) et repart des réglages, salles, formules et du catalogue actuels du vrai club (stock fictif de 10 par article). Il n’y a qu’une démo, la même pour tous : chacun y retrouve les essais des autres, jusqu’à la prochaine remise à neuf. C’est aussi le seul moment où un changement de réglage ou de produit du vrai club passe dans la démo.
 
 ## Architecture et validation
 
@@ -129,7 +129,7 @@ React 18 + Vite, React Router et Zustand pour l’interface. L’API tourne dans
 - `worker/api.js` : authentification, contrôle des rôles, vérification des origines et idempotence.
 - `worker/club.js`, `worker/ledger.js`, `worker/lounge.js` : règles métier côté serveur.
 - `worker/space.js` : aiguille chaque requête vers le vrai club ou vers la démo (en-tête `X-Club-Espace`). La session reste celle du vrai club, qui garantit à la démo l’identité de la personne connectée ; la démo n’ouvre jamais de session.
-- `worker/seed.js` : données fictives de la démo et comptes du développement local.
+- `worker/seed.js` : jeu de données fictives (utilisé par les tests) et comptes du développement local.
 - `test/` : scénarios API, montants, crédits, concurrence, rôles, conservation, migration, redémarrage et isolation de la démo.
 
 ```sh

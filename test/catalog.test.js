@@ -858,7 +858,7 @@ test('démo : la configuration envoyée porte les produits actifs du vrai club, 
   assert.ok(JSON.stringify(real.club.demoConfig()).length < 30000); // text only: the 90 KB picture is not in it
 });
 
-test('démo : les produits du vrai club sont recopiés avec leurs identifiants et un stock de 10, avec les produits fictifs', async () => {
+test('démo : les produits du vrai club sont recopiés avec leurs identifiants et un stock de 10, sans produit fictif', async () => {
   const { real, demo, admin } = await withDemo();
   const a = await newProduct(admin, { name: 'Cohiba Siglo I', reference: 'CIG-001', description: 'Un cigare.', price: 12000 * UM, initial_stock: 40, low_stock_threshold: 5 });
   const b = await newProduct(admin, { name: 'Whisky maison', category: 'bouteille', reference: 'BOU-001', price: 30000 * UM });
@@ -870,32 +870,23 @@ test('démo : les produits du vrai club sont recopiés avec leurs identifiants e
 
   demo.club.prepareDemo(real.club.demoConfig());
 
-  const all = demo.club.listProducts({ includeInactive: true });
-  const copies = all.filter((p) => !p.is_demo).sort((x, y) => x.id - y.id);
-  assert.deepEqual(copies.map((p) => [p.id, p.name, p.reference, p.category, p.price, p.description, p.low_stock_threshold]), [
+  const all = demo.club.listProducts({ includeInactive: true }).sort((x, y) => x.id - y.id);
+  assert.deepEqual(all.map((p) => [p.id, p.name, p.reference, p.category, p.price, p.description, p.low_stock_threshold]), [
     [a.id, 'Cohiba Siglo I', 'CIG-001', 'cigare', 12000 * UM, 'Un cigare.', 5],
     [b.id, 'Whisky maison', 'BOU-001', 'bouteille', 30000 * UM, null, 3],
   ]);
-  assert.ok(copies.every((p) => p.active && p.stock_qty === 10 && p.out === false)); // 10 each, whatever the real stock
-  // The seed's own products are all there too, after the copies.
-  const fictitious = all.filter((p) => p.is_demo);
-  assert.equal(fictitious.length, 7);
-  assert.deepEqual(fictitious.map((p) => p.reference).sort().slice(0, 3), ['BOU-DEMO-01', 'BOU-DEMO-02', 'BOU-DEMO-03']);
-  assert.ok(fictitious.every((p) => p.id > Math.max(a.id, b.id)));
-  assert.equal(all.length, 9); // neither the retired product nor the old fictitious one of the real club
-  // The history of the demo sells the fictitious products only.
-  for (const { product_id: id } of demo.club.all('SELECT DISTINCT product_id FROM charges WHERE product_id IS NOT NULL')) {
-    assert.equal(all.find((p) => p.id === id).is_demo, true);
-  }
-  // Each copy has the opening movement that explains its stock.
+  // 10 each, whatever the real stock; neither the retired product nor the old fictitious one of the real club.
+  assert.ok(all.every((p) => !p.is_demo && p.active && p.stock_qty === 10 && p.out === false));
+  // Each copy has the opening movement that explains its stock, and nothing has been sold.
   const movements = demo.club.stockMovements({ product_id: a.id });
   assert.deepEqual(movements.map((m) => [m.kind, m.quantity, m.stock_after]), [['stock_initial', 10, 10]]);
+  assert.equal(demo.club.get('SELECT COUNT(*) AS n FROM charges').n, 0);
   // The real club is untouched: its stock is its own, and it still has no fictitious history.
   assert.equal(real.club.listProducts().find((p) => p.id === a.id).stock_qty, 40);
   assert.equal(real.club.get('SELECT COUNT(*) AS n FROM members').n, 0);
 });
 
-test('démo : les produits fictifs prennent les identifiants après les produits recopiés, même après un trou', async () => {
+test('démo : les identifiants du vrai club sont gardés, même après un trou', async () => {
   const { real, demo, admin } = await withDemo();
   const a = await newProduct(admin, { name: 'Premier', reference: 'CIG-001' });
   real.db.run(
@@ -905,13 +896,14 @@ test('démo : les produits fictifs prennent les identifiants après les produits
   demo.club.prepareDemo(real.club.demoConfig());
 
   const rows = demo.club.all('SELECT id, is_demo FROM products ORDER BY id').map((r) => ({ ...r }));
-  assert.deepEqual(rows.slice(0, 2), [{ id: a.id, is_demo: 0 }, { id: 500, is_demo: 0 }]);
-  assert.equal(rows.length, 9);
-  assert.ok(rows.slice(2).every((r) => r.id > 500 && r.is_demo === 1), JSON.stringify(rows));
-  assert.equal(demo.club.listMembers().length, 5); // the seed went through
+  assert.deepEqual(rows, [{ id: a.id, is_demo: 0 }, { id: 500, is_demo: 0 }]);
+  // A product made in the demo afterwards takes the next id.
+  const author = demo.club.userRow(real.club.userByLogin('proprietaire').id);
+  const made = demo.club.tx(() => demo.club.createProduct(author, { category: 'cigare', name: 'Essai', reference: 'CIG-777', price: UM }));
+  assert.ok(made.id > 500);
 });
 
-test('démo : les produits ne sont recopiés qu’au remplissage et à la remise à neuf, pas à chaque requête', async () => {
+test('démo : les produits ne sont recopiés qu’à la préparation et à la remise à neuf, pas à chaque requête', async () => {
   const { real, demo, admin } = await withDemo();
   const a = await newProduct(admin, { name: 'Cohiba Siglo I', reference: 'CIG-001', price: 12000 * UM });
   demo.club.prepareDemo(real.club.demoConfig());
@@ -933,51 +925,45 @@ test('démo : les produits ne sont recopiés qu’au remplissage et à la remise
   demo.club.tx(() => demo.club.stockOperation(author, a.id, { kind: 'entree', quantity: 5 }));
   assert.equal(demo.club.listProducts().find((p) => p.id === a.id).stock_qty, 15);
   demo.club.resetDemo(real.club.demoConfig(), author);
-  const copies = demo.club.listProducts().filter((p) => !p.is_demo).sort((x, y) => x.id - y.id);
-  assert.deepEqual(copies.map((p) => [p.id, p.name, p.price, p.stock_qty]), [
-    [a.id, 'Renommé', 15000 * UM, 10], [fresh.id, 'Tout nouveau', 10000 * UM, 10],
+  const copies = demo.club.listProducts().sort((x, y) => x.id - y.id);
+  assert.deepEqual(copies.map((p) => [p.id, p.name, p.price, p.stock_qty, p.is_demo]), [
+    [a.id, 'Renommé', 15000 * UM, 10, false], [fresh.id, 'Tout nouveau', 10000 * UM, 10, false],
   ]);
-  assert.equal(demo.club.listProducts().filter((p) => p.is_demo).length, 7);
   assert.equal(demo.club.get('SELECT COUNT(*) AS n FROM stock_movements WHERE product_id = ?', a.id).n, 1);
   // And a second reset gives the same space.
   demo.club.resetDemo(real.club.demoConfig(), author);
-  assert.equal(demo.club.listProducts().length, 9);
+  assert.equal(demo.club.listProducts().length, 2);
 });
 
-test('démo : un remplissage refusé ou en échec ne laisse aucun produit recopié derrière lui', async () => {
+test('démo : une préparation en échec ne laisse aucun produit recopié, un reste d’un espace jamais préparé est effacé', async () => {
   const { real, demo, admin } = await withDemo();
   await newProduct(admin, { name: 'Cohiba Siglo I', reference: 'CIG-001' });
   const config = real.club.demoConfig();
 
-  // The seed finds no plan to sell: the copy made just before it is undone with the rest.
-  assert.throws(() => demo.club.prepareDemo({ ...config, plans: [] }));
+  // A second room without a name (NOT NULL): the copy fails, and what it did before is undone with the rest.
+  const broken = { ...config, rooms: [...config.rooms, { ...config.rooms[0], id: 999, name: null }] };
+  assert.throws(() => demo.club.prepareDemo(broken));
   assert.equal(demo.club.get('SELECT COUNT(*) AS n FROM products').n, 0);
   assert.equal(demo.club.get('SELECT COUNT(*) AS n FROM product_photos').n, 0);
+  assert.equal(demo.club.get("SELECT COUNT(*) AS n FROM meta WHERE key = 'demo_empty'").n, 0);
 
-  // A space that holds a product but was never filled is not mixed with the catalogue: refused as any leftover.
+  // A space that holds a product but was never prepared: emptied, then the catalogue copied.
   demo.db.run("INSERT INTO products (category, name, reference, price, created_at) VALUES ('cigare', 'Resté là', 'X-1', 100, ?)", new Date().toISOString());
-  assert.throws(() => demo.club.prepareDemo(config), (err) => err.code === 'DONNEES_EXISTANTES');
-  assert.deepEqual(demo.club.all('SELECT name FROM products').map((p) => p.name), ['Resté là']);
-  assert.equal(demo.club.get("SELECT COUNT(*) AS n FROM meta WHERE key = 'demo_seeded'").n, 0);
+  demo.club.prepareDemo(config);
+  assert.deepEqual(demo.club.all('SELECT name FROM products').map((p) => p.name), ['Cohiba Siglo I']);
 });
 
-test('démo : un vrai produit qui porte la référence d’un produit fictif la garde, le fictif prend la suivante de sa série', async () => {
+test('démo : un vrai produit garde sa référence, d’une remise à neuf à l’autre', async () => {
   const { real, demo, admin } = await withDemo();
-  // The seed's Robusto wants CIG-DEMO-01. Lower case on purpose: references are unique whatever their case.
+  // Lower case on purpose: the old seed's fictitious products used this series.
   const mine = await newProduct(admin, { name: 'Cigare maison', reference: 'cig-demo-01' });
   const inTheDemo = inDemo(real, demo, admin);
 
   const check = async (step) => {
     const products = ok(await inTheDemo.get('/api/products?all=1'));
-    const copy = products.find((p) => p.id === mine.id);
-    assert.deepEqual([copy.name, copy.reference, copy.is_demo], ['Cigare maison', 'cig-demo-01', false], step);
-    const referenceOf = (name) => products.find((p) => p.name === name).reference;
-    assert.deepEqual(
-      ['Robusto (démo)', 'Corona (démo)', 'Churchill (démo)', 'Whisky 12 ans (démo)'].map(referenceOf),
-      ['CIG-DEMO-02', 'CIG-DEMO-03', 'CIG-DEMO-04', 'BOU-DEMO-01'], step,
-    );
-    assert.equal(products.length, 8, step);
-    assert.equal(new Set(products.map((p) => p.reference.toLowerCase())).size, 8, step);
+    assert.deepEqual(products.map((p) => [p.id, p.name, p.reference, p.is_demo, p.stock_qty]), [
+      [mine.id, 'Cigare maison', 'cig-demo-01', false, 10],
+    ], step);
   };
 
   await check('ouverture');
@@ -985,23 +971,6 @@ test('démo : un vrai produit qui porte la référence d’un produit fictif la 
   await check('première remise à neuf');
   ok(await inTheDemo.post('/api/demo/reset', {}));
   await check('seconde remise à neuf');
-});
-
-test('démo : des références prises de suite, dans les deux séries, sont sautées une à une', async () => {
-  const { real, demo, admin } = await withDemo();
-  const mine = [];
-  for (const [category, reference] of [['cigare', 'cig-demo-01'], ['cigare', 'CIG-DEMO-02'], ['bouteille', 'bou-demo-02']]) {
-    mine.push(await newProduct(admin, { name: `Réel ${reference}`, category, reference }));
-  }
-  demo.club.prepareDemo(real.club.demoConfig());
-
-  const products = demo.club.listProducts();
-  assert.deepEqual(mine.map((p) => products.find((x) => x.id === p.id).reference), ['cig-demo-01', 'CIG-DEMO-02', 'bou-demo-02']);
-  const fictitious = products.filter((p) => p.is_demo);
-  assert.deepEqual(fictitious.map((p) => p.reference).sort(), [
-    'BOU-DEMO-01', 'BOU-DEMO-03', 'BOU-DEMO-04', 'BOU-DEMO-05', 'CIG-DEMO-03', 'CIG-DEMO-04', 'CIG-DEMO-05',
-  ]);
-  assert.equal(demo.club.listMembers().length, 5); // the history was made all the same
 });
 
 test('photos : en démo, ajouter ou retirer est refusé sans toucher à la photo du vrai club, qui reste servie par lui', async () => {

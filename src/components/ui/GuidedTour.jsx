@@ -91,7 +91,7 @@ const STEPS = [
     inDemo: {
       body: 'Horaires, tarifs et formules, moyens de paiement, soldes d’ouverture, catégories de dépenses et journal des actions. Les changements faits ici restent dans la démo.',
       features: [
-        '« Remettre la démo à neuf » (onglet Équipe & Système) efface les essais et remet des données fictives neuves',
+        '« Remettre la démo à neuf » (onglet Équipe & Système) vide la démo : une base vide, sans clients ni opérations, pour tout essayer du début',
         'Les comptes utilisateurs se gèrent hors du mode démo',
       ],
     },

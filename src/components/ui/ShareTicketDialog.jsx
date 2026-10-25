@@ -79,7 +79,7 @@ export default function ShareTicketDialog({ close, file, text, title, digits, de
   return (
     <Modal title={title} size="wide" onClose={close}>
       <div className="form-grid">
-        {demo ? <Notice kind="info">Démo : le ticket porte « DÉMO — SANS VALEUR » et les données sont fictives.</Notice> : null}
+        {demo ? <Notice kind="info">Démo : le ticket porte « DÉMO — SANS VALEUR » : rien n'est réel.</Notice> : null}
         <p className="muted">{useShare
             ? 'Touchez « Envoyer sur WhatsApp », choisissez WhatsApp puis le client : le ticket et le message partent ensemble.'
             : canCopy
