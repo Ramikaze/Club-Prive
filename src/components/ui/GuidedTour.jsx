@@ -76,12 +76,12 @@ const STEPS = [
     body: 'Relevés manuels d’humidité et de température, seuils propres à chaque cave. Un relevé hors seuils déclenche une alerte ; un contrôle en retard est signalé.',
   },
   {
-    route: '/caisse', targets: ['.account-cards', '[data-tour="cash"]'], icon: 'wallet', title: 'Caisse',
-    body: 'Les recettes sont ventilées exactement entre Réservations, Alcool et Cigares. Les notes ouvertes s’encaissent ligne par ligne, en totalité.',
-    features: ['Remboursement tracé avec son motif', 'Exports CSV et Excel'],
+    route: '/caisse', targets: ['#caisse-recettes', '[data-tour="cash"]'], icon: 'wallet', title: 'Caisse',
+    body: 'Une seule page : les soldes, puis les recettes et les dépenses de la période, chacune détaillée avec son total. Les recettes sont ventilées exactement entre Réservations, Alcool et Cigares.',
+    features: ['Notes ouvertes encaissées ligne par ligne, en totalité', 'Remboursement tracé avec son motif', 'Détails et exports CSV et Excel en bas de page'],
   },
   {
-    route: '/depenses', targets: ['[data-tour="expenses"] .actions .btn-primary', '[data-tour="expenses"]'], icon: 'receipt', title: 'Dépenses du jour',
+    route: '/caisse', targets: ['[data-tour="cash"] .actions .btn-primary', '[data-tour="cash"]'], icon: 'receipt', title: 'Nouvelle dépense',
     body: '« Nouvelle dépense » : catégorie, montant, caisse ou compte utilisé, et le sous-compte concerné pour suivre sa marge.',
     features: ['L’administrateur saisit aussi entrées diverses et transferts', 'Annulation avec motif, jamais de suppression'],
   },

@@ -54,7 +54,7 @@ export default function TicketHistory() {
       <PageHead
         title="Historique des tickets"
         lead="Chaque ticket sorti ou envoyé : quand, pour qui et par qui."
-        back={{ to: '/caisse', label: 'Encaissements' }}
+        back={{ to: '/caisse', label: 'Caisse' }}
       />
       <div className="toolbar">
         <PeriodPicker period={period} />

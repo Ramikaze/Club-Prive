@@ -123,7 +123,7 @@ export default function Treasury() {
               </div>
               {r.expenses_by_category.length > 0 && (
                 <div className="card section-gap">
-                  <div className="card-head"><h2>Dépenses par catégorie</h2><Link to={`/depenses${qs({ from, to, type: 'depense' })}`}>Détail des dépenses</Link></div>
+                  <div className="card-head"><h2>Dépenses par catégorie</h2><Link to={`/caisse${qs({ from, to, type: 'depense' })}`}>Détail des dépenses</Link></div>
                   <div className="bars">
                     {r.expenses_by_category.map((c) => (
                       <div className="bar-row" key={c.category_id}>
