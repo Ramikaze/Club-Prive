@@ -41,8 +41,8 @@ function readLink(hash) {
   return { id: parseNumber(decode(rawId)), code: normalizeTicketCode(decode(rawCode)) };
 }
 
-const STATUS_TEXT = { valide: 'Valide', partiellement_rembourse: 'Partiellement remboursé', rembourse: 'Remboursé' };
-const STATUS_KIND = { valide: 'ok', partiellement_rembourse: 'warn', rembourse: 'danger' };
+const STATUS_TEXT = { valide: 'Valide', partiellement_rembourse: 'Partiellement remboursé', rembourse: 'Remboursé', annule: 'Annulé' };
+const STATUS_KIND = { valide: 'ok', partiellement_rembourse: 'warn', rembourse: 'danger', annule: 'danger' };
 
 function Banner({ kind, children }) {
   return (

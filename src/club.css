@@ -880,6 +880,10 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .ts-total { display: flex; justify-content: space-between; gap: 3mm; align-items: baseline; padding: 1.5mm 0; border-top: 2px solid #000; border-bottom: 1px dashed #000; font-size: 12pt; }
 .ts-total strong { font-size: 15pt; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .ts-refunds { padding: 1.5mm 0; border-bottom: 1px dashed #000; font-weight: 700; }
+.ts-balances { border-top: 1px dashed #000; }
+.ts-signature { padding: 2mm 0; }
+/* Two written lines of room for the member's signature. */
+.ts-signature-box { height: 14mm; margin-top: 1mm; border: 1px solid #000; }
 .ts-verify { display: grid; justify-items: center; gap: 1mm; padding: 3mm 0 2mm; text-align: center; }
 .ts-qr { width: 34mm; height: 34mm; display: block; }
 .ts-code { font: 700 11pt/1.2 ui-monospace, Menlo, Consolas, monospace; letter-spacing: 0.08em; }

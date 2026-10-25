@@ -9,7 +9,9 @@ import { text, int, toId, flag, frDate } from './validate.js';
 import { ledgerMethods, DEFAULT_CATEGORIES, OUTSIDE_MEAL_CATEGORY } from './ledger.js';
 import { loungeMethods } from './lounge.js';
 import { seedDemo } from './seed.js';
-import { newTicketCode, formatTicketNumber, normalizeTicketCode, memberInitials, TICKET_CODE_LENGTH } from '../shared/ticket.js';
+import {
+  newTicketCode, formatTicketNumber, normalizeTicketCode, memberInitials, paymentLines, TICKET_CODE_LENGTH,
+} from '../shared/ticket.js';
 import { timingSafeEqual } from './auth.js';
 import { decodePhoto } from './photos.js';
 import {
@@ -978,6 +980,12 @@ export class Club {
       };
     }
     return { state: 'aucun' };
+  }
+
+  // The minutes the member can still book on the current subscription today, or null without one.
+  timeAvailable(memberId) {
+    const summary = this.subscriptionSummary(memberId, this.bizToday());
+    return ['active', 'expire_bientot'].includes(summary.state) ? summary.credit.available : null;
   }
 
   activateSubscription(actor, memberId, input) {
@@ -2594,16 +2602,31 @@ export class Club {
     ) ?? null;
   }
 
-  // « valide » without refund, « rembourse » when every line of the payment is refunded, else partial.
-  ticketStatus(paymentId) {
-    const lines = this.get('SELECT COUNT(*) AS n FROM payment_allocations WHERE payment_id = ?', paymentId).n;
-    const refunds = this.get('SELECT COUNT(*) AS n FROM refunds WHERE payment_id = ?', paymentId).n;
+  // « annule » for a cancelled recharge or meal, « valide » without refund, « rembourse » when every line of the
+  // payment is refunded, else partial.
+  ticketStatus(p) {
+    if (p.cancelled_at) return 'annule';
+    const lines = this.get('SELECT COUNT(*) AS n FROM payment_allocations WHERE payment_id = ?', p.id).n;
+    const refunds = this.get('SELECT COUNT(*) AS n FROM refunds WHERE payment_id = ?', p.id).n;
     if (!refunds) return 'valide';
     return refunds >= lines ? 'rembourse' : 'partiellement_rembourse';
   }
 
-  // The receipt for the staff: the payment, its refunds, the next copy number and the club's texts. Only an
-  // administrator also gets the list of copies already given out.
+  // The card's balance right after this payment, as its receipt prints it: the member's movements up to the
+  // payment's own (a later refund or cancellation of it comes after). A recharge or meal that did not move the
+  // card shows the balance at that instant; a payment the card had no part in shows none (null).
+  balanceAfterPayment(p) {
+    const own = this.get('SELECT MIN(id) AS id FROM wallet_movements WHERE payment_id = ?', p.id).id;
+    if (own !== null) {
+      return this.get('SELECT COALESCE(SUM(amount), 0) AS n FROM wallet_movements WHERE member_id = ? AND id <= ?', p.member_id, own).n;
+    }
+    if ((p.kind ?? 'encaissement') === 'encaissement') return null;
+    return this.get('SELECT COALESCE(SUM(amount), 0) AS n FROM wallet_movements WHERE member_id = ? AND created_at <= ?', p.member_id, p.paid_at).n;
+  }
+
+  // The receipt for the staff: the payment, its refunds, the next copy number and the club's texts, and for the
+  // card the balance it left, the member's time credit now and whether the member signs. A movement made by
+  // the automatic renewal (no author) is not signed. Only an administrator also gets the copies given out.
   ticketFor(actor, id) {
     const p = this.ticketPaymentRow(id);
     if (!p) throw notFound('Paiement');
@@ -2616,7 +2639,10 @@ export class Club {
       member_phone: p.member_phone ?? '',
       refunded_amount: refunds.reduce((sum, r) => sum + r.amount, 0),
       refunds,
-      status: this.ticketStatus(p.id),
+      status: this.ticketStatus(p),
+      wallet_balance_after: this.balanceAfterPayment(p),
+      time_available: this.timeAvailable(p.member_id),
+      signature_required: (p.card_amount > 0 || (p.kind ?? 'encaissement') !== 'encaissement') && p.created_by !== null,
       next_copy_no: last + 1,
       header: s.ticket_header,
       footer: s.ticket_footer,
@@ -2661,10 +2687,15 @@ export class Club {
     const valid = Boolean(p) && given.length === TICKET_CODE_LENGTH && p.ticket_code?.length === TICKET_CODE_LENGTH;
     const stored = encoder.encode(valid ? p.ticket_code : '0'.repeat(given.length));
     if (!timingSafeEqual(given, stored) || !valid) return null;
-    const lines = this.all(
-      `SELECT c.label, c.quantity, pa.amount FROM payment_allocations pa JOIN charges c ON c.id = pa.charge_id
-       WHERE pa.payment_id = ? ORDER BY pa.id`, p.id,
-    );
+    const lines = paymentLines({
+      kind: p.kind,
+      label: p.label,
+      amount: p.amount,
+      allocations: this.all(
+        `SELECT c.label, c.quantity, pa.amount FROM payment_allocations pa JOIN charges c ON c.id = pa.charge_id
+         WHERE pa.payment_id = ? ORDER BY pa.id`, p.id,
+      ),
+    });
     const refunded = this.get('SELECT COALESCE(SUM(amount), 0) AS n FROM refunds WHERE payment_id = ?', p.id).n;
     const s = this.settings();
     return {
@@ -2678,7 +2709,7 @@ export class Club {
       total: p.amount,
       method: p.method,
       initials: memberInitials(p.first_name, p.last_name),
-      status: this.ticketStatus(p.id),
+      status: this.ticketStatus(p),
       refunded_amount: refunded,
     };
   }

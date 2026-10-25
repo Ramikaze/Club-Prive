@@ -819,6 +819,126 @@ test('formule annuelle : renouvelée en annuelle, à son prix', async () => {
   }
 });
 
+// ---------------------------------------------------------------------------- the card's cash receipt
+
+const ticketOf = async (paymentId) => ok(await manager.get(`/api/payments/${paymentId}/ticket`)).ticket;
+const publicOf = (paymentId) => {
+  const { ticket_code: code } = server.club.get('SELECT ticket_code FROM payments WHERE id = ?', paymentId);
+  return server.club.publicTicket(paymentId, code);
+};
+const PUBLIC_KEYS = ['club_name', 'currency', 'initials', 'lines', 'method', 'number', 'paid_at', 'refunded_amount', 'status', 'timezone', 'total'];
+
+test('ticket d’une recharge : une ligne, solde juste après elle, signature ; annulée, « annule » partout', async () => {
+  const member = await newMember('Victor');
+  const first = ok(await recharge(member.id, { amount: 100000 * UM, method: 'Espèces' })).payment;
+  const second = ok(await recharge(member.id, { amount: 50000 * UM, method: 'Espèces' })).payment;
+  const t = await ticketOf(first.id);
+  assert.equal(t.kind, 'recharge');
+  assert.equal(t.card_amount, 0);
+  assert.equal(t.label, 'Recharge de la carte membre');
+  assert.deepEqual(t.allocations, []);
+  assert.equal(t.wallet_balance_after, 100000 * UM); // not the 150 000 of today
+  assert.equal(t.time_available, null); // no subscription
+  assert.equal(t.signature_required, true);
+  assert.equal(t.status, 'valide');
+  assert.equal((await ticketOf(second.id)).wallet_balance_after, 150000 * UM);
+
+  const pub = publicOf(first.id);
+  assert.deepEqual(Object.keys(pub).sort(), PUBLIC_KEYS);
+  assert.deepEqual(pub.lines, [{ label: 'Recharge carte membre', quantity: 1, amount: 100000 * UM }]);
+  assert.equal(pub.status, 'valide');
+  assert.doesNotMatch(JSON.stringify(pub), /150000|Victor|\+000/);
+
+  ok(await admin.post(`/api/payments/${second.id}/cancel-recharge`, { reason: 'Erreur de montant' }));
+  const cancelled = await ticketOf(second.id);
+  assert.equal(cancelled.status, 'annule');
+  assert.ok(cancelled.cancelled_at);
+  assert.equal(cancelled.wallet_balance_after, 150000 * UM); // the balance the recharge left, as printed then
+  assert.equal(publicOf(second.id).status, 'annule');
+  assert.equal((await ticketOf(first.id)).status, 'valide');
+});
+
+test('ticket d’un paiement mixte : part de la carte, reste et son moyen, solde et crédit temps ; espèces seules sans signature', async () => {
+  const { member } = await subscribed('Wanda');
+  ok(await recharge(member.id, { amount: 5000 * UM, method: 'Espèces' }));
+  const bottle = line(member.id, 'alcool', 20000 * UM, 'Bouteille');
+  const { payment } = ok(await pay({ charge_ids: [bottle], card: true, method: 'Espèces' }));
+  ok(await recharge(member.id, { amount: 7000 * UM, method: 'Espèces' })); // later: not on this ticket
+  const t = await ticketOf(payment.id);
+  assert.equal(t.kind, 'encaissement');
+  assert.equal(t.card_amount, 5000 * UM);
+  assert.equal(t.amount, 20000 * UM);
+  assert.equal(t.method, 'Espèces');
+  assert.equal(t.wallet_balance_after, 0);
+  const credit = ok(await manager.get(`/api/members/${member.id}`)).subscription.credit.available;
+  assert.ok(credit > 0);
+  assert.equal(t.time_available, credit);
+  assert.equal(t.signature_required, true);
+  assert.equal(t.allocations[0].label, 'Bouteille');
+  assert.equal(publicOf(payment.id).method, 'Espèces');
+  assert.deepEqual(Object.keys(publicOf(payment.id)).sort(), PUBLIC_KEYS);
+
+  // Paid in cash only: the card is not involved, so no balance and nothing to sign.
+  const glass = line(member.id, 'alcool', 3000 * UM, 'Verre');
+  const cashOnly = ok(await pay({ charge_ids: [glass], method: 'Espèces' })).payment;
+  const c = await ticketOf(cashOnly.id);
+  assert.equal(c.card_amount, 0);
+  assert.equal(c.wallet_balance_after, null);
+  assert.equal(c.signature_required, false);
+});
+
+test('ticket d’un repas extérieur : son libellé, la part de la carte, signature ; annulé, « annule »', async () => {
+  const member = await newMember('Xavier');
+  ok(await recharge(member.id, { amount: 10000 * UM, method: 'Espèces' }));
+  const { payment } = ok(await outside(member.id, { amount: 18500 * UM, label: 'Chez Fatou', courier_method: 'Espèces', rest_method: 'MTN MoMo' }));
+  const t = await ticketOf(payment.id);
+  assert.equal(t.kind, 'repas');
+  assert.equal(t.label, 'Chez Fatou');
+  assert.equal(t.card_amount, 10000 * UM);
+  assert.equal(t.method, 'MTN MoMo');
+  assert.equal(t.wallet_balance_after, 0);
+  assert.equal(t.time_available, null);
+  assert.equal(t.signature_required, true);
+  assert.equal(t.status, 'valide');
+  assert.deepEqual(publicOf(payment.id).lines, [{ label: 'Chez Fatou', quantity: 1, amount: 18500 * UM }]);
+
+  ok(await admin.post(`/api/payments/${payment.id}/cancel-meal`, { reason: 'Erreur de saisie' }));
+  const cancelled = await ticketOf(payment.id);
+  assert.equal(cancelled.status, 'annule');
+  assert.equal(cancelled.wallet_balance_after, 0); // the card's money came back later, not on this receipt
+  assert.equal(publicOf(payment.id).status, 'annule');
+
+  // A meal the card could not pay at all still shows the card's balance then, and is signed.
+  const broke = await newMember('Yvette');
+  const meal = ok(await outside(broke.id, { amount: 5000 * UM, label: 'Chez Awa', courier_method: 'Espèces', rest_method: 'Espèces' })).payment;
+  const m = await ticketOf(meal.id);
+  assert.equal(m.card_amount, 0);
+  assert.equal(m.wallet_balance_after, 0);
+  assert.equal(m.signature_required, true);
+});
+
+test('ticket d’un renouvellement automatique : payé par la carte, solde après, sans signature', async () => {
+  const { member, end } = await subscribed('Zoé');
+  ok(await recharge(member.id, { amount: 60000 * UM, method: 'Espèces' }));
+  atDay(addDays(end, 1));
+  try {
+    const [subscriptionId] = renew(member.id).renewed;
+    const { id } = server.club.get(
+      `SELECT p.id FROM payments p JOIN payment_allocations pa ON pa.payment_id = p.id
+       JOIN charges c ON c.id = pa.charge_id WHERE c.subscription_id = ?`, subscriptionId,
+    );
+    const t = await ticketOf(id);
+    assert.equal(t.method, CARD_METHOD);
+    assert.equal(t.card_amount, 50000 * UM);
+    assert.equal(t.created_by_name, null);
+    assert.equal(t.wallet_balance_after, 10000 * UM);
+    assert.equal(t.time_available, 120);
+    assert.equal(t.signature_required, false);
+  } finally {
+    server.club.at = null;
+  }
+});
+
 test('migration sans perte : V15 garde réservations, crédits et lignes, et rend l’abonnement facultatif', async () => {
   const source = new Server({}, { lenientTariffs: true });
   const old = new Server({});

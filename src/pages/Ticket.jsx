@@ -15,7 +15,7 @@ import { dateTime, money } from '../lib/format.js';
 import { useLoad } from '../lib/hooks.js';
 import { useStore } from '../store/useStore.js';
 import { DemoMessageDialog } from '../dialogs/reservationDialogs.jsx';
-import { ticketVerifyUrl, ticketWhatsAppText } from '../../shared/ticket.js';
+import { paymentLines, ticketVerifyUrl, ticketWhatsAppText } from '../../shared/ticket.js';
 import { waDigits, waLink } from '../../shared/whatsapp.js';
 
 // The injected <style> that sets the roll's paper size, and the body class that lets the paper print. The paper
@@ -48,12 +48,16 @@ function whatsAppText(ticket, copyNo) {
     paidAt: ticket.paid_at,
     memberName: ticket.member_name,
     memberNo: ticket.member_no,
-    lines: ticket.allocations,
+    lines: paymentLines({ kind: ticket.kind, label: ticket.label, amount: ticket.amount, allocations: ticket.allocations }),
     total: ticket.amount,
     method: ticket.method,
     reference: ticket.reference,
     cashier: ticket.created_by_name,
     refunded: ticket.refunded_amount,
+    cardAmount: ticket.card_amount,
+    balance: ticket.wallet_balance_after,
+    timeAvailable: ticket.wallet_balance_after === null ? null : ticket.time_available,
+    cancelledAt: ticket.cancelled_at,
     verifyUrl: verifiable ? ticketVerifyUrl(window.location.origin, ticket.id, ticket.ticket_code) : null,
     footer: ticket.footer,
     money,

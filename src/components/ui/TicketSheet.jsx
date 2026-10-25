@@ -1,12 +1,14 @@
 // The cash receipt as paper: an 80 mm roll, black on white, whatever the theme. The preview on screen and the
 // printed copy are this same component. `copyNo` 1 is the original, then « Duplicata n°X »; `printedBy` and
 // `printedAt` say who asked for this copy and when. In the demo the sheet carries a watermark and neither the
-// QR code nor the check code, so it cannot pass for a real receipt.
+// QR code nor the check code, so it cannot pass for a real receipt. A receipt the member card had a part in
+// shows the card's share and the rest with its method, the balances after it, and a box for the member's
+// signature when the movement was made by the staff.
 import { useMemo } from 'react';
 import BrandLogo from './BrandLogo.jsx';
-import { money, dateTime } from '../../lib/format.js';
+import { money, dateTime, fmtDuration } from '../../lib/format.js';
 import { encodeQrMatrix, qrSvgPath } from '../../lib/qrcode.js';
-import { formatTicketCode, ticketVerifyUrl } from '../../../shared/ticket.js';
+import { formatTicketCode, paymentLines, ticketVerifyUrl } from '../../../shared/ticket.js';
 
 export const copyLabel = (copyNo) => (copyNo <= 1 ? 'Original' : `Duplicata n°${copyNo}`);
 
@@ -26,6 +28,9 @@ export default function TicketSheet({ ticket, copyNo, printedBy, printedAt }) {
   const verifyUrl = verifiable ? ticketVerifyUrl(window.location.origin, ticket.id, ticket.ticket_code) : null;
   const header = String(ticket.header ?? '').trim();
   const footer = String(ticket.footer ?? '').trim();
+  const lines = paymentLines({ kind: ticket.kind, label: ticket.label, amount: ticket.amount, allocations: ticket.allocations });
+  const paidBy = `${ticket.method}${ticket.reference ? ` (${ticket.reference})` : ''}`;
+  const rest = ticket.amount - ticket.card_amount;
 
   return (
     <article className="ticket-sheet" aria-label={`Ticket ${ticket.number}`}>
@@ -49,8 +54,8 @@ export default function TicketSheet({ ticket, copyNo, printedBy, printedAt }) {
       </dl>
 
       <ul className="ts-lines">
-        {ticket.allocations.map((line, i) => (
-          <li key={`${line.charge_id}-${i}`}>
+        {lines.map((line, i) => (
+          <li key={`${line.charge_id ?? 'line'}-${i}`}>
             <span className="ts-label">{line.quantity > 1 ? `${line.quantity} × ` : ''}{line.label}</span>
             <span className="ts-amount">{money(line.amount)}</span>
           </li>
@@ -60,10 +65,26 @@ export default function TicketSheet({ ticket, copyNo, printedBy, printedAt }) {
       <div className="ts-total"><span>TOTAL</span><strong>{money(ticket.amount)}</strong></div>
 
       <dl className="ts-facts">
-        <div><dt>Payé</dt><dd>{ticket.method}{ticket.reference ? ` (${ticket.reference})` : ''}</dd></div>
+        {ticket.card_amount > 0 ? (
+          <>
+            <div><dt>Payé par carte membre</dt><dd>{money(ticket.card_amount)}</dd></div>
+            {rest > 0 && <div><dt>Reste payé ({paidBy})</dt><dd>{money(rest)}</dd></div>}
+          </>
+        ) : <div><dt>Payé</dt><dd>{paidBy}</dd></div>}
         {ticket.created_by_name && <div><dt>Encaissé par</dt><dd>{ticket.created_by_name}</dd></div>}
         <div><dt>Imprimé par</dt><dd>{printedBy}, le {dateTime(printedAt)}</dd></div>
       </dl>
+
+      {ticket.wallet_balance_after !== null && (
+        <dl className="ts-facts ts-balances">
+          <div><dt>Solde carte</dt><dd>{money(ticket.wallet_balance_after)}</dd></div>
+          {ticket.time_available !== null && <div><dt>Crédit temps</dt><dd>{fmtDuration(ticket.time_available)} disponibles</dd></div>}
+        </dl>
+      )}
+
+      {ticket.cancelled_at && (
+        <div className="ts-refunds"><p>Annulé le {dateTime(ticket.cancelled_at)}</p></div>
+      )}
 
       {ticket.refunds.length > 0 && (
         <div className="ts-refunds">
@@ -78,6 +99,13 @@ export default function TicketSheet({ ticket, copyNo, printedBy, printedAt }) {
           <TicketQr value={verifyUrl} />
           <p>Vérifiez ce ticket : scannez le QR code</p>
           <p className="ts-code">{formatTicketCode(ticket.ticket_code)}</p>
+        </div>
+      )}
+
+      {ticket.signature_required && (
+        <div className="ts-signature">
+          <p>Signature du client</p>
+          <div className="ts-signature-box" aria-hidden="true" />
         </div>
       )}
 
