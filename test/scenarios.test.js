@@ -129,14 +129,17 @@ test('5 bis. le crédit n’est jamais compté deux fois en accès simultané', 
   assert.deepEqual(included, [0, 120]);
 });
 
-test('6. pas d’horaires : prolongation au-delà de minuit et réservation le matin, sans autorisation', async () => {
+test('6. prolongation au-delà de minuit jusqu’à la fermeture, et réservation le matin, sans autorisation', async () => {
   const e = await newMember('Émile');
+  // The time beyond the credit is paid by the card when the session is extended.
+  ok(await manager.post(`/api/members/${e}/wallet/recharge`, { amount: 100000 * UM, method: 'Espèces' }));
   const d = ok(await book(e, day(4), '22:00', 90));
   const id = d.reservation.id;
   const quote = ok(await manager.post(`/api/reservations/${id}/extend/quote`, { minutes: 120 }));
   assert.equal(quote.included_minutes, 30);
   assert.equal(quote.paid_minutes, 90);
   assert.equal(quote.supplement_delta, 40000 * UM);
+  assert.deepEqual([quote.card_amount, quote.card_balance, quote.balance_after, quote.card_enough], [40000 * UM, 100000 * UM, 60000 * UM, true]);
   const ext = ok(await manager.post(`/api/reservations/${id}/extend`, { minutes: 120 }));
   assert.equal(ext.reservation.end_time, '01:30');
   assert.equal(ext.reservation.end_date, day(5));
@@ -144,10 +147,13 @@ test('6. pas d’horaires : prolongation au-delà de minuit et réservation le m
   assert.equal(ext.reservation.duration_min, 210);
   assert.equal(ext.reservation.off_hours, false);
   assert.equal(ext.reservation.supplement_amount, 40000 * UM);
-  // Until the morning, past the start of the next business day: still the same session.
-  const dawn = ok(await manager.post(`/api/reservations/${id}/extend`, { minutes: 300 }));
-  assert.equal(dawn.reservation.end_time, '06:30');
-  assert.equal(dawn.reservation.biz_day, day(4));
+  // Not past the club's closing time (02:30 by default): until then, still the same session.
+  const dawn = await manager.post(`/api/reservations/${id}/extend`, { minutes: 300 });
+  assert.equal(dawn.status, 409);
+  assert.equal(dawn.data.error.code, 'FERMETURE');
+  const closing = ok(await manager.post(`/api/reservations/${id}/extend`, { minutes: 60 }));
+  assert.equal(closing.reservation.end_time, '02:30');
+  assert.equal(closing.reservation.biz_day, day(4));
   const tooLong = await manager.post(`/api/reservations/${id}/extend`, { minutes: 1440 });
   assert.equal(tooLong.status, 400);
   assert.equal(tooLong.data.error.code, 'DUREE_MAXIMALE');
@@ -334,6 +340,7 @@ test('13. tarifs non validés bloqués hors démonstration ; pas de recalcul apr
     ok(await admin.put('/api/settings', { overtime_tariff: { hour: 30000 * UM, half: 18000 * UM, validated: true } }));
     const unchanged = ok(await manager.get(`/api/reservations/${now.reservation.id}`));
     assert.equal(unchanged.reservation.supplement_amount, 25000 * UM);
+    ok(await manager.post(`/api/members/${k}/wallet/recharge`, { amount: 15000 * UM, method: 'Espèces' }));
     const extended = ok(await manager.post(`/api/reservations/${now.reservation.id}/extend`, { minutes: 30 }));
     assert.equal(extended.reservation.supplement_amount, 40000 * UM); // still the booked tariff: 25 000 + 15 000
   } finally {

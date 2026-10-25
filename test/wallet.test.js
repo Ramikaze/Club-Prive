@@ -500,11 +500,11 @@ test('séance sans abonnement : aucun crédit temps à décompter, la minuterie 
 });
 
 test('salle, prolongation payée par la carte : la demi-heure en plus est prise sur la carte', async () => {
-  const q = ok(await manager.post(`/api/reservations/${noraBooking.id}/extend/quote`, { minutes: 30, pay_with_card: true }));
+  const q = ok(await manager.post(`/api/reservations/${noraBooking.id}/extend/quote`, { minutes: 30 }));
   assert.equal(q.supplement_delta, 15000 * UM);
-  assert.equal(q.card_amount, 15000 * UM);
-  refused(await manager.post(`/api/reservations/${noraBooking.id}/extend`, { minutes: 30 }), 409, 'ABONNEMENT_INVALIDE');
-  const d = ok(await manager.post(`/api/reservations/${noraBooking.id}/extend`, { minutes: 30, pay_with_card: true }));
+  assert.deepEqual([q.card_amount, q.card_balance, q.balance_after, q.card_enough], [15000 * UM, 50000 * UM, 35000 * UM, true]);
+  // The card always pays the extension, whatever an older screen sends.
+  const d = ok(await manager.post(`/api/reservations/${noraBooking.id}/extend`, { minutes: 30, pay_with_card: false }));
   assert.equal(balance(nora.id), 35000 * UM);
   assert.equal(d.reservation.duration_min, 150);
   assert.equal(d.reservation.due_amount, 0);

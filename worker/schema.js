@@ -625,7 +625,30 @@ const V15 = [
   END`,
 ];
 
-export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15];
+// Members present in a room are never debited: only the holder of the booking is. An attendee row keeps who was
+// there, without any plan: `reservation_attendees.subscription_id` loses its NOT NULL. No table refers to this
+// one, so its rows wait in a plain copy while it is created again; both of its indexes come back.
+const V16 = [
+  'CREATE TABLE reservation_attendees_v15 AS SELECT * FROM reservation_attendees',
+  'DROP TABLE reservation_attendees',
+  `CREATE TABLE reservation_attendees (
+    id INTEGER PRIMARY KEY,
+    reservation_id INTEGER NOT NULL REFERENCES reservations(id),
+    member_id INTEGER NOT NULL REFERENCES members(id),
+    subscription_id INTEGER REFERENCES subscriptions(id),
+    included_minutes INTEGER NOT NULL DEFAULT 0 CHECK (included_minutes >= 0),
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    UNIQUE (reservation_id, member_id)
+  )`,
+  `INSERT INTO reservation_attendees (id, reservation_id, member_id, subscription_id, included_minutes, created_at, created_by)
+   SELECT id, reservation_id, member_id, subscription_id, included_minutes, created_at, created_by FROM reservation_attendees_v15`,
+  'DROP TABLE reservation_attendees_v15',
+  'CREATE INDEX reservation_attendees_res ON reservation_attendees(reservation_id)',
+  'CREATE INDEX reservation_attendees_member ON reservation_attendees(member_id, reservation_id)',
+];
+
+export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16];
 
 export function migrate(db) {
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');

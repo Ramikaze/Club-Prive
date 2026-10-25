@@ -85,7 +85,7 @@ test('disponibilité membre : titulaire et accompagnant ne peuvent occuper deux 
   }
   const other = await book({ room_id: rooms[1].id, member_id: members[2].id });
   rejected(await manager.post(`/api/reservations/${other.id}/attendees`, { member_id: members[1].id }), 'MEMBRE_OCCUPE');
-  assert.equal(credit(members[1]).committed, 60);
+  assert.equal(credit(members[1]).committed, 0);
   ok(await manager.post(`/api/reservations/${res.id}/cancel`, { reason: 'Changement de salle' }));
   ok(await manager.post(`/api/reservations/${other.id}/attendees`, { member_id: members[1].id }));
 });
@@ -100,24 +100,73 @@ test('prolongation : disponibilité de chaque participant vérifiée et créneau
   assert.equal(credit(members[0]).committed, 60);
 });
 
-test('crédits des participants : prolongation, retrait, retour et clôture sans double débit', async () => {
+// Credit movements of a member's plan, whatever the booking.
+const movements = (member) => server.club.all('SELECT kind, minutes FROM credit_movements WHERE subscription_id = ?', member.subId).map((m) => ({ ...m }));
+
+test('membres présents : jamais débités, à la réservation, à l’entrée, en prolongation ou à la clôture', async () => {
   const res = await book({ attendee_ids: [members[1].id] });
+  // Booking with an attendee: only the holder's plan is engaged; the attendee row keeps who was there.
+  assert.equal(credit(members[0]).committed, 60);
+  assert.deepEqual(movements(members[1]), []);
+  assert.deepEqual({ ...server.club.get('SELECT subscription_id, included_minutes FROM reservation_attendees WHERE reservation_id = ?', res.id) },
+    { subscription_id: null, included_minutes: 0 });
+  assert.deepEqual(res.attendees.map((a) => [a.member_id, a.included_minutes]), [[members[0].id, 60], [members[1].id, undefined]]);
   ok(await manager.post(`/api/reservations/${res.id}/extend`, { minutes: 30 }));
-  assert.equal(credit(members[1]).committed, 90);
+  assert.equal(credit(members[0]).committed, 90);
   ok(await manager.del(`/api/reservations/${res.id}/attendees/${members[1].id}`));
-  assert.equal(credit(members[1]).available, 120);
   const headers = { 'idempotency-key': 'return-to-room-once' };
   for (let n = 0; n < 2; n += 1) {
     ok(await manager.post(`/api/reservations/${res.id}/attendees`, { member_id: members[1].id }, headers));
   }
-  assert.equal(credit(members[1]).committed, 90);
+  // On entry in the room as well (« Membre (n/N) »): nothing of the member's is taken.
+  ok(await manager.post(`/api/reservations/${res.id}/attendees`, { member_id: members[2].id }));
   ok(await manager.post(`/api/reservations/${res.id}/finish`));
   assert.equal(ok(await manager.get(`/api/members/${members[1].id}`)).reservations[0].id, res.id);
-  for (const member of members.slice(0, 2)) {
-    assert.equal(credit(member).committed, 0);
-    assert.equal(credit(member).consumed, 90);
-    assert.equal(credit(member).available, 30);
+  // Finishing consumes the holder's minutes alone.
+  assert.deepEqual([credit(members[0]).committed, credit(members[0]).consumed, credit(members[0]).available], [0, 90, 30]);
+  for (const member of members.slice(1)) {
+    assert.deepEqual(movements(member), []);
+    assert.equal(credit(member).available, 120);
   }
+});
+
+test('membres présents : un membre sans formule ni crédit peut entrer, sans aucun débit', async () => {
+  ok(await admin.post(`/api/subscriptions/${members[1].subId}/adjust`, { minutes: -120, reason: 'Crédit épuisé (test)' }));
+  const dora = ok(await manager.post('/api/members', { first_name: 'Dora', last_name: 'Test', phone: '+000 000001' }));
+  const quote = ok(await manager.post('/api/reservations/quote', request({ attendee_ids: [members[1].id, dora.id] })));
+  assert.deepEqual(quote.extra_attendees.map((a) => a.id), [members[1].id, dora.id]);
+  assert.equal(quote.extra_attendees.some((a) => 'included_minutes' in a || 'credit_available' in a), false);
+  const res = await book({ attendee_ids: [dora.id] });
+  const added = ok(await manager.post(`/api/reservations/${res.id}/attendees`, { member_id: members[1].id })).reservation;
+  assert.deepEqual(added.attendees.map((a) => a.member_id), [members[0].id, dora.id, members[1].id]);
+  assert.equal(movements(members[1]).filter((m) => m.kind !== 'ajustement').length, 0);
+  ok(await manager.post(`/api/reservations/${res.id}/cancel`, { reason: 'Annulation (test)' }));
+  assert.equal(movements(members[1]).filter((m) => m.kind !== 'ajustement').length, 0);
+  assert.equal(credit(members[0]).available, 120);
+});
+
+test('membres présents : au démarrage, le crédit encore engagé sur une séance active est rendu une seule fois', async () => {
+  const active = await book({ attendee_ids: [members[1].id] });
+  const done = await book({ attendee_ids: [members[2].id], room_id: rooms[1].id, member_id: members[0].id, start_time: '17:00' });
+  // What the live database holds from before the rule: attendees with engaged credit, one booking finished since.
+  const legacy = (res, member, kind) => {
+    server.club.run('UPDATE reservation_attendees SET subscription_id = ?, included_minutes = 60 WHERE reservation_id = ? AND member_id = ?', member.subId, res.id, member.id);
+    server.club.creditMove(null, member.subId, res.id, 'engagement', 60, 'Présence en salle (ancien)');
+    if (kind) server.club.creditMove(null, member.subId, res.id, kind, 60, 'Réservation terminée (présence en salle)');
+  };
+  legacy(active, members[1]);
+  legacy(done, members[2], 'consommation');
+  server.club.run("UPDATE reservations SET status = 'terminee' WHERE id = ?", done.id);
+  server.club.run("DELETE FROM meta WHERE key = 'attendees_not_debited'");
+  assert.equal(credit(members[1]).committed, 60);
+  for (let n = 0; n < 2; n += 1) await server.restart();
+  assert.deepEqual(server.club.all("SELECT minutes, reason FROM credit_movements WHERE subscription_id = ? AND kind = 'liberation'", members[1].subId).map((m) => ({ ...m })),
+    [{ minutes: 60, reason: 'Membres présents : plus de débit' }]);
+  assert.deepEqual([credit(members[1]).committed, credit(members[1]).available], [0, 120]);
+  assert.equal(server.club.get('SELECT included_minutes FROM reservation_attendees WHERE reservation_id = ?', active.id).included_minutes, 0);
+  // The finished booking keeps its history.
+  assert.equal(server.club.get('SELECT included_minutes FROM reservation_attendees WHERE reservation_id = ?', done.id).included_minutes, 60);
+  assert.deepEqual([credit(members[2]).consumed, credit(members[2]).available], [60, 60]);
 });
 
 test('concurrence : un seul engagement pour le même membre dans deux salles', async () => {
@@ -127,12 +176,13 @@ test('concurrence : un seul engagement pour le même membre dans deux salles', a
   assert.equal(credit(members[0]).committed, 60);
 });
 
-test('abonnement : annulation impossible tant que le membre accompagne une réservation active', async () => {
+test('abonnement : celui du titulaire est retenu par sa réservation active, pas celui d’un membre présent', async () => {
   const res = await book({ attendee_ids: [members[1].id] });
-  rejected(await admin.post(`/api/subscriptions/${members[1].subId}/cancel`, { reason: 'Demande du membre' }), 'RESERVATIONS_ACTIVES');
-  ok(await manager.post(`/api/reservations/${res.id}/cancel`, { reason: 'Annulation collective' }));
-  for (const member of members.slice(0, 2)) assert.equal(credit(member).available, 120);
+  rejected(await admin.post(`/api/subscriptions/${members[0].subId}/cancel`, { reason: 'Demande du membre' }), 'RESERVATIONS_ACTIVES');
   ok(await admin.post(`/api/subscriptions/${members[1].subId}/cancel`, { reason: 'Demande du membre' }));
+  ok(await manager.post(`/api/reservations/${res.id}/cancel`, { reason: 'Annulation collective' }));
+  assert.equal(credit(members[0]).available, 120);
+  ok(await admin.post(`/api/subscriptions/${members[0].subId}/cancel`, { reason: 'Demande du membre' }));
 });
 
 test('configuration : capacité et fermeture respectent les réservations actives', async () => {
@@ -160,7 +210,7 @@ test('suppression de salle : historique conservé, aucune réaffectation et dern
   assert.equal(ok(await manager.get(`/api/reservations/${first.id}`)).reservation.room_name, rooms[0].name);
 });
 
-test('accès salle : seuls les membres avec carte active, formule active et crédit restant sont admis', async () => {
+test('accès salle : le titulaire doit avoir carte active, formule et crédit ; un membre présent, une carte active', async () => {
   // Bruno : crédit épuisé par un ajustement administrateur.
   ok(await admin.post(`/api/subscriptions/${members[1].subId}/adjust`, { minutes: -credit(members[1]).available, reason: 'Crédit épuisé (test)' }));
   assert.equal(credit(members[1]).available, 0);
@@ -181,26 +231,19 @@ test('accès salle : seuls les membres avec carte active, formule active et cré
   rejected(await manager.post('/api/reservations', request({ member_id: members[2].id, require_credit: true })), 'CARTE_DESACTIVEE');
   rejected(await manager.post('/api/reservations', request({ member_id: dora.id, require_credit: true })), 'ABONNEMENT_INVALIDE');
 
-  // Accompagnants non éligibles à la création ou au devis.
-  rejected(await manager.post('/api/reservations/quote', request({ attendee_ids: [members[1].id] })), 'CREDIT_EPUISE');
+  // Membres présents : ni formule ni crédit demandés (seul le titulaire est débité), mais une carte désactivée
+  // reste refusée, à la création comme au devis.
+  rejected(await manager.post('/api/reservations/quote', request({ attendee_ids: [members[2].id] })), 'CARTE_DESACTIVEE');
   rejected(await manager.post('/api/reservations', request({ attendee_ids: [members[2].id] })), 'CARTE_DESACTIVEE');
-  rejected(await manager.post('/api/reservations', request({ attendee_ids: [dora.id] })), 'ABONNEMENT_INVALIDE');
   assert.equal(credit(members[0]).committed, 0, 'aucune réservation partielle créée');
 
-  // Ajout en direct dans une salle occupée.
+  // Ajout en direct dans une salle occupée : Bruno (crédit épuisé) et Dora (sans formule) entrent sans débit.
   const res = await book({ require_credit: true });
-  for (const [id, code] of [[members[1].id, 'CREDIT_EPUISE'], [members[2].id, 'CARTE_DESACTIVEE'], [dora.id, 'ABONNEMENT_INVALIDE']]) {
-    rejected(await manager.post(`/api/reservations/${res.id}/attendees`, { member_id: id }), code);
-  }
+  rejected(await manager.post(`/api/reservations/${res.id}/attendees`, { member_id: members[2].id }), 'CARTE_DESACTIVEE');
+  for (const id of [members[1].id, dora.id]) ok(await manager.post(`/api/reservations/${res.id}/attendees`, { member_id: id }));
   const detail = ok(await manager.get(`/api/reservations/${res.id}`)).reservation;
-  assert.deepEqual(detail.attendees.map((a) => a.member_id), [members[0].id]);
-
-  // Une fois rechargé, Bruno peut entrer et son propre crédit est engagé.
-  ok(await admin.post(`/api/subscriptions/${members[1].subId}/adjust`, { minutes: 30, reason: 'Recharge (test)' }));
-  const added = ok(await manager.post(`/api/reservations/${res.id}/attendees`, { member_id: members[1].id })).reservation;
-  assert.equal(added.attendees.length, 2);
-  assert.equal(credit(members[1]).committed, 30);
-  assert.equal(credit(members[1]).available, 0);
+  assert.deepEqual(detail.attendees.map((a) => a.member_id), [members[0].id, members[1].id, dora.id]);
+  assert.deepEqual([credit(members[1]).committed, credit(members[1]).available], [0, 0]);
   assert.equal(credit(members[0]).committed, 60);
 });
 

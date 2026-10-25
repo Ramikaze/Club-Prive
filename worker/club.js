@@ -19,7 +19,7 @@ import {
 import {
   ACCOUNTS, ACCOUNT_LABELS, bookingWindow, validateHours, placeInWindow, supplementAmount, supplementDetail, fmtDuration,
   isWeekend, minDurationFor, DEPOSIT_FROM, depositFor, formatMoney, CARD_METHOD, RENEWAL_WARNING_DAYS, RENEWAL_GRACE_DAYS,
-  formatFirstName, formatLastName, CASH_METHOD,
+  formatFirstName, formatLastName, CASH_METHOD, DEFAULT_CLOSE,
 } from '../shared/rules.js';
 import { waDigits } from '../shared/whatsapp.js';
 
@@ -73,7 +73,7 @@ export function defaultSettings() {
     ticket_footer: 'Merci de votre visite',
     currency: { label: 'FCFA', decimals: 0 },
     timezone: 'Africa/Brazzaville',
-    hours: { open: '06:00' }, // start of the business day; the room can be booked at any hour
+    hours: { open: '06:00', close: DEFAULT_CLOSE }, // start of the business day, and closing time (no extension past it)
     // gap_min: minutes kept free between two bookings of the same room; 0 turns the rule off.
     booking: { slot_min: 30, min_duration_min: 60, weekend_min_duration_min: 120, extension_step_min: 30, gap_min: 30 },
     overtime_tariff: { hour: 2500000, half: 1500000, validated: false },
@@ -248,6 +248,22 @@ export class Club {
         for (const m of this.all('SELECT id FROM members WHERE active = 1')) this.ensureCard(SYSTEM_ACTOR, m.id);
         this.run("INSERT INTO meta (key, value) VALUES ('cards_for_all', ?)", this.nowIso());
       }
+      // Members present in a room are no longer debited, only the holder is. The credit an attendee still has
+      // engaged on a booking not yet over (booked or in progress) goes back to the attendee's plan once, and the
+      // row keeps no minutes. Finished bookings keep their history as it was.
+      if (!this.get("SELECT 1 AS x FROM meta WHERE key = 'attendees_not_debited'")) {
+        const rows = this.all(
+          `SELECT ra.id, ra.reservation_id, ra.subscription_id FROM reservation_attendees ra
+           JOIN reservations r ON r.id = ra.reservation_id
+           WHERE r.status IN ('reservee', 'en_cours')`,
+        );
+        for (const ra of rows) {
+          const open = ra.subscription_id != null ? this.committedFor(ra.reservation_id, ra.subscription_id) : 0;
+          if (open > 0) this.creditMove(SYSTEM_ACTOR, ra.subscription_id, ra.reservation_id, 'liberation', open, 'Membres présents : plus de débit');
+          this.run('UPDATE reservation_attendees SET included_minutes = 0 WHERE id = ?', ra.id);
+        }
+        this.run("INSERT INTO meta (key, value) VALUES ('attendees_not_debited', ?)", this.nowIso());
+      }
       if (!this.get('SELECT 1 AS x FROM categories LIMIT 1')) {
         for (const [kind, names] of Object.entries(DEFAULT_CATEGORIES)) {
           for (const name of names) this.run('INSERT INTO categories (kind, name, created_at) VALUES (?, ?, ?)', kind, name, this.nowIso());
@@ -294,6 +310,8 @@ export class Club {
       for (const row of this.all('SELECT key, value FROM settings')) if (row.key in s) s[row.key] = JSON.parse(row.value);
       // A booking setting saved before the gap existed has no `gap_min`: it reads with the default.
       if (!Number.isInteger(s.booking.gap_min)) s.booking = { ...s.booking, gap_min: defaultSettings().booking.gap_min };
+      // Likewise hours saved before the closing time existed.
+      if (!s.hours.close) s.hours = { ...s.hours, close: DEFAULT_CLOSE };
       // Not a stored setting: it follows the space the club runs in, whatever an older `demo_mode` row says.
       s.demo_mode = this.demo;
       this.cachedSettings = s;
@@ -369,7 +387,7 @@ export class Club {
         return tz;
       }
       case 'hours': {
-        const h = { open: String(v?.open ?? '') };
+        const h = { open: String(v?.open ?? ''), close: String(v?.close ?? current?.close ?? DEFAULT_CLOSE) };
         const err = validateHours(h);
         if (err) throw invalid(err);
         return h;
@@ -1148,11 +1166,9 @@ export class Club {
     if (!sub) throw notFound('Abonnement');
     if (sub.status === 'annulee') throw conflict('DEJA_ANNULE', 'Abonnement déjà annulé.');
     const reason = text(input.reason, 'Motif', { required: true, min: 3, max: 300 });
+    // Only the bookings this plan pays for hold it: a member present in someone else's room takes nothing from it.
     const active = this.get(
-      `SELECT COUNT(*) AS n FROM reservations r WHERE r.status IN ('reservee', 'en_cours')
-       AND (r.subscription_id = ? OR EXISTS (
-         SELECT 1 FROM reservation_attendees ra WHERE ra.reservation_id = r.id AND ra.subscription_id = ?
-       ))`, sub.id, sub.id,
+      "SELECT COUNT(*) AS n FROM reservations r WHERE r.status IN ('reservee', 'en_cours') AND r.subscription_id = ?", sub.id,
     );
     if (active.n > 0) {
       throw conflict('RESERVATIONS_ACTIVES', `Annulez ou terminez d'abord les ${active.n} réservation(s) rattachée(s) à cet abonnement.`);
@@ -1610,6 +1626,24 @@ export class Club {
     return { member, sub, credit };
   }
 
+  // A member present in a room besides the holder. Only the holder is debited (« Les membres présents ne doivent
+  // jamais être débités, ni à la réservation ni à l'entrée en salle »): no plan, credit or card balance is asked
+  // of an attendee. The member must still be active and identifiable: a member whose cards are all deactivated
+  // (a lost or blocked card) is turned away, as for the holder.
+  verifyAttendee(memberId) {
+    const member = this.memberRow(memberId);
+    this.assertMemberActive(member, 'toute réservation ou entrée en salle');
+    if (this.hasDeactivatedCardsOnly(member.id)) {
+      throw conflict(
+        'CARTE_DESACTIVEE',
+        `La carte de membre de ${member.first_name} ${member.last_name} est désactivée : émettez une carte active avant l'accès en salle.`,
+      );
+    }
+    return member;
+  }
+
+  // The holder first, with the minutes this booking takes from the holder's plan; the other members present
+  // carry no minutes: they are never debited.
   attendeesFor(r) {
     const primaryCard = this.activeCardCode(r.member_id);
     const list = [{
@@ -1635,8 +1669,6 @@ export class Club {
         name: `${ex.first_name} ${ex.last_name}`,
         member_no: ex.member_no,
         card_code: this.activeCardCode(ex.member_id),
-        subscription_id: ex.subscription_id,
-        included_minutes: ex.included_minutes,
         is_primary: false,
       });
     }
@@ -1846,13 +1878,8 @@ export class Club {
       const mId = toId(rawId, 'Membre accompagnant');
       if (seenIds.has(mId)) continue;
       seenIds.add(mId);
-      const att = this.verifyMemberRoomAccess(mId, place.bizDay, { requireRemainingCredit: true });
-      extraAttendees.push({
-        member: att.member,
-        sub: att.sub,
-        credit: att.credit,
-        included: Math.min(att.credit.available, duration),
-      });
+      // Only the holder is debited: an attendee needs no plan nor credit, and none of it is taken.
+      extraAttendees.push({ member: this.verifyAttendee(mId) });
     }
 
     const partySize = input.party_size === undefined || input.party_size === '' || input.party_size === null
@@ -1900,8 +1927,6 @@ export class Club {
         id: a.member.id,
         name: `${a.member.first_name} ${a.member.last_name}`,
         member_no: a.member.member_no,
-        included_minutes: a.included,
-        credit_available: a.credit.available,
       })),
       rooms_availability: p.rooms_availability,
       biz_day: p.place.bizDay,
@@ -1967,12 +1992,12 @@ export class Club {
       throw err;
     }
     if (p.sub) this.creditMove(actor, p.sub.id, id, 'engagement', p.included, 'Réservation confirmée');
+    // The members present are recorded, never debited: no plan, no minutes, no credit movement.
     for (const att of p.extraAttendees) {
       this.insert(
-        'INSERT INTO reservation_attendees (reservation_id, member_id, subscription_id, included_minutes, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?)',
-        id, att.member.id, att.sub.id, att.included, this.nowIso(), actor.id,
+        'INSERT INTO reservation_attendees (reservation_id, member_id, subscription_id, included_minutes, created_at, created_by) VALUES (?, ?, NULL, 0, ?, ?)',
+        id, att.member.id, this.nowIso(), actor.id,
       );
-      this.creditMove(actor, att.sub.id, id, 'engagement', att.included, `Présence en salle (${p.room.name})`);
     }
     // Paid time is one line, or two when a deposit is due: the deposit (paid now) and the balance
     // (paid before entering the room, or now as well when the member goes straight in). Paid with the card,
@@ -2039,7 +2064,7 @@ export class Club {
       throw conflict('STATUT', 'Impossible d’ajouter un membre sur une séance terminée ou annulée.');
     }
     const room = this.resolveRoom(r.room_id);
-    const { member, sub, credit } = this.verifyMemberRoomAccess(input.member_id, r.biz_day, { requireRemainingCredit: true });
+    const member = this.verifyAttendee(input.member_id);
     const who = `${member.first_name} ${member.last_name}`;
     if (member.id === r.member_id || this.get('SELECT 1 AS x FROM reservation_attendees WHERE reservation_id = ? AND member_id = ?', r.id, member.id)) {
       throw conflict('DEJA_PRESENT', `${who} est déjà enregistré(e) dans cette salle.`);
@@ -2048,16 +2073,13 @@ export class Club {
     const newCount = Math.max(r.party_size, 1 + n) + 1;
     this.validateOccupancy(room, newCount, 2 + n);
     this.ensureMembersAvailable([member.id], r.start_ms, r.end_ms, r.id);
-    const included = Math.min(credit.available, r.duration_min);
+    // Recorded as present, never debited: only the holder's plan pays for the room.
     this.insert(
-      'INSERT INTO reservation_attendees (reservation_id, member_id, subscription_id, included_minutes, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?)',
-      r.id, member.id, sub.id, included, this.nowIso(), actor.id,
+      'INSERT INTO reservation_attendees (reservation_id, member_id, subscription_id, included_minutes, created_at, created_by) VALUES (?, ?, NULL, 0, ?, ?)',
+      r.id, member.id, this.nowIso(), actor.id,
     );
-    this.creditMove(actor, sub.id, r.id, 'engagement', included, `Présence en salle (${room.name})`);
     this.run('UPDATE reservations SET party_size = ?, updated_at = ?, updated_by = ? WHERE id = ?', newCount, this.nowIso(), actor.id, r.id);
-    this.audit(actor, 'reservation.ajouter_membre', 'reservation', r.id, {
-      membre: who, member_no: member.member_no, minutes_engagees: included,
-    });
+    this.audit(actor, 'reservation.ajouter_membre', 'reservation', r.id, { membre: who, member_no: member.member_no });
     return this.reservationDetail(r.id);
   }
 
@@ -2072,14 +2094,11 @@ export class Club {
     }
     const row = this.get('SELECT * FROM reservation_attendees WHERE reservation_id = ? AND member_id = ?', r.id, mId);
     if (!row) throw notFound('Membre présent');
-    const open = this.committedFor(r.id, row.subscription_id);
-    if (open > 0) {
-      this.creditMove(actor, row.subscription_id, r.id, 'liberation', open, 'Retrait de la salle');
-    }
+    // Nothing of an attendee's was taken, so nothing is given back.
     this.run('DELETE FROM reservation_attendees WHERE id = ?', row.id);
     const { n } = this.get('SELECT COUNT(*) AS n FROM reservation_attendees WHERE reservation_id = ?', r.id);
     this.run('UPDATE reservations SET party_size = ?, updated_at = ?, updated_by = ? WHERE id = ?', Math.max(r.party_size - 1, 1 + n), this.nowIso(), actor.id, r.id);
-    this.audit(actor, 'reservation.retirer_membre', 'reservation', r.id, { member_id: mId, minutes_liberees: open });
+    this.audit(actor, 'reservation.retirer_membre', 'reservation', r.id, { member_id: mId });
     return this.reservationDetail(r.id);
   }
 
@@ -2152,7 +2171,12 @@ export class Club {
       credit_available: p.credit?.available ?? 0, included_minutes: p.addIncluded, paid_minutes: p.addPaid,
       total_paid_minutes: p.newPaid, supplement_before: p.r.supplement_amount, supplement_after: p.newSupplement,
       supplement_delta: p.delta, tariff: p.tariff,
-      ...this.cardQuote(p.r.member_id, flag(input.pay_with_card) ? Math.max(p.delta, 0) : 0, Math.max(p.delta, 0)),
+      // The card pays all of the paid part, at once: an extension it cannot pay is refused (SOLDE_INSUFFISANT).
+      ...(() => {
+        const balance = this.walletBalance(p.r.member_id);
+        const card = Math.max(p.delta, 0);
+        return { card_balance: balance, card_amount: card, balance_after: balance - card, card_enough: card <= balance };
+      })(),
       tariff_blocked: p.addPaid > 0 && !p.tariff.validated && !s.demo_mode,
       conflicts: p.conflicts,
       gap_conflicts: p.gap_conflicts,
@@ -2162,15 +2186,34 @@ export class Club {
     };
   }
 
-  // Why a planned extension cannot go ahead, as the error to raise, or null when it can: the room is taken,
-  // the next booking would be too close, or the time beyond the credit has no tariff an administrator has
-  // validated to be billed at (the demo bills it all the same). extendReservation raises it and
-  // extensionWindow words it, so what the window calls possible is what the server accepts.
+  // The instant the club closes on the night of business day `bizDay`.
+  closingMs(bizDay) {
+    const { timezone: tz, hours } = this.settings();
+    const close = hours.close ?? DEFAULT_CLOSE;
+    return localToUtcMs(parseHHMM(close) <= parseHHMM(hours.open) ? addDays(bizDay, 1) : bizDay, close, tz);
+  }
+
+  // Why a planned extension cannot go ahead, as the error to raise, or null when it can: it would end after the
+  // club closes, the room is taken, the next booking would be too close, the time beyond the credit has no tariff
+  // an administrator has validated to be billed at (the demo bills it all the same), or the member's card cannot
+  // pay that time in full. extendReservation raises it and extensionWindow words it, so what the window calls
+  // possible is what the server accepts.
   extensionRefusal(p) {
+    const close = this.settings().hours.close ?? DEFAULT_CLOSE;
+    if (p.newEnd > this.closingMs(p.r.biz_day)) return conflict('FERMETURE', `Le club ferme à ${close} : prolongation impossible au-delà.`);
     if (p.conflicts.length) return this.overlapError(p.conflicts, p.r.room_name);
     if (p.gap_conflicts.length) return this.gapError(p.gap_conflicts, { startMs: p.r.end_ms, endMs: p.newEnd, extension: true });
     if (p.addPaid > 0 && !p.tariff.validated && !this.settings().demo_mode) {
       return conflict('TARIF_NON_VALIDE', "Le tarif des heures supplémentaires de cette réservation n'a pas été validé.");
+    }
+    // The paid part is taken from the card when the session is extended, all of it: never left to collect.
+    const balance = this.walletBalance(p.r.member_id);
+    if (p.delta > balance) {
+      return conflict(
+        'SOLDE_INSUFFISANT',
+        `Crédit CFA insuffisant sur la carte : ${this.money(balance)} disponibles, ${this.money(p.delta)} nécessaires.`,
+        { balance, needed: p.delta, minutes: p.addPaid },
+      );
     }
     return null;
   }
@@ -2179,11 +2222,8 @@ export class Club {
     const p = this.planExtension(id, input.minutes);
     const refusal = this.extensionRefusal(p);
     if (refusal) throw refusal;
-    // Without a plan the extension is paid with the card, as the booking was.
-    const payWithCard = flag(input.pay_with_card);
-    if (!p.r.subscription_id && !payWithCard) {
-      throw conflict('ABONNEMENT_INVALIDE', `${p.r.first_name} ${p.r.last_name} n'a pas d'abonnement : la prolongation se paie avec la carte.`);
-    }
+    // The time within the plan's credit is free; the card pays the rest in full (extensionRefusal made sure it
+    // can). pay_with_card and method, sent by older screens, are ignored.
     try {
       this.run(
         `UPDATE reservations SET end_ms = ?, duration_min = duration_min + ?, included_minutes = included_minutes + ?,
@@ -2196,35 +2236,20 @@ export class Club {
       if (String(err.message).includes('CHEVAUCHEMENT')) throw this.overlapError(this.overlapping(p.r.end_ms, p.newEnd, p.r.id, p.r.room_id ?? 1), p.r.room_name);
       throw err;
     }
+    // Only the holder's credit and card pay for the extra time (the owner's rule: a room is booked by one member,
+    // and it is on that member's card that it is debited); the attendees' credit is left alone.
     this.creditMove(actor, p.r.subscription_id, p.r.id, 'engagement', p.addIncluded, `Prolongation +${fmtDuration(p.add)}`);
-    for (const att of this.all('SELECT * FROM reservation_attendees WHERE reservation_id = ?', p.r.id)) {
-      const attSub = this.get('SELECT * FROM subscriptions WHERE id = ?', att.subscription_id);
-      if (attSub && attSub.status === 'active') {
-        const attCredit = this.credit(attSub, p.r.biz_day);
-        const attAdd = Math.min(attCredit.available, p.add);
-        if (attAdd > 0) {
-          this.run('UPDATE reservation_attendees SET included_minutes = included_minutes + ? WHERE id = ?', attAdd, att.id);
-          this.creditMove(actor, att.subscription_id, p.r.id, 'engagement', attAdd, `Prolongation +${fmtDuration(p.add)} (présence en salle)`);
-        }
-      }
-    }
     if (p.delta > 0) {
       const line = {
         account: 'reservations', kind: 'temps_supplementaire', member_id: p.r.member_id, reservation_id: p.r.id,
         quantity: 1, tariff_validated: p.tariff.validated ? 1 : 0,
       };
-      const extra = { label: `Prolongation +${fmtDuration(p.add)} (temps supplémentaire)`, unit_price: p.delta };
-      if (payWithCard) {
-        this.insertTimeLinesPaidByCard(actor, line, [extra], {
-          method: text(input.method, 'Moyen de paiement', { max: 40 }), reference: null,
-        });
-      } else {
-        this.insertCharge(actor, { ...line, ...extra });
-      }
+      const chargeId = this.insertCharge(actor, { ...line, label: `Prolongation +${fmtDuration(p.add)} (temps supplémentaire)`, unit_price: p.delta });
+      this.recordPayment(actor, { charge_ids: [chargeId], card: true });
     }
     this.audit(actor, 'reservation.prolonger', 'reservation', p.r.id, {
       minutes: p.add, ancienne_fin: new Date(p.r.end_ms).toISOString(), nouvelle_fin: new Date(p.newEnd).toISOString(),
-      minutes_incluses: p.addIncluded, minutes_payantes: p.addPaid, supplement_ajoute: p.delta, carte: payWithCard,
+      minutes_incluses: p.addIncluded, minutes_payantes: p.addPaid, supplement_ajoute: p.delta, carte: Math.max(p.delta, 0),
     });
     return this.reservationDetail(p.r.id);
   }
@@ -2238,6 +2263,11 @@ export class Club {
   // the search. `next` is the next booking of the room, whatever stops the extension. `until_time` is a bare
   // time, so `until_next_day` says when that limit falls on a later calendar day than the session's current
   // end ("until 14:00" after an end at 16:00 means tomorrow).
+  // The holder's plan credit still free carries the session past its planned end on its own (finishReservation
+  // takes that time from it at the exit), up to the closing time and the next booking of the room:
+  // `credit_minutes` past the end, until `credit_until_at` (null without such credit). The question of an
+  // extension paid by the card only arises there: when the window does not reach beyond that credit,
+  // `beyond_credit_reason` says why (null for the closing time, as `reason`).
   extensionWindow(id) {
     const r = this.reservationRow(id);
     const { timezone: tz, booking: { extension_step_min: step } } = this.settings();
@@ -2258,14 +2288,21 @@ export class Club {
     }
     // A booking neither waiting nor running has nothing to extend, and nothing to say about it.
     if (refusal?.code === 'STATUT') {
-      return { possible: false, max_minutes: 0, until_time: null, until_at: null, until_next_day: false, reason: null, next: null };
+      return {
+        possible: false, max_minutes: 0, until_time: null, until_at: null, until_next_day: false, reason: null, next: null,
+        credit_minutes: 0, credit_until_at: null, beyond_credit_reason: null,
+      };
     }
     const next = this.get(
       `${RES_SELECT} WHERE r.status <> 'annulee' AND COALESCE(r.room_id, 1) = ? AND r.start_ms >= ? AND r.id <> ?
        ORDER BY r.start_ms LIMIT 1`,
       r.room_id ?? 1, r.end_ms, r.id,
     );
+    const creditMin = this.overtimeLimit(r, next?.start_ms ?? null).credit;
     return {
+      credit_minutes: creditMin,
+      credit_until_at: creditMin ? new Date(r.end_ms + creditMin * 60000).toISOString() : null,
+      beyond_credit_reason: best && creditMin && best.add <= creditMin && refusal ? this.extensionReason(refusal) : null,
       possible: best !== null,
       max_minutes: best?.add ?? 0,
       until_time: best ? localParts(best.newEnd, tz).time : null,
@@ -2277,7 +2314,8 @@ export class Club {
   }
 
   // The refusal of the shortest extension, in the words of the alert. A refusal this does not know keeps
-  // its own message, so that a rule added to extendReservation is never hidden.
+  // its own message, so that a rule added to extendReservation is never hidden. The closing time is known to
+  // everyone: reaching it says nothing (null).
   extensionReason(refusal) {
     const first = refusal.details?.conflicts?.[0];
     switch (refusal.code) {
@@ -2290,6 +2328,12 @@ export class Club {
         return "Prolongation impossible : le tarif des heures supplémentaires n'est pas encore validé par un administrateur.";
       case 'DUREE_MAXIMALE':
         return 'Prolongation impossible : une séance ne peut pas dépasser 24 heures.';
+      case 'FERMETURE':
+        return null;
+      case 'SOLDE_INSUFFISANT': {
+        const { balance, needed, minutes } = refusal.details;
+        return `Prolongation impossible : crédit CFA insuffisant (${this.money(balance)} sur la carte, ${this.money(needed)} pour ${fmtDuration(minutes)}).`;
+      }
       default:
         return `Prolongation impossible : ${refusal.message}`;
     }
@@ -2318,19 +2362,76 @@ export class Club {
     if (!['reservee', 'en_cours'].includes(r.status)) {
       throw conflict('STATUT', `Impossible de terminer une réservation au statut « ${RES_STATUS[r.status]} ».`);
     }
+    if (r.status === 'en_cours') this.recordOvertime(actor, r);
     // A booking without a plan has no minutes of its holder to consume.
     const open = r.subscription_id ? this.committedFor(r.id, r.subscription_id) : 0;
+    // Only the holder's minutes are consumed: the members present were never debited.
     if (open) this.creditMove(actor, r.subscription_id, r.id, 'consommation', open, 'Réservation terminée');
-    for (const att of this.all('SELECT * FROM reservation_attendees WHERE reservation_id = ?', r.id)) {
-      const attOpen = this.committedFor(r.id, att.subscription_id);
-      this.creditMove(actor, att.subscription_id, r.id, 'consommation', attOpen, 'Réservation terminée (présence en salle)');
-    }
     this.run(
       "UPDATE reservations SET status = 'terminee', finished_at = ?, finished_by = ?, updated_at = ?, updated_by = ? WHERE id = ?",
       this.nowIso(), actor.id, this.nowIso(), actor.id, r.id,
     );
     this.audit(actor, 'reservation.terminer', 'reservation', r.id, { minutes_consommees: open });
     return this.reservationDetail(r.id);
+  }
+
+  // How far a session can run past its planned end on its own: until the club closes, the next booking of the
+  // room starts (`nextStart`, its timetable cannot overlap), or the session reaches 24 hours. `credit` is the
+  // part of that the holder's plan credit still free covers, in minutes.
+  overtimeLimit(r, nextStart) {
+    const limitMs = Math.min(this.closingMs(r.biz_day), r.start_ms + MAX_SESSION_MS, nextStart ?? Infinity);
+    const room = Math.max(0, Math.floor((limitMs - r.end_ms) / 60000));
+    const sub = r.subscription_id ? this.get('SELECT * FROM subscriptions WHERE id = ?', r.subscription_id) : null;
+    const available = sub?.status === 'active' ? this.credit(sub, r.biz_day).available : 0;
+    return { limitMs, minutes: room, credit: Math.min(available, room) };
+  }
+
+  // The time a running session went on past its planned end, recorded when it is finished (the owner's rule:
+  // the time credit left on the card runs until the member leaves). Nothing when it ends on time or earlier.
+  // Counted to the minute, a minute started counting, and only up to overtimeLimit. The session is lengthened by it, without the overlap and gap checks
+  // of an extension (the people have stayed). It is taken first from the holder's plan credit only (the owner's
+  // rule: the attendees' credit is left alone); the rest is paid time, priced by the minute at the booking's
+  // hourly tariff, to the franc: the holder's card pays what it can, the rest is left to collect.
+  recordOvertime(actor, r) {
+    const next = this.get(
+      "SELECT MIN(start_ms) AS t FROM reservations WHERE status <> 'annulee' AND COALESCE(room_id, 1) = ? AND start_ms >= ? AND id <> ?",
+      r.room_id ?? 1, r.end_ms, r.id,
+    ).t;
+    const limit = this.overtimeLimit(r, next);
+    // From the planned end, or from the arrival for a session started after it (nobody was in the room before).
+    const from = Math.max(r.end_ms, r.started_at ? Date.parse(r.started_at) : r.end_ms);
+    const add = Math.min(Math.ceil((this.nowMs() - from) / 60000), limit.minutes);
+    if (add <= 0) return;
+    const included = Math.min(limit.credit, add);
+    const paid = add - included;
+    const amount = Math.round((r.tariff_hour * paid) / 60 / 100) * 100;
+    const newEnd = r.end_ms + add * 60000;
+    this.run(
+      `UPDATE reservations SET end_ms = ?, duration_min = duration_min + ?, included_minutes = included_minutes + ?,
+         paid_minutes = paid_minutes + ?, supplement_amount = supplement_amount + ?, updated_at = ?, updated_by = ?
+       WHERE id = ?`,
+      newEnd, add, included, paid, amount, this.nowIso(), actor.id, r.id,
+    );
+    this.creditMove(actor, r.subscription_id, r.id, 'engagement', included, `Dépassement +${fmtDuration(add)}`);
+    let card = 0;
+    if (amount > 0) {
+      const line = {
+        account: 'reservations', kind: 'temps_supplementaire', member_id: r.member_id, reservation_id: r.id,
+        quantity: 1, tariff_validated: r.tariff_validated ? 1 : 0,
+      };
+      const label = `Dépassement +${fmtDuration(paid)} (temps supplémentaire)`;
+      // A tariff nobody has validated cannot be collected yet (outside the demo): all of it waits at the till.
+      if (r.tariff_validated || this.settings().demo_mode) card = Math.min(this.walletBalance(r.member_id), amount);
+      if (card > 0) {
+        const paidId = this.insertCharge(actor, { ...line, label: card < amount ? `${label} — payé par carte` : label, unit_price: card });
+        this.recordPayment(actor, { charge_ids: [paidId], card: true });
+      }
+      if (card < amount) this.insertCharge(actor, { ...line, label: `${label} — reste à encaisser`, unit_price: amount - card });
+    }
+    this.audit(actor, 'reservation.depassement', 'reservation', r.id, {
+      minutes: add, ancienne_fin: new Date(r.end_ms).toISOString(), nouvelle_fin: new Date(newEnd).toISOString(),
+      minutes_incluses: included, minutes_payantes: paid, montant: amount, carte: card, reste: amount - card,
+    });
   }
 
   cancelReservation(actor, id, input) {
@@ -2357,10 +2458,6 @@ export class Club {
     const what = absence ? 'Absence' : 'Annulation';
     const released = r.subscription_id ? this.committedFor(r.id, r.subscription_id) : 0;
     if (released) this.creditMove(actor, r.subscription_id, r.id, 'liberation', released, `${what} : ${reason}`);
-    for (const att of this.all('SELECT * FROM reservation_attendees WHERE reservation_id = ?', r.id)) {
-      const attReleased = this.committedFor(r.id, att.subscription_id);
-      this.creditMove(actor, att.subscription_id, r.id, 'liberation', attReleased, `${what} : ${reason}`);
-    }
     const due = this.all("SELECT * FROM charges WHERE reservation_id = ? AND status = 'due'", r.id);
     for (const c of due) this.voidCharge(actor, c, `${what} de la réservation : ${reason}`);
     const paid = this.all("SELECT * FROM charges WHERE reservation_id = ? AND status = 'payee'", r.id);

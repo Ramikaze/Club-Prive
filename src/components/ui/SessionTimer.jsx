@@ -1,6 +1,8 @@
 // Live counter of a session in a room. It starts when the member's arrival is recorded (status
 // "en cours", started_at) and counts down the time credit the card carried in (card_credit_min), then
-// the paid time once the credit runs out. The booking's planned end stays shown underneath.
+// the paid time once the credit runs out. The booking's planned end stays shown underneath. Past that end, the
+// time runs on the plan credit while there is some (it is taken from it at the exit): no overrun until it is
+// spent.
 import { useEffect, useState } from 'react';
 import { fmtDuration, parts } from '../../lib/format.js';
 
@@ -41,11 +43,11 @@ export default function SessionTimer({ reservation: r, compact = false }) {
   const remaining = Date.parse(r.end_at) - now;
   const { creditMs, left } = creditLeft(r, now);
   const spent = left < 0;
-  const over = spent || remaining < 0;
-  const ending = !over && (left <= ENDING_SOON_MS || remaining <= ENDING_SOON_MS);
+  const booked = r.card_credit_min == null;
+  const over = spent || (booked && remaining < 0);
+  const ending = !over && (left <= ENDING_SOON_MS || (booked && remaining <= ENDING_SOON_MS));
   const progress = creditMs > 0 ? Math.min(1, Math.max(0, left / creditMs)) : 0;
   const state = over ? 'is-over' : ending ? 'is-ending' : '';
-  const booked = r.card_credit_min == null;
   const label = booked
     ? (spent ? 'Temps réservé dépassé' : 'Temps réservé restant')
     : (spent ? 'Crédit épuisé · temps payant' : 'Crédit temps restant sur la carte');
@@ -60,9 +62,11 @@ export default function SessionTimer({ reservation: r, compact = false }) {
       </div>
       <div className="session-timer-track" aria-hidden="true"><span style={{ transform: `scaleX(${progress})` }} /></div>
       <div className="session-timer-foot">
-        {remaining < 0
-          ? `Dépassement de ${fmtDuration(minutes(remaining))} : fin prévue à ${r.end_time}`
-          : `Arrivé à ${parts(started).time} · fin prévue à ${r.end_time}`}
+        {remaining >= 0
+          ? `Arrivé à ${parts(started).time} · fin prévue à ${r.end_time}`
+          : over
+            ? `Dépassement de ${fmtDuration(minutes(remaining))} : fin prévue à ${r.end_time}`
+            : `Fin prévue à ${r.end_time} passée · le temps continue sur le crédit`}
       </div>
     </div>
   );
@@ -73,7 +77,8 @@ export function TimeInRoom({ reservation: r }) {
   const now = useNow(15000);
   if (!isRunning(r)) return null;
   const { left } = creditLeft(r, now);
-  const over = left < 0 || now > Date.parse(r.end_at);
+  // Past the planned end, a holder with plan credit left is not over: the time runs on that credit.
+  const over = left < 0 || (r.card_credit_min == null && now > Date.parse(r.end_at));
   return (
     <span className={over ? 'session-inline is-over' : 'session-inline'}>
       {r.card_credit_min == null
