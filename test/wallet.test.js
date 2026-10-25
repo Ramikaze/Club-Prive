@@ -40,6 +40,14 @@ after(() => server.destroy());
 
 let alice; // recharged 100 000 FCFA in the first test
 
+test('numéro de reçu : attribué par l’application, jamais saisi à la main', async () => {
+  const member = await newMember('Rita');
+  const { payment } = ok(await recharge(member.id, { amount: 1000 * UM, method: 'Espèces', reference: 'SAISI-A-LA-MAIN' }));
+  assert.equal(server.club.get('SELECT reference FROM payments WHERE id = ?', payment.id).reference, null);
+  const { ticket } = ok(await manager.get(`/api/payments/${payment.id}/ticket`));
+  assert.match(ticket.number, /^T-\d{6,}$/);
+});
+
 test('recharge : le gérant crédite la carte, un encaissement « recharge » sans ligne, avec ticket et journal', async () => {
   alice = await newMember('Alice');
   assert.deepEqual(ok(await manager.get(`/api/members/${alice.id}`)).wallet, { balance: 0, last_recharge: null, movements: [] });
