@@ -94,13 +94,25 @@ function ShareTicketDialog({ close, file, text, title, digits, demo }) {
   const canShare = typeof navigator.canShare === 'function' && navigator.canShare({ files: [file], text });
   // A WhatsApp link carries text only: opening it also copies the picture, pasted (Cmd/Ctrl + V) in the chat.
   const canCopy = typeof window.ClipboardItem === 'function' && Boolean(navigator.clipboard?.write);
-  const copy = async () => {
+  // The picture is copied first, then WhatsApp opens: a page that loses the focus to the new tab has its copy
+  // cancelled. A browser that blocks the late tab gets a second click (the copy is already done).
+  const [copied, setCopied] = useState(false);
+  const openWhatsApp = async (e) => {
+    if (!canCopy || copied) return;
+    e.preventDefault();
     try {
       await navigator.clipboard.write([new window.ClipboardItem({ 'image/png': file })]);
-      toast('Ticket copié : dans la conversation WhatsApp, faites Cmd + V (ou Ctrl + V) pour le joindre au message, puis envoyez.');
+      setCopied(true);
     } catch {
-      toast('La copie a échoué : utilisez « Télécharger le ticket ».', 'error');
+      toast('La copie du ticket a échoué : WhatsApp s’ouvre avec le message, joignez le ticket téléchargé.', 'error');
+      window.open(waHref, '_blank');
+      return;
     }
+    const tab = window.open(waHref, '_blank');
+    if (tab) tab.opener = null;
+    toast(tab
+      ? 'Ticket copié : dans WhatsApp, faites Cmd + V (ou Ctrl + V) pour joindre le ticket au message, puis envoyez.'
+      : 'Ticket copié : cliquez encore sur « Ouvrir WhatsApp » pour ouvrir la conversation.');
   };
   const share = async () => {
     try {
@@ -108,6 +120,14 @@ function ShareTicketDialog({ close, file, text, title, digits, demo }) {
       close();
     } catch (e) {
       if (e?.name !== 'AbortError') toast('Le partage a échoué : téléchargez l’image et ouvrez WhatsApp avec le message.', 'error');
+    }
+  };
+  const copyImage = async () => {
+    try {
+      await navigator.clipboard.write([new window.ClipboardItem({ 'image/png': file })]);
+      toast('Ticket copié : collez-le (Cmd + V ou Ctrl + V) dans la conversation WhatsApp.');
+    } catch {
+      toast('La copie du ticket a échoué : utilisez « Télécharger le ticket ».', 'error');
     }
   };
   const copyText = async () => {
@@ -130,7 +150,13 @@ function ShareTicketDialog({ close, file, text, title, digits, demo }) {
             : canCopy
               ? '« Ouvrir WhatsApp avec le message » ouvre la conversation avec le message déjà écrit et copie le ticket : faites Cmd + V (ou Ctrl + V) pour le joindre, puis envoyez.'
               : 'Ouvrez WhatsApp avec le message, puis joignez le ticket téléchargé (trombone, puis Photos ou Document).'}</p>
-        <img src={url} alt={`Ticket ${file.name}`} className="ticket-image-preview" />
+        <div className="ticket-image-box">
+          <img src={url} alt={`Ticket ${file.name}`} className="ticket-image-preview" />
+          {canCopy ? (
+            <button type="button" className="btn btn-sm btn-ghost wa-copy" onClick={copyImage} title="Copier l’image du ticket" aria-label="Copier l’image du ticket">
+              <Icon name="copy" /></button>
+          ) : null}
+        </div>
         <div className="wa-message-box">
           <blockquote className="wa-message">{text}</blockquote>
           <button type="button" className="btn btn-sm btn-ghost wa-copy" onClick={copyText} title="Copier le message" aria-label="Copier le message">
@@ -138,7 +164,7 @@ function ShareTicketDialog({ close, file, text, title, digits, demo }) {
         </div>
         <div className="modal-actions">
           <a className="btn btn-ghost" href={url} download={file.name}><Icon name="download" /> Télécharger le ticket</a>
-          <a className="btn" href={waHref} target="_blank" rel="noopener noreferrer" onClick={canCopy ? () => { copy(); } : undefined}><Icon name="message" /> Ouvrir WhatsApp avec le message</a>
+          <a className="btn" href={waHref} target="_blank" rel="noopener noreferrer" onClick={openWhatsApp}><Icon name="message" /> {copied ? 'Ouvrir WhatsApp (ticket copié)' : 'Ouvrir WhatsApp avec le message'}</a>
           {canShare ? <button type="button" className="btn btn-primary" onClick={share}><Icon name="message" /> Partager sur WhatsApp</button> : null}
         </div>
       </div>
