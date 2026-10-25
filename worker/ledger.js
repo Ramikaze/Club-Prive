@@ -18,7 +18,7 @@ const CATEGORY_KIND = { depense: 'Dépense', recette: 'Entrée diverse' };
 const MOVEMENT_KIND = {
   ouverture: "Solde d'ouverture", encaissement: 'Encaissement', remboursement: 'Remboursement',
   depense: 'Dépense', recette: 'Entrée diverse', transfert: 'Transfert',
-  recharge: 'Recharge de carte', annulation_recharge: 'Annulation de recharge', annulation_repas: 'Annulation de repas',
+  recharge: 'Approvisionnement de carte', annulation_recharge: 'Annulation d’approvisionnement', annulation_repas: 'Annulation de repas',
 };
 
 export const DEFAULT_CATEGORIES = {
@@ -417,7 +417,7 @@ export const ledgerMethods = {
       }
       if (r.cancelled_at && r.cancelled_at >= a && r.cancelled_at < b) {
         rows.push({
-          ...base, key: `KA-${r.id}`, ...when(r.cancelled_at), type: 'annulation_recharge', label: 'Annulation de recharge',
+          ...base, key: `KA-${r.id}`, ...when(r.cancelled_at), type: 'annulation_recharge', label: 'Annulation d’approvisionnement',
           detail: `${member} — ${r.cancel_reason}`, in: 0, out: r.amount,
         });
       }

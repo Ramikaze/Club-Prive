@@ -116,10 +116,10 @@ test('paymentLines : les lignes d’un encaissement, une ligne pour une recharge
   const allocations = [{ charge_id: 4, label: 'Cigare', quantity: 2, amount: 1000000 }];
   assert.deepEqual(paymentLines({ kind: 'encaissement', amount: 1000000, allocations }), allocations);
   assert.deepEqual(paymentLines({ amount: 1000000, allocations }), allocations);
-  assert.equal(RECHARGE_LINE_LABEL, 'Recharge carte membre');
+  assert.equal(RECHARGE_LINE_LABEL, 'Approvisionnement carte membre');
   assert.deepEqual(
-    paymentLines({ kind: 'recharge', label: 'Recharge de la carte membre', amount: 10000000, allocations: [] }),
-    [{ label: 'Recharge carte membre', quantity: 1, amount: 10000000 }],
+    paymentLines({ kind: 'recharge', label: 'Approvisionnement de la carte membre', amount: 10000000, allocations: [] }),
+    [{ label: 'Approvisionnement carte membre', quantity: 1, amount: 10000000 }],
   );
   assert.deepEqual(
     paymentLines({ kind: 'repas', label: 'Chez Fatou', amount: 1850000, allocations: [] }),
@@ -184,7 +184,7 @@ test('rechargeWhatsAppText : montant, nouveau solde et date', () => {
   assert.equal(text, [
     'THE LIMEN · Club privé',
     'Bonjour Jean,',
-    `Votre carte membre a été rechargée de ${amount} le 24/10/2026 à 20:41 : nouveau solde ${amount}.`,
+    `Votre carte membre a été approvisionnée de ${amount} le 24/10/2026 à 20:41 : nouveau solde ${amount}.`,
     'Merci de votre confiance.',
   ].join('\n'));
   // The club's currency, when given, is the one shown.
@@ -192,7 +192,7 @@ test('rechargeWhatsAppText : montant, nouveau solde et date', () => {
     clubName: 'Club', firstName: 'Awa', amount: 2500, balance: 7500, at: '2026-01-02T08:00:00.000Z',
     timezone: 'UTC', currency: { label: 'EUR', decimals: 2 },
   });
-  assert.match(other, /rechargée de 25,00 EUR le 02\/01\/2026 à 08:00 : nouveau solde 75,00 EUR\./);
+  assert.match(other, /approvisionnée de 25,00 EUR le 02\/01\/2026 à 08:00 : nouveau solde 75,00 EUR\./);
 });
 
 test('renewalWhatsAppText : bientôt et bloqué, avec ce qui manque', () => {
@@ -205,13 +205,13 @@ test('renewalWhatsAppText : bientôt et bloqué, avec ce qui manque', () => {
     'THE LIMEN · Club privé',
     'Bonjour Jean,',
     `Votre abonnement Mensuelle se termine le 23/11/2026. Il se renouvelle avec votre carte membre, mais le solde ne suffit pas : ${m(30000)} sur la carte, ${m(50000)} nécessaires.`,
-    `Il manque ${m(20000)} : rechargez votre carte pour que l’abonnement soit renouvelé.`,
+    `Il manque ${m(20000)} : approvisionnez votre carte pour que l’abonnement soit renouvelé.`,
   ].join('\n'));
   assert.equal(renewalWhatsAppText({ ...input, state: 'bloque' }), [
     'THE LIMEN · Club privé',
     'Bonjour Jean,',
     `Votre abonnement Mensuelle s’est terminé le 23/11/2026. Renouvellement impossible : ${m(30000)} sur la carte, ${m(50000)} nécessaires.`,
-    `Il manque ${m(20000)} : dès que vous rechargez votre carte, l’abonnement est renouvelé à partir du jour de la recharge.`,
+    `Il manque ${m(20000)} : dès que vous approvisionnez votre carte, l’abonnement est renouvelé à partir du jour de l’approvisionnement.`,
   ].join('\n'));
   assert.match(renewalWhatsAppText({ ...input, state: 'bloque' }), /Il manque 20\s000 FCFA/);
 });

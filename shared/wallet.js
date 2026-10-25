@@ -41,7 +41,7 @@ export function rechargeWhatsAppText({ clubName, firstName, amount, balance, at,
   return [
     clean(clubName),
     `Bonjour ${clean(firstName)},`,
-    `Votre carte membre a été rechargée de ${money(amount)} le ${instantText(at, timezone)} : nouveau solde ${money(balance)}.`,
+    `Votre carte membre a été approvisionnée de ${money(amount)} le ${instantText(at, timezone)} : nouveau solde ${money(balance)}.`,
     ...ticketLines(number, verifyUrl),
     'Merci de votre confiance.',
   ].filter(Boolean).join('\n');
@@ -57,11 +57,11 @@ export function renewalWhatsAppText({ clubName, firstName, planName, endDate, ba
   const lines = state === 'bloque'
     ? [
       `Votre abonnement ${plan} s’est terminé le ${dayText(endDate)}. Renouvellement impossible : ${amounts}`,
-      `${missing} : dès que vous rechargez votre carte, l’abonnement est renouvelé à partir du jour de la recharge.`,
+      `${missing} : dès que vous approvisionnez votre carte, l’abonnement est renouvelé à partir du jour de l’approvisionnement.`,
     ]
     : [
       `Votre abonnement ${plan} se termine le ${dayText(endDate)}. Il se renouvelle avec votre carte membre, mais le solde ne suffit pas : ${amounts}`,
-      `${missing} : rechargez votre carte pour que l’abonnement soit renouvelé.`,
+      `${missing} : approvisionnez votre carte pour que l’abonnement soit renouvelé.`,
     ];
   return [clean(clubName), `Bonjour ${clean(firstName)},`, ...lines].filter(Boolean).join('\n');
 }

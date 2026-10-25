@@ -123,7 +123,7 @@ function RenewalAlerts({ alerts }) {
     <section className="card">
       <div className="card-head">
         <h2>Renouvellements par la carte</h2>
-        <span className="chip chip-warn">{`${alerts.length} à recharger`}</span>
+        <span className="chip chip-warn">{`${alerts.length} à approvisionner`}</span>
       </div>
       <div className="list">{alerts.map((a) => (
         <div className="list-item list-item-wrap" key={a.member_id}>

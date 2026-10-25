@@ -74,8 +74,8 @@ export default function Treasury() {
                     <div className="total"><dt>Crédits CFA des membres (dus en consommations)</dt><dd>{money(t.wallet_liability)}</dd></div>
                   </dl>
                   <p className="subtle" style={{ marginTop: 8 }}>
-                    Argent déjà rechargé sur les cartes au {dayLabel(t.to, 'short')}, que le club doit encore aux membres en consommations.
-                    Il est compté en trésorerie à la recharge, en recette seulement quand la carte paie.
+                    Argent déjà approvisionné sur les cartes au {dayLabel(t.to, 'short')}, que le club doit encore aux membres en consommations.
+                    Il est compté en trésorerie à l’approvisionnement, en recette seulement quand la carte paie.
                   </p>
                 </div>
               )}

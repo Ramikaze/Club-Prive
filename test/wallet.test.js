@@ -947,7 +947,7 @@ test('ticket d’une recharge : une ligne, solde juste après elle, signature ; 
   const t = await ticketOf(first.id);
   assert.equal(t.kind, 'recharge');
   assert.equal(t.card_amount, 0);
-  assert.equal(t.label, 'Recharge de la carte membre');
+  assert.equal(t.label, 'Approvisionnement de la carte membre');
   assert.deepEqual(t.allocations, []);
   assert.equal(t.wallet_balance_after, 100000 * UM); // not the 150 000 of today
   assert.equal(t.time_available, null); // no subscription
@@ -958,7 +958,7 @@ test('ticket d’une recharge : une ligne, solde juste après elle, signature ; 
 
   const pub = publicOf(first.id);
   assert.deepEqual(Object.keys(pub).sort(), PUBLIC_KEYS);
-  assert.deepEqual(pub.lines, [{ label: 'Recharge carte membre', quantity: 1, amount: 100000 * UM }]);
+  assert.deepEqual(pub.lines, [{ label: 'Approvisionnement carte membre', quantity: 1, amount: 100000 * UM }]);
   assert.equal(pub.status, 'valide');
   assert.doesNotMatch(JSON.stringify(pub), /150000|Victor|\+000/);
 
