@@ -12,6 +12,8 @@ import { ACCOUNTS, ACCOUNT_LABELS, CARD_METHOD } from '../shared/rules.js';
 export const MANAGER_EXPENSE_MAX = 5000 * 100;
 // The expense category of the meals the club advances to a courier; it is no cost of the club (the member repays it).
 export const OUTSIDE_MEAL_CATEGORY = 'Avance repas client';
+// The category of the gaps found when counting the till, in both kinds: a surplus is an other receipt, a shortage an expense.
+export const CASH_GAP_CATEGORY = 'Écart de caisse';
 export const ENTRY_KIND = { depense: 'Dépense', recette: 'Entrée diverse', transfert: 'Transfert' };
 export const ENTRY_STATUS = { active: 'Enregistrée', annulee: 'Annulée' };
 const CATEGORY_KIND = { depense: 'Dépense', recette: 'Entrée diverse' };
@@ -102,6 +104,9 @@ export const ledgerMethods = {
     const active = input.active !== undefined ? flag(input.active) : !!c.active;
     if (c.kind === 'depense' && c.name === OUTSIDE_MEAL_CATEGORY && (name !== c.name || !active)) {
       throw conflict('CATEGORIE_PROTEGEE', `La catégorie « ${OUTSIDE_MEAL_CATEGORY} » sert aux repas commandés à l'extérieur : elle ne se renomme ni ne se désactive.`);
+    }
+    if (c.name === CASH_GAP_CATEGORY && (name !== c.name || !active)) {
+      throw conflict('CATEGORIE_PROTEGEE', `La catégorie « ${CASH_GAP_CATEGORY} » sert au comptage de la caisse : elle ne se renomme ni ne se désactive.`);
     }
     if (this.get('SELECT 1 AS x FROM categories WHERE kind = ? AND name = ? AND id <> ?', c.kind, name, c.id)) {
       throw conflict('CATEGORIE_EXISTANTE', 'Cette catégorie existe déjà.');
@@ -357,6 +362,54 @@ export const ledgerMethods = {
 
   treasury(from, to) {
     return { ...this.treasuryBalances(from, to), result: this.periodResult(from, to), wallet_liability: this.walletLiabilityAt(to) };
+  },
+
+  // ---------------------------------------------------------------- counting the till (cash page)
+
+  // The first cash fund, typed on the cash page: what each till and account holds today. It is the opening balances
+  // dated today, so earlier movements leave the balances. Paramètres still sets them at any date; this only starts
+  // the tracking, and refuses once a fund exists (counting the till adjusts it from then on).
+  setCashFund(actor, input) {
+    const ob = this.settings().opening_balances;
+    if (ob.date || Object.keys(ob.amounts).length) {
+      throw conflict('FOND_EXISTANT', 'Le fond de caisse est déjà enregistré. Pour corriger un solde, comptez la caisse.');
+    }
+    const raw = input?.amounts ?? {};
+    if (typeof raw !== 'object' || Array.isArray(raw)) throw invalid('Montants invalides.');
+    const amounts = {};
+    for (const [k, n] of Object.entries(raw)) {
+      const method = this.treasuryAccount(k, 'Caisse ou compte');
+      amounts[method] = int(n ?? 0, `Montant (${method})`, { min: 0, max: 1e13 });
+    }
+    const today = this.bizToday();
+    this.updateSettings(actor, { opening_balances: { date: today, amounts } });
+    return this.treasury(today, today);
+  },
+
+  // The till counted now on one account: the gap between what is there and the balance the books expect is recorded
+  // today, a surplus as an other receipt and a shortage as an expense, both in « Écart de caisse », so that the
+  // balance becomes what was counted. The expected balance is the server's, never the browser's. No gap, no entry.
+  countCash(actor, input) {
+    const today = this.bizToday();
+    this.assertOpen(today, 'Ce comptage');
+    const ob = this.settings().opening_balances;
+    if (ob.date && ob.date > today) {
+      throw invalid("Le fond de caisse commence après aujourd'hui : corrigez sa date dans Paramètres, rubrique Trésorerie.");
+    }
+    const method = this.treasuryAccount(input.method, 'Caisse ou compte');
+    const counted = int(input.counted, 'Montant compté', { min: 0, max: 1e13 });
+    const reason = text(input.reason, 'Motif', { max: 120 }) ?? 'Comptage de caisse';
+    const expected = this.treasuryBalances(today, today).accounts.find((a) => a.method === method)?.closing ?? 0;
+    const gap = counted - expected;
+    let entry = null;
+    if (gap !== 0) {
+      const kind = gap > 0 ? 'recette' : 'depense';
+      const category = this.get('SELECT id FROM categories WHERE kind = ? AND name = ?', kind, CASH_GAP_CATEGORY);
+      if (!category) throw conflict('CATEGORIE_ECART_ABSENTE', `La catégorie « ${CASH_GAP_CATEGORY} » est introuvable : contactez l'administrateur.`);
+      entry = this.createEntry(actor, { kind, biz_date: today, category_id: category.id, amount: Math.abs(gap), method, label: reason });
+    }
+    this.audit(actor, 'caisse.compter', 'ledger', entry?.id ?? null, { compte: method, attendu: expected, montant_compte: counted, ecart: gap, motif: reason });
+    return { expected, counted, gap, entry_id: entry?.id ?? null, treasury: this.treasury(today, today) };
   },
 
   // ---------------------------------------------------------------- general ledger

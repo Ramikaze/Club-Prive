@@ -504,6 +504,7 @@ function TreasurySection({ save }) {
             <input name={`amount-${i}`} inputMode="decimal" defaultValue={toMajor(ob.amounts?.[method])} placeholder="0" /></label>
         ))}</div>
         <p className="subtle">Soldes des caisses et comptes au début du suivi. Les mouvements antérieurs à cette date sont ignorés.</p>
+        <p className="subtle">Plus simple : page <Link to="/caisse">Caisse</Link> → Compter la caisse.</p>
         <FormFooter busy={busy} error={error} />
       </form>
     </section>

@@ -10,6 +10,7 @@ import { Loaded, Notice, PageHead } from '../components/ui/ui.jsx';
 import PeriodPicker, { usePeriod } from '../components/ui/PeriodPicker.jsx';
 import EntryDialog, { MANAGER_CAP_TEXT } from '../components/cash/EntryDialog.jsx';
 import CashBalance from '../components/cash/CashBalance.jsx';
+import CountDialog from '../components/cash/CountDialog.jsx';
 import ReceiptsBlock from '../components/cash/ReceiptsBlock.jsx';
 import ExpensesBlock, { TransfersBlock } from '../components/cash/ExpensesBlock.jsx';
 import { DetailsAndExports, OpenNotes } from '../components/cash/CashDetails.jsx';
@@ -91,6 +92,7 @@ function AdminCash() {
   const method = methods.includes(compte) ? compte : '';
 
   const add = (kind) => openDialog(EntryDialog, { kind, categories: state.data?.categories ?? [], onDone: state.reload });
+  const count = () => openDialog(CountDialog, { method, onDone: state.reload });
   const params = { from, to };
   const oneDay = from === to;
 
@@ -124,7 +126,7 @@ function AdminCash() {
       </div>
       <Loaded state={state}>{(d) => (
         <div className="cash-page">
-          <CashBalance t={d.treasury} method={method} entries={d.entries} journal={d.journal} openingBalances={settings.opening_balances} />
+          <CashBalance t={d.treasury} method={method} entries={d.entries} journal={d.journal} openingBalances={settings.opening_balances} onCount={count} />
           <div className="cash-columns">
             <div className="cash-columns-inner">
               <ReceiptsBlock journal={d.journal} entries={d.entries} method={method} oneDay={oneDay} isAdmin onChange={state.reload} />
