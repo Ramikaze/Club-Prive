@@ -2,7 +2,7 @@
 // notices, the password field and the page header. Class names come from src/club.css.
 import { useId, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import Icon from './Icon.jsx';
 import { STATUS, ACCOUNT_LABEL } from '../../lib/format.js';
 import { photoUrl } from '../../lib/photo.js';
@@ -122,10 +122,17 @@ export function PasswordField({ label, help, ...input }) {
   );
 }
 
+// Every page header starts with a way back: « Retour » to the page the user came from (browser history inside
+// the app), or, when the page was opened directly (a link, a reload), the page's own parent if it has one.
 export function PageHead({ title, lead, back, actions, tour }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const hasHistory = location.key !== 'default';
   return (
     <>
-      {back && <Link className="back" to={back.to}><Icon name="left" /> {back.label}</Link>}
+      {hasHistory ? (
+        <button type="button" className="back no-print" onClick={() => navigate(-1)}><Icon name="left" /> Retour</button>
+      ) : back ? <Link className="back no-print" to={back.to}><Icon name="left" /> {back.label}</Link> : null}
       <div className="page-head" data-tour={tour}>
         <div>
           <h1>{title}</h1>
