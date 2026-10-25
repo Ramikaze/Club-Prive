@@ -23,6 +23,12 @@ import {
 } from '../shared/rules.js';
 import { waDigits } from '../shared/whatsapp.js';
 
+// A session has one member, its holder; whoever comes with the holder is a guest, not a member.
+const oneMemberOnly = () => invalid(
+  "Une séance n'accueille qu'un seul membre : le titulaire ; les autres personnes sont des invités.",
+  'UN_SEUL_MEMBRE',
+);
+
 export const RES_STATUS = { reservee: 'Réservée', en_cours: 'En cours', terminee: 'Terminée', annulee: 'Annulée' };
 export const CHARGE_STATUS = { due: 'À encaisser', payee: 'Encaissée', annulee: 'Annulée', remboursee: 'Remboursée' };
 const CHARGE_KIND = { temps_supplementaire: 'Temps supplémentaire', produit: 'Produit', abonnement: 'Abonnement' };
@@ -120,10 +126,9 @@ const CHARGE_SELECT = `
   SELECT c.*, u.name AS created_by_name, cu.name AS cancelled_by_name,
     pa.payment_id, p.paid_at, p.method AS payment_method,
     rf.id AS refund_id, rf.created_at AS refunded_at, rf.reason AS refund_reason,
-    m.first_name, m.last_name, m.member_no, cm.first_name AS consumer_first, cm.last_name AS consumer_last
+    m.first_name, m.last_name, m.member_no
   FROM charges c
   JOIN members m ON m.id = c.member_id
-  LEFT JOIN members cm ON cm.id = c.consumer_member_id
   LEFT JOIN users u ON u.id = c.created_by
   LEFT JOIN users cu ON cu.id = c.cancelled_by
   LEFT JOIN payment_allocations pa ON pa.charge_id = c.id
@@ -700,8 +705,8 @@ export class Club {
     const { n } = this.get(
       `SELECT COUNT(*) AS n FROM reservations r
        WHERE r.status IN ('reservee', 'en_cours')
-         AND (r.member_id = ? OR EXISTS (SELECT 1 FROM reservation_attendees ra WHERE ra.reservation_id = r.id AND ra.member_id = ?))`,
-      m.id, m.id,
+         AND r.member_id = ?`,
+      m.id,
     );
     if (n > 0) {
       throw conflict('RESERVATIONS_ACTIVES', `${m.first_name} ${m.last_name} figure dans ${n} réservation(s) en cours ou à venir : terminez-les ou annulez-les avant de désactiver la fiche.`);
@@ -788,7 +793,7 @@ export class Club {
     if (!active && bookings.length) {
       throw conflict('RESERVATIONS_ACTIVES', 'Déplacez ou annulez les réservations actives avant de fermer cette salle.');
     }
-    if (bookings.some((b) => Math.max(b.party_size, 1 + this.get('SELECT COUNT(*) AS n FROM reservation_attendees WHERE reservation_id = ?', b.id).n) > capacity)) {
+    if (bookings.some((b) => (b.party_size ?? 1) > capacity)) {
       throw conflict('CAPACITE_DEPASSEE', 'Une réservation active dépasse cette capacité. Modifiez son effectif ou changez-la de salle avant de réduire la capacité.');
     }
     this.run(
@@ -911,9 +916,7 @@ export class Club {
       `SELECT c.*, u.name AS issued_by_name FROM cards c LEFT JOIN users u ON u.id = c.issued_by
        WHERE c.member_id = ? ORDER BY c.status, c.issued_at DESC`, m.id,
     ).map((c) => this.cardDTO(c));
-    const reservations = this.all(`${RES_SELECT} WHERE r.member_id = ? OR EXISTS (
-      SELECT 1 FROM reservation_attendees ra WHERE ra.reservation_id = r.id AND ra.member_id = ?
-    ) ORDER BY r.start_ms DESC LIMIT 100`, m.id, m.id)
+    const reservations = this.all(`${RES_SELECT} WHERE r.member_id = ? ORDER BY r.start_ms DESC LIMIT 100`, m.id)
       .map((r) => this.reservationDTO(r));
     const charges = this.all(`${CHARGE_SELECT} WHERE c.member_id = ? ORDER BY c.created_at DESC LIMIT 300`, m.id)
       .map((c) => this.chargeDTO(c));
@@ -977,10 +980,8 @@ export class Club {
       id: r.id, payment_id: r.payment_id, number: formatTicketNumber(r.payment_id), account: r.account, amount: r.amount,
       card_amount: r.card_amount, method: r.method, reason: r.reason, at: r.created_at, label: r.label, quantity: r.quantity,
     }));
-    // The bookings he holds or joins whose business day falls in the period.
-    const reservations = this.all(`${RES_SELECT} WHERE (r.member_id = ? OR EXISTS (
-      SELECT 1 FROM reservation_attendees ra WHERE ra.reservation_id = r.id AND ra.member_id = ?
-    )) AND r.biz_day >= ? AND r.biz_day <= ? ORDER BY r.start_ms`, m.id, m.id, start, end)
+    // The bookings he holds whose business day falls in the period.
+    const reservations = this.all(`${RES_SELECT} WHERE r.member_id = ? AND r.biz_day >= ? AND r.biz_day <= ? ORDER BY r.start_ms`, m.id, start, end)
       .map((r) => this.reservationDTO(r));
     const subscriptions = this.all(
       `SELECT s.*, u.name AS created_by_name FROM subscriptions s LEFT JOIN users u ON u.id = s.created_by
@@ -1626,55 +1627,6 @@ export class Club {
     return { member, sub, credit };
   }
 
-  // A member present in a room besides the holder. Only the holder is debited (« Les membres présents ne doivent
-  // jamais être débités, ni à la réservation ni à l'entrée en salle »): no plan, credit or card balance is asked
-  // of an attendee. The member must still be active and identifiable: a member whose cards are all deactivated
-  // (a lost or blocked card) is turned away, as for the holder.
-  verifyAttendee(memberId) {
-    const member = this.memberRow(memberId);
-    this.assertMemberActive(member, 'toute réservation ou entrée en salle');
-    if (this.hasDeactivatedCardsOnly(member.id)) {
-      throw conflict(
-        'CARTE_DESACTIVEE',
-        `La carte de membre de ${member.first_name} ${member.last_name} est désactivée : émettez une carte active avant l'accès en salle.`,
-      );
-    }
-    return member;
-  }
-
-  // The holder first, with the minutes this booking takes from the holder's plan; the other members present
-  // carry no minutes: they are never debited.
-  attendeesFor(r) {
-    const primaryCard = this.activeCardCode(r.member_id);
-    const list = [{
-      member_id: r.member_id,
-      name: `${r.first_name} ${r.last_name}`,
-      member_no: r.member_no,
-      card_code: primaryCard,
-      subscription_id: r.subscription_id,
-      included_minutes: r.included_minutes,
-      is_primary: true,
-    }];
-    const extras = this.all(
-      `SELECT ra.*, m.first_name, m.last_name, m.member_no
-       FROM reservation_attendees ra
-       JOIN members m ON m.id = ra.member_id
-       WHERE ra.reservation_id = ?
-       ORDER BY ra.id`,
-      r.id,
-    );
-    for (const ex of extras) {
-      list.push({
-        member_id: ex.member_id,
-        name: `${ex.first_name} ${ex.last_name}`,
-        member_no: ex.member_no,
-        card_code: this.activeCardCode(ex.member_id),
-        is_primary: false,
-      });
-    }
-    return list;
-  }
-
   reservationRow(id) {
     const r = this.get(`${RES_SELECT} WHERE r.id = ?`, toId(id, 'Réservation'));
     if (!r) throw notFound('Réservation');
@@ -1685,13 +1637,13 @@ export class Club {
     const tz = this.settings().timezone;
     const s = localParts(r.start_ms, tz);
     const e = localParts(r.end_ms, tz);
-    const attendees = this.attendeesFor(r);
     return {
       id: r.id, member_id: r.member_id, member_name: `${r.first_name} ${r.last_name}`, member_no: r.member_no,
       is_demo: !!r.is_demo, subscription_id: r.subscription_id, biz_day: r.biz_day,
       room_id: r.room_id ?? 1, room_name: r.room_name ?? 'Salon Principal', room_capacity: r.room_capacity ?? 8,
-      party_size: Math.max(r.party_size ?? 1, attendees.length),
-      attendees,
+      // The holder is the session's only member: the rest of the party are guests, paid for by the holder.
+      party_size: r.party_size ?? 1,
+      card_code: this.activeCardCode(r.member_id),
       items_summary: r.items_summary ?? null,
       start_at: new Date(r.start_ms).toISOString(), end_at: new Date(r.end_ms).toISOString(),
       start_ms: r.start_ms, end_ms: r.end_ms,
@@ -1805,31 +1757,24 @@ export class Club {
     return conflict('BATTEMENT', `${lead}${parts.join(' ; ')}.`, details);
   }
 
-  ensureMembersAvailable(memberIds, startMs, endMs, excludeId = null) {
-    const ids = [...new Set(memberIds)];
-    const placeholders = ids.map(() => '?').join(',');
+  // The holder cannot be in two sessions at once.
+  ensureMemberAvailable(memberId, startMs, endMs, excludeId = null) {
     // Same lower bound on start_ms as `overlapping`: it leaves the past out without changing the result.
     const conflicts = this.all(
       `${RES_SELECT} WHERE r.status <> 'annulee' AND r.start_ms > ? AND r.start_ms < ? AND r.end_ms > ? AND r.id <> ?
-       AND (r.member_id IN (${placeholders}) OR EXISTS (
-         SELECT 1 FROM reservation_attendees ra WHERE ra.reservation_id = r.id AND ra.member_id IN (${placeholders})
-       )) ORDER BY r.start_ms`,
-      startMs - MAX_SESSION_MS, endMs, startMs, excludeId ?? 0, ...ids, ...ids,
+       AND r.member_id = ? ORDER BY r.start_ms`,
+      startMs - MAX_SESSION_MS, endMs, startMs, excludeId ?? 0, memberId,
     ).map((r) => this.reservationDTO(r));
     if (!conflicts.length) return;
     const first = conflicts[0];
-    const attendee = first.attendees.find((a) => ids.includes(a.member_id));
     throw conflict(
       'MEMBRE_OCCUPE',
-      `${attendee.name} participe déjà à une réservation dans « ${first.room_name} » (${first.start_time} → ${first.end_time}).`,
-      { conflicts, member_name: attendee.name },
+      `${first.member_name} a déjà une réservation dans « ${first.room_name} » (${first.start_time} → ${first.end_time}).`,
+      { conflicts, member_name: first.member_name },
     );
   }
 
-  validateOccupancy(room, partySize, attendeeCount) {
-    if (partySize < attendeeCount) {
-      throw conflict('EFFECTIF_INVALIDE', `L’effectif doit inclure les ${attendeeCount} membres inscrits à cette réservation.`);
-    }
+  validateOccupancy(room, partySize) {
     if (partySize > room.capacity) {
       throw conflict('CAPACITE_DEPASSEE', `La salle « ${room.name} » est limitée à ${room.capacity} personnes.`);
     }
@@ -1868,31 +1813,22 @@ export class Club {
       requireRemainingCredit: flag(input.require_credit), allowWithoutSubscription: payWithCard,
     });
 
-    if (input.attendee_ids !== undefined && (!Array.isArray(input.attendee_ids) || input.attendee_ids.length > 200)) {
-      throw invalid('Liste de membres accompagnants invalide.');
+    // One member per session, the holder: the others in the party are guests, counted by `party_size`.
+    if (input.attendee_ids !== undefined && input.attendee_ids !== null
+      && (!Array.isArray(input.attendee_ids) || input.attendee_ids.length)) {
+      throw oneMemberOnly();
     }
-    const rawAttendees = input.attendee_ids ?? [];
-    const seenIds = new Set([member.id]);
-    const extraAttendees = [];
-    for (const rawId of rawAttendees) {
-      const mId = toId(rawId, 'Membre accompagnant');
-      if (seenIds.has(mId)) continue;
-      seenIds.add(mId);
-      // Only the holder is debited: an attendee needs no plan nor credit, and none of it is taken.
-      extraAttendees.push({ member: this.verifyAttendee(mId) });
-    }
-
     const partySize = input.party_size === undefined || input.party_size === '' || input.party_size === null
-      ? 1 + extraAttendees.length
+      ? 1
       : int(input.party_size, 'Nombre de personnes', { min: 1, max: 200 });
-    this.validateOccupancy(room, partySize, 1 + extraAttendees.length);
+    this.validateOccupancy(room, partySize);
 
     const included = credit ? Math.min(credit.available, duration) : 0;
     const paid = duration - included;
     const tariff = s.overtime_tariff;
     const allOverlaps = this.overlapping(startMs, endMs, null);
     const conflicts = allOverlaps.filter((r) => r.room_id === room.id);
-    if (!conflicts.length) this.ensureMembersAvailable([...seenIds], startMs, endMs);
+    if (!conflicts.length) this.ensureMemberAvailable(member.id, startMs, endMs);
     const busyRoomIds = new Set(allOverlaps.map((r) => r.room_id));
     // A room is also refused when a booking of its own sits too close; a strict overlap comes first, so
     // a busy room reports its overlap alone. Each room's list is made once: the chosen room is one of the
@@ -1906,7 +1842,7 @@ export class Club {
       gap_conflict: near.get(rm.id)[0] ?? null,
     }));
     return {
-      member, sub, room, partySize, extraAttendees, credit, startMs, endMs, duration, place, included, paid,
+      member, sub, room, partySize, credit, startMs, endMs, duration, place, included, paid,
       supplement: supplementAmount(paid, tariff), tariff, payWithCard,
       conflicts,
       gap_conflicts: near.get(room.id),
@@ -1923,11 +1859,6 @@ export class Club {
       subscription: p.sub ? { id: p.sub.id, plan_name: p.sub.plan_name, end_date: p.sub.end_date } : null,
       room: this.roomDTO(p.room),
       party_size: p.partySize,
-      extra_attendees: p.extraAttendees.map((a) => ({
-        id: a.member.id,
-        name: `${a.member.first_name} ${a.member.last_name}`,
-        member_no: a.member.member_no,
-      })),
       rooms_availability: p.rooms_availability,
       biz_day: p.place.bizDay,
       start_at: new Date(p.startMs).toISOString(), end_at: new Date(p.endMs).toISOString(),
@@ -1992,13 +1923,6 @@ export class Club {
       throw err;
     }
     if (p.sub) this.creditMove(actor, p.sub.id, id, 'engagement', p.included, 'Réservation confirmée');
-    // The members present are recorded, never debited: no plan, no minutes, no credit movement.
-    for (const att of p.extraAttendees) {
-      this.insert(
-        'INSERT INTO reservation_attendees (reservation_id, member_id, subscription_id, included_minutes, created_at, created_by) VALUES (?, ?, NULL, 0, ?, ?)',
-        id, att.member.id, this.nowIso(), actor.id,
-      );
-    }
     // Paid time is one line, or two when a deposit is due: the deposit (paid now) and the balance
     // (paid before entering the room, or now as well when the member goes straight in). Paid with the card,
     // every line is paid now, after the audit of the booking.
@@ -2019,7 +1943,6 @@ export class Club {
     }
     this.audit(actor, 'reservation.creer', 'reservation', id, {
       membre: `${p.member.first_name} ${p.member.last_name}`, salle: p.room.name, personnes: p.partySize,
-      accompagnants: p.extraAttendees.map((a) => `${a.member.first_name} ${a.member.last_name}`),
       debut: new Date(p.startMs).toISOString(), duree: p.duration,
       minutes_incluses: p.included, minutes_payantes: p.paid, supplement: p.supplement, acompte: deposit, carte: payWithCard,
     });
@@ -2058,31 +1981,12 @@ export class Club {
     if (paidIds.length) this.recordPayment(actor, { charge_ids: paidIds, card: true, method, reference });
   }
 
-  addReservationAttendee(actor, id, input) {
-    const r = this.reservationRow(id);
-    if (!['reservee', 'en_cours'].includes(r.status)) {
-      throw conflict('STATUT', 'Impossible d’ajouter un membre sur une séance terminée ou annulée.');
-    }
-    const room = this.resolveRoom(r.room_id);
-    const member = this.verifyAttendee(input.member_id);
-    const who = `${member.first_name} ${member.last_name}`;
-    if (member.id === r.member_id || this.get('SELECT 1 AS x FROM reservation_attendees WHERE reservation_id = ? AND member_id = ?', r.id, member.id)) {
-      throw conflict('DEJA_PRESENT', `${who} est déjà enregistré(e) dans cette salle.`);
-    }
-    const { n } = this.get('SELECT COUNT(*) AS n FROM reservation_attendees WHERE reservation_id = ?', r.id);
-    const newCount = Math.max(r.party_size, 1 + n) + 1;
-    this.validateOccupancy(room, newCount, 2 + n);
-    this.ensureMembersAvailable([member.id], r.start_ms, r.end_ms, r.id);
-    // Recorded as present, never debited: only the holder's plan pays for the room.
-    this.insert(
-      'INSERT INTO reservation_attendees (reservation_id, member_id, subscription_id, included_minutes, created_at, created_by) VALUES (?, ?, NULL, 0, ?, ?)',
-      r.id, member.id, this.nowIso(), actor.id,
-    );
-    this.run('UPDATE reservations SET party_size = ?, updated_at = ?, updated_by = ? WHERE id = ?', newCount, this.nowIso(), actor.id, r.id);
-    this.audit(actor, 'reservation.ajouter_membre', 'reservation', r.id, { membre: who, member_no: member.member_no });
-    return this.reservationDetail(r.id);
+  // A session has one member, its holder: no other member can be added (the others are guests).
+  addReservationAttendee() {
+    throw oneMemberOnly();
   }
 
+  // Bookings made before the one-member rule may still carry other members: such a row can be removed.
   removeReservationAttendee(actor, id, memberId) {
     const r = this.reservationRow(id);
     if (!['reservee', 'en_cours'].includes(r.status)) {
@@ -2096,8 +2000,7 @@ export class Club {
     if (!row) throw notFound('Membre présent');
     // Nothing of an attendee's was taken, so nothing is given back.
     this.run('DELETE FROM reservation_attendees WHERE id = ?', row.id);
-    const { n } = this.get('SELECT COUNT(*) AS n FROM reservation_attendees WHERE reservation_id = ?', r.id);
-    this.run('UPDATE reservations SET party_size = ?, updated_at = ?, updated_by = ? WHERE id = ?', Math.max(r.party_size - 1, 1 + n), this.nowIso(), actor.id, r.id);
+    this.run('UPDATE reservations SET party_size = ?, updated_at = ?, updated_by = ? WHERE id = ?', Math.max((r.party_size ?? 1) - 1, 1), this.nowIso(), actor.id, r.id);
     this.audit(actor, 'reservation.retirer_membre', 'reservation', r.id, { member_id: mId });
     return this.reservationDetail(r.id);
   }
@@ -2109,7 +2012,7 @@ export class Club {
       ? int(input.party_size, 'Nombre de personnes', { min: 1, max: 200 })
       : (r.party_size ?? 1);
     const room = input.room_id !== undefined ? this.resolveRoom(input.room_id) : this.resolveRoom(r.room_id);
-    this.validateOccupancy(room, partySize, this.attendeesFor(r).length);
+    this.validateOccupancy(room, partySize);
     if (room.id !== (r.room_id ?? 1) && ['reservee', 'en_cours'].includes(r.status)) {
       const conflicts = this.overlapping(r.start_ms, r.end_ms, r.id, room.id);
       if (conflicts.length) throw this.overlapError(conflicts, room.name);
@@ -2149,7 +2052,7 @@ export class Club {
     const newPaid = r.paid_minutes + addPaid;
     const newSupplement = supplementAmount(newPaid, tariff);
     const conflicts = this.overlapping(r.end_ms, newEnd, r.id, r.room_id ?? 1);
-    if (!conflicts.length) this.ensureMembersAvailable(this.attendeesFor(r).map((a) => a.member_id), r.end_ms, newEnd, r.id);
+    if (!conflicts.length) this.ensureMemberAvailable(r.member_id, r.end_ms, newEnd, r.id);
     // Only the bookings after this one can be too close: ending later does not bring it closer to the ones
     // before it, which may already be as close as the gap allows (or closer, if the gap has grown since).
     const tooClose = conflicts.length ? [] : this.gapConflicts(r.end_ms, newEnd, r.id, r.room_id ?? 1).filter((o) => o.start_ms >= r.end_ms);
@@ -2236,8 +2139,8 @@ export class Club {
       if (String(err.message).includes('CHEVAUCHEMENT')) throw this.overlapError(this.overlapping(p.r.end_ms, p.newEnd, p.r.id, p.r.room_id ?? 1), p.r.room_name);
       throw err;
     }
-    // Only the holder's credit and card pay for the extra time (the owner's rule: a room is booked by one member,
-    // and it is on that member's card that it is debited); the attendees' credit is left alone.
+    // Only the holder's credit and card pay for the extra time (the owner's rule: a session has one member, its
+    // holder, and it is on that member's card that it is debited).
     this.creditMove(actor, p.r.subscription_id, p.r.id, 'engagement', p.addIncluded, `Prolongation +${fmtDuration(p.add)}`);
     if (p.delta > 0) {
       const line = {
@@ -2389,8 +2292,8 @@ export class Club {
   // The time a running session went on past its planned end, recorded when it is finished (the owner's rule:
   // the time credit left on the card runs until the member leaves). Nothing when it ends on time or earlier.
   // Counted to the minute, a minute started counting, and only up to overtimeLimit. The session is lengthened by it, without the overlap and gap checks
-  // of an extension (the people have stayed). It is taken first from the holder's plan credit only (the owner's
-  // rule: the attendees' credit is left alone); the rest is paid time, priced by the minute at the booking's
+  // of an extension (the people have stayed). It is taken first from the holder's plan credit (the holder is
+  // the session's only member); the rest is paid time, priced by the minute at the booking's
   // hourly tariff, to the franc: the holder's card pays what it can, the rest is left to collect.
   recordOvertime(actor, r) {
     const next = this.get(
@@ -2531,6 +2434,8 @@ export class Club {
       subscription: sub ? this.subscriptionDTO(sub, this.bizToday()) : null,
       charges, payments, credit_movements, history, totals,
       extension_window: this.extensionWindow(r.id),
+      // What the holder's card holds: a product served can be paid with it on the spot.
+      card_balance: this.walletBalance(r.member_id),
       // What the WhatsApp confirmation to the booking's holder is addressed from. They are in this detail only:
       // the lists of bookings do not spread the members' phone numbers.
       member_first_name: r.first_name,
@@ -2565,26 +2470,25 @@ export class Club {
   insertCharge(actor, c) {
     return this.insert(
       `INSERT INTO charges (account, kind, member_id, reservation_id, subscription_id, product_id, label, quantity,
-         unit_price, amount, status, tariff_validated, created_at, created_by, consumer_member_id, deposit)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'due', ?, ?, ?, ?, ?)`,
+         unit_price, amount, status, tariff_validated, created_at, created_by, deposit)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'due', ?, ?, ?, ?)`,
       c.account, c.kind, c.member_id, c.reservation_id ?? null, c.subscription_id ?? null, c.product_id ?? null,
       c.label, c.quantity, c.unit_price, c.quantity * c.unit_price, c.tariff_validated ?? 1, this.nowIso(), actor.id,
-      c.consumer_member_id ?? null, c.deposit ? 1 : 0,
+      c.deposit ? 1 : 0,
     );
   }
 
-  // Bottles and cigars of a reservation, with the member who consumed each (the holder by default).
+  // Bottles and cigars of a reservation, all charged to its holder (`consumer_member_id` of older rows is not read).
   consumptionLines(reservationId) {
     return this.all(
-      `SELECT c.id, c.account, c.label, c.quantity, c.unit_price, c.amount, c.status, c.product_id,
-         COALESCE(c.consumer_member_id, c.member_id) AS consumer_member_id, m.first_name, m.last_name
-       FROM charges c JOIN members m ON m.id = COALESCE(c.consumer_member_id, c.member_id)
+      `SELECT c.id, c.account, c.label, c.quantity, c.unit_price, c.amount, c.status, c.product_id
+       FROM charges c
        WHERE c.reservation_id = ? AND c.kind = 'produit' AND c.status IN ('due', 'payee')
        ORDER BY c.created_at, c.id`, reservationId,
     ).map((c) => ({
       id: c.id, account: c.account, account_label: ACCOUNT_LABELS[c.account], label: c.label, quantity: c.quantity,
       unit_price: c.unit_price, amount: c.amount, status: c.status, status_label: CHARGE_STATUS[c.status],
-      product_id: c.product_id, consumer_member_id: c.consumer_member_id, consumer_name: `${c.first_name} ${c.last_name}`,
+      product_id: c.product_id,
     }));
   }
 
@@ -2600,9 +2504,6 @@ export class Club {
       cancelled_at: c.cancelled_at, cancel_reason: c.cancel_reason, cancelled_by_name: c.cancelled_by_name ?? null,
       payment_id: c.payment_id ?? null, paid_at: c.paid_at ?? null, payment_method: c.payment_method ?? null,
       refund_id: c.refund_id ?? null, refunded_at: c.refunded_at ?? null, refund_reason: c.refund_reason ?? null,
-      consumer_member_id: c.kind === 'produit' ? (c.consumer_member_id ?? c.member_id) : null,
-      consumer_name: c.kind !== 'produit' ? null
-        : c.consumer_first ? `${c.consumer_first} ${c.consumer_last}` : (c.first_name ? `${c.first_name} ${c.last_name}` : null),
     };
   }
 
@@ -2634,25 +2535,35 @@ export class Club {
         : 'Les cigares se vendent à l’unité : indiquez un nombre entier (1 à 99).');
     }
     if (p.stock_qty < qty) throw conflict('STOCK_INSUFFISANT', `Stock insuffisant pour « ${p.name} » : ${p.stock_qty} disponible(s).`);
-    // The consumer must be in the room: the holder (default) or a member added to the reservation.
-    let consumer = r.member_id;
-    if (input.consumer_member_id !== undefined && input.consumer_member_id !== null && input.consumer_member_id !== '') {
-      consumer = toId(input.consumer_member_id, 'Membre');
-      if (consumer !== r.member_id
-        && !this.get('SELECT 1 AS x FROM reservation_attendees WHERE reservation_id = ? AND member_id = ?', r.id, consumer)) {
-        throw invalid('Ce membre n’est pas dans la salle de cette réservation.', 'MEMBRE_ABSENT');
-      }
-    }
+    // Paid on the spot (`pay_now`: a method, or the card with `card: true` or the card's method), or left on the
+    // session's note to be paid at the end with the rest (the default).
+    const payNow = input.pay_now === undefined || input.pay_now === null || input.pay_now === false ? null : input.pay_now;
+    if (payNow !== null && (typeof payNow !== 'object' || Array.isArray(payNow))) throw invalid('Paiement immédiat invalide.');
+    // Everything served in a session is charged to its holder, the only member there (a consumer sent by an
+    // older screen is ignored).
     const account = p.category === 'cigare' ? 'cigares' : 'alcool';
     const chargeId = this.insertCharge(actor, {
       account, kind: 'produit', member_id: r.member_id, reservation_id: r.id, product_id: p.id,
-      label: p.name, quantity: qty, unit_price: p.price, consumer_member_id: consumer === r.member_id ? null : consumer,
+      label: p.name, quantity: qty, unit_price: p.price,
     });
     this.moveStock(actor, p.id, -qty, 'vente', { chargeId, reason: `Réservation n° ${r.id}` });
     this.audit(actor, 'reservation.consommation.ajouter', 'reservation', r.id, {
-      charge_id: chargeId, produit: p.name, quantite: qty, montant: qty * p.price, sous_compte: account, consommateur: consumer,
+      charge_id: chargeId, produit: p.name, quantite: qty, montant: qty * p.price, sous_compte: account,
     });
-    return this.reservationDetail(r.id);
+    if (!payNow) return this.reservationDetail(r.id);
+    const card = flag(payNow.card) || payNow.method === CARD_METHOD;
+    const method = payNow.method === CARD_METHOD ? null : (payNow.method ?? null);
+    // The card pays only when it holds the whole amount, unless a method is given for the rest.
+    const balance = this.walletBalance(r.member_id);
+    if (card && !method && balance < qty * p.price) {
+      throw conflict(
+        'SOLDE_INSUFFISANT',
+        `Crédit CFA insuffisant sur la carte : ${this.money(balance)} pour ${this.money(qty * p.price)}.`,
+        { balance, needed: qty * p.price },
+      );
+    }
+    const { payment } = this.recordPayment(actor, { charge_ids: [chargeId], card, method });
+    return { ...this.reservationDetail(r.id), payment };
   }
 
   voidCharge(actor, c, reason) {

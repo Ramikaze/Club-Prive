@@ -117,3 +117,11 @@ export function fmtDuration(min) {
   if (!h) return `${m} min`;
   return m ? `${h} h ${String(m).padStart(2, '0')}` : `${h} h`;
 }
+
+// A session has one member, its holder; everyone else in the party is a guest (not a member), whose time and
+// consumptions the holder pays. `partySize` counts the holder.
+export function partyLabel(partySize) {
+  const guests = Math.max(1, Number(partySize) || 1) - 1;
+  if (!guests) return 'Titulaire seul';
+  return `Titulaire + ${guests} invité${guests > 1 ? 's' : ''}`;
+}

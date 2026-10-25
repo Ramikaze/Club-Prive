@@ -318,11 +318,11 @@ function MemberDetail({ m, reload }) {
               <tbody>{m.reservations.map((r) => (
                 <tr key={r.id} className={r.status === 'annulee' ? 'is-muted' : ''}>
                   <td data-label="Journée"><Link to={`/reservations/${r.id}`}>{dayLabel(r.biz_day, 'medium')}</Link></td>
-                  <td data-label="Salle">{r.room_name || 'Salon Principal'}{r.member_id !== m.id && <div className="subtle">Accompagnant · titulaire : {r.member_name}</div>}</td>
+                  <td data-label="Salle">{r.room_name || 'Salon Principal'}</td>
                   <td data-label="Horaire" className="nowrap">{r.start_time} – {r.end_time}</td>
                   <td data-label="Personnes">{r.party_size || 1} pers.</td>
                   <td data-label="Durée">{fmtDuration(r.duration_min)}</td>
-                  <td data-label="Supplément" className="num">{r.member_id === m.id ? money(r.supplement_amount) : '—'}</td>
+                  <td data-label="Supplément" className="num">{money(r.supplement_amount)}</td>
                   <td data-label="Statut"><Chip group="res" value={r.status} /></td></tr>
               ))}</tbody></table></div>
           ) : <Empty icon="calendar">Aucune réservation.</Empty>}

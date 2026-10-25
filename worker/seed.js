@@ -179,25 +179,25 @@ function fill(club, { actor, catalogue }) {
   club.cancelReservation(manager, cancelled.id, { reason: 'Empêchement du membre (démo)' });
 
   // A session already running when the demonstration is loaded, whatever the hour (the club has
-  // no opening hours), so the room timer and the per-member breakdown show at once: started about
-  // 45 minutes ago, two members present, each with cigars and a bottle. Created before today's
+  // no opening hours), so the room timer and the consumptions show at once: started about 45 minutes
+  // ago, the holder and a guest, with cigars and a bottle. Created before today's
   // other bookings, which give way to it in the single room.
   const win = club.window();
   const ago = localParts(realNow - 45 * 60000, tz);
   const startMin = ago.minutes - (ago.minutes % slot);
   const date = startMin < win.open ? addDays(ago.date, -1) : ago.date;
   const time = fmtHHMM(startMin);
-  const pairs = [[client1, client2], [client3, client5], [client4, client2], [client1, client5]];
+  const holders = [client1, client3, client4, client5];
   const inRoom = (() => {
     const start = startOf(date, time);
-    for (const [holder, guest] of pairs) {
+    for (const holder of holders) {
       club.at = start - 30 * 60000;
       try {
         const r = club.createReservation(manager, {
-          member_id: holder, attendee_ids: [guest], date, start_time: time, duration_min: 120,
+          member_id: holder, date, start_time: time, duration_min: 120,
           room_id: roomId, party_size: 2,
         }).reservation;
-        return { r, holder, guest };
+        return { r };
       } catch (err) {
         if (!(err instanceof AppError)) throw err; // a member without credit or busy: try the next pair
       }
@@ -205,14 +205,15 @@ function fill(club, { actor, catalogue }) {
     return null;
   })();
   if (inRoom) {
-    const { r, holder, guest } = inRoom;
+    const { r } = inRoom;
     club.at = r.start_ms;
     club.startReservation(manager, r.id);
-    // Served within the elapsed time, so both members have cigars and a bottle even in a young session.
-    const served = [[10, holder, robusto, 1], [20, holder, whisky, 1], [25, guest, corona, 2], [35, guest, champagne, 1]];
-    served.forEach(([afterMin, consumer, productId, quantity], i) => {
+    // Served within the elapsed time, so the session has cigars and a bottle even when young; all of it is
+    // on the holder's note.
+    const served = [[10, robusto, 1], [20, whisky, 1], [25, corona, 2], [35, champagne, 1]];
+    served.forEach(([afterMin, productId, quantity], i) => {
       club.at = r.start_ms + Math.min(afterMin * 60000, ((realNow - r.start_ms) * (i + 1)) / (served.length + 1));
-      club.addItem(manager, r.id, { product_id: productId, quantity, consumer_member_id: consumer });
+      club.addItem(manager, r.id, { product_id: productId, quantity });
     });
   }
 

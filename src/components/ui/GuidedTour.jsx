@@ -36,7 +36,7 @@ const STEPS = [
   {
     route: '/salles', targets: ['.room-card.is-free .room-card-actions .btn-primary', '.rooms-grid'], icon: 'plus', title: 'Installer un membre',
     body: '« Installer un membre » ouvre une réservation qui commence tout de suite : client titulaire, durée et nombre de personnes. Le titulaire doit avoir une carte active, une formule valide et du crédit.',
-    features: ['« Réserver un créneau » pour plus tard', 'Ses invités sont comptés, sans crédit à engager'],
+    features: ['« Réserver un créneau » pour plus tard', 'Un seul membre par séance : les autres personnes sont ses invités, et il paie pour eux'],
   },
   {
     route: '/salles', targets: ['.room-card .session-timer', '.room-card.is-occupied', '.rooms-grid'], icon: 'clock', title: 'Le compteur de séance',
@@ -44,9 +44,9 @@ const STEPS = [
     features: ['Orange dans les 15 dernières minutes', 'Rouge quand le crédit est épuisé ou la séance dépassée', '« Prolonger » depuis la carte de la salle'],
   },
   {
-    route: '/salles', targets: ['.room-card .conso', '.room-card.is-occupied', '.rooms-grid'], icon: 'receipt', title: 'Consommations par membre',
-    body: 'Chaque membre présent avec ce qu’il a pris : Cigares et Alcool dans des parties séparées avec leur sous-total, puis le total du salon en bas.',
-    features: ['« Facturer bouteille / cigare » : choisissez le membre puis touchez le produit (+1)', 'La note reste au nom du titulaire', '« Libérer la salle » termine la séance et consomme les crédits'],
+    route: '/salles', targets: ['.room-card .conso', '.room-card.is-occupied', '.rooms-grid'], icon: 'receipt', title: 'Consommations de la séance',
+    body: 'Tout ce qui est servi dans la salle, invités compris, est au nom du titulaire : Cigares et Alcool dans des parties séparées avec leur sous-total, puis le total de la séance en bas.',
+    features: ['« Facturer bouteille / cigare » : touchez le produit (+1)', 'Règlement « À la note » (payé à la fin) ou « Payer maintenant », en espèces par exemple, avec son ticket', '« Libérer la salle » termine la séance et consomme le crédit du titulaire'],
   },
   {
     route: '/agenda', targets: ['[data-tour="agenda-views"]', '[data-tour="agenda"]'], icon: 'calendar', title: 'Vues de l’agenda',
@@ -122,7 +122,7 @@ const STEPS = [
 
 const WELCOME_FEATURES = [
   ['rooms', 'Salles, compteur de séance'],
-  ['receipt', 'Consommations par membre'],
+  ['receipt', 'Consommations de la séance'],
   ['calendar', 'Agenda jour, semaine, liste'],
   ['users', 'Membres, cartes, crédits'],
   ['box', 'Stocks & cave à cigares'],

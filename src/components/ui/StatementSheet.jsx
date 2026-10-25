@@ -149,11 +149,11 @@ export default function StatementSheet({ s, settings, demo }) {
             <tr key={r.id} className={r.status === 'annulee' ? 'is-cancelled' : undefined}>
               <td className="st-nowrap">{dayLabel(r.biz_day, 'short')}</td>
               <td className="st-nowrap">{r.start_time} – {r.end_time}</td>
-              <td>{r.room_name}{r.member_id !== m.id ? <div className="st-sub">Accompagnant · titulaire : {r.member_name}</div> : null}</td>
+              <td>{r.room_name}</td>
               <td className="st-nowrap">{fmtDuration(r.duration_min)}</td>
               <td>{Math.max(1, Number(r.party_size) || 1)}</td>
-              <td className="st-nowrap">{r.member_id === m.id && r.included_minutes > 0 ? fmtDuration(r.included_minutes) : '—'}</td>
-              <td className="st-nowrap">{r.member_id === m.id && r.paid_minutes > 0 ? fmtDuration(r.paid_minutes) : '—'}</td>
+              <td className="st-nowrap">{r.included_minutes > 0 ? fmtDuration(r.included_minutes) : '—'}</td>
+              <td className="st-nowrap">{r.paid_minutes > 0 ? fmtDuration(r.paid_minutes) : '—'}</td>
               <td>{STATUS.res[r.status]?.[0] ?? r.status_label}</td>
             </tr>
           ))}</tbody>

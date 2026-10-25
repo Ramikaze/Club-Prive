@@ -47,110 +47,111 @@ test('salles : seul un administrateur peut modifier la configuration', async () 
   assert.equal((await admin.post('/api/rooms', { name: 'Vide', capacity: '' })).status, 400);
 });
 
-test('capacité : devis, création et modification comptent toutes les personnes', async () => {
+const refusedOneMember = (response) => {
+  assert.equal(response.status, 400, JSON.stringify(response.data));
+  assert.equal(response.data.error.code, 'UN_SEUL_MEMBRE');
+  assert.equal(response.data.error.message, "Une séance n'accueille qu'un seul membre : le titulaire ; les autres personnes sont des invités.");
+};
+
+test('capacité : devis, création et modification comptent le titulaire et ses invités', async () => {
   const room = ok(await admin.post('/api/rooms', { name: 'Duo', capacity: 2 })).room;
   for (const path of ['/api/reservations/quote', '/api/reservations']) {
     rejected(await manager.post(path, request({ room_id: room.id, party_size: 3 })), 'CAPACITE_DEPASSEE');
-    rejected(await manager.post(path, request({ room_id: room.id, party_size: 3, attendee_ids: [members[1].id] })), 'CAPACITE_DEPASSEE');
   }
   const res = await book({ room_id: room.id, party_size: 2 });
   rejected(await manager.put(`/api/reservations/${res.id}/occupancy`, { party_size: 3 }), 'CAPACITE_DEPASSEE');
-  rejected(await manager.post(`/api/reservations/${res.id}/attendees`, { member_id: members[1].id }), 'CAPACITE_DEPASSEE');
-  assert.equal(credit(members[1]).committed, 0);
+  assert.equal(ok(await manager.put(`/api/reservations/${res.id}/occupancy`, { party_size: 1 })).reservation.party_size, 1);
 });
 
-test('effectif : les invités restent comptés lors de l’ajout et du retrait d’un membre', async () => {
-  const res = await book({ party_size: 3 });
-  const added = ok(await manager.post(`/api/reservations/${res.id}/attendees`, { member_id: members[1].id })).reservation;
-  assert.equal(added.party_size, 4);
-  rejected(await manager.put(`/api/reservations/${res.id}/occupancy`, { party_size: 1 }), 'EFFECTIF_INVALIDE');
-  const removed = ok(await manager.del(`/api/reservations/${res.id}/attendees/${members[1].id}`)).reservation;
-  assert.equal(removed.party_size, 3);
-  assert.equal(credit(members[1]).committed, 0);
+test('un seul membre par séance : d’autres membres refusés, à la réservation comme en salle', async () => {
+  for (const path of ['/api/reservations/quote', '/api/reservations']) {
+    refusedOneMember(await manager.post(path, request({ attendee_ids: [members[1].id] })));
+    refusedOneMember(await manager.post(path, request({ attendee_ids: 'x' })));
+  }
+  assert.equal(credit(members[0]).committed, 0, 'aucune réservation partielle créée');
+  // An empty list, as an older screen sends it, is the holder alone.
+  const res = await book({ attendee_ids: [] });
+  assert.equal(res.party_size, 1);
+  assert.equal('attendees' in res, false);
+  refusedOneMember(await manager.post(`/api/reservations/${res.id}/attendees`, { member_id: members[1].id }));
+  assert.equal(server.club.get('SELECT COUNT(*) AS n FROM reservation_attendees').n, 0);
+  assert.deepEqual(movements(members[1]), []);
+});
+
+test('invités : le titulaire vient avec des non-membres, jusqu’à la capacité de la salle, seul débité', async () => {
+  const quote = ok(await manager.post('/api/reservations/quote', request({ party_size: 4 })));
+  assert.equal(quote.party_size, 4);
+  assert.equal('extra_attendees' in quote, false);
+  const res = await book({ party_size: 4 });
+  assert.equal(res.party_size, 4);
+  assert.equal(res.card_code, server.club.activeCardCode(members[0].id));
+  assert.equal(credit(members[0]).committed, 60);
+  // The capacity of the room bounds the party, not the number of members.
+  rejected(await manager.put(`/api/reservations/${res.id}/occupancy`, { party_size: rooms[0].capacity + 1 }), 'CAPACITE_DEPASSEE');
+  ok(await manager.post(`/api/reservations/${res.id}/finish`));
+  assert.deepEqual([credit(members[0]).committed, credit(members[0]).consumed], [0, 60]);
+  for (const member of members.slice(1)) assert.deepEqual(movements(member), []);
 });
 
 test('occupation : transfert vers une salle trop petite et modification après clôture refusés', async () => {
   const small = ok(await admin.post('/api/rooms', { name: 'Solo', capacity: 1 })).room;
-  const res = await book({ attendee_ids: [members[1].id] });
+  const res = await book({ party_size: 2 });
   rejected(await manager.put(`/api/reservations/${res.id}/occupancy`, { room_id: small.id }), 'CAPACITE_DEPASSEE');
   ok(await manager.post(`/api/reservations/${res.id}/finish`));
   rejected(await manager.put(`/api/reservations/${res.id}/occupancy`, { party_size: 1 }), 'STATUT');
 });
 
-test('disponibilité membre : titulaire et accompagnant ne peuvent occuper deux salles simultanément', async () => {
-  const res = await book({ attendee_ids: [members[1].id] });
-  for (const member of [members[0], members[1]]) {
-    rejected(await manager.post('/api/reservations', request({ room_id: rooms[1].id, member_id: member.id })), 'MEMBRE_OCCUPE');
-    rejected(await manager.post('/api/reservations/quote', request({ room_id: rooms[1].id, member_id: members[2].id, attendee_ids: [member.id] })), 'MEMBRE_OCCUPE');
+test('disponibilité membre : le titulaire ne peut occuper deux salles simultanément', async () => {
+  const res = await book({ party_size: 2 });
+  for (const path of ['/api/reservations/quote', '/api/reservations']) {
+    rejected(await manager.post(path, request({ room_id: rooms[1].id })), 'MEMBRE_OCCUPE');
   }
-  const other = await book({ room_id: rooms[1].id, member_id: members[2].id });
-  rejected(await manager.post(`/api/reservations/${other.id}/attendees`, { member_id: members[1].id }), 'MEMBRE_OCCUPE');
-  assert.equal(credit(members[1]).committed, 0);
+  // Another member books another room at the same time.
+  await book({ room_id: rooms[1].id, member_id: members[1].id });
   ok(await manager.post(`/api/reservations/${res.id}/cancel`, { reason: 'Changement de salle' }));
-  ok(await manager.post(`/api/reservations/${other.id}/attendees`, { member_id: members[1].id }));
+  await book({ room_id: rooms[2].id });
 });
 
-test('prolongation : disponibilité de chaque participant vérifiée et créneaux contigus autorisés', async () => {
-  const res = await book({ attendee_ids: [members[1].id] });
-  await book({ room_id: rooms[1].id, member_id: members[1].id, start_time: '16:00' });
+test('prolongation : disponibilité du titulaire vérifiée et créneaux contigus autorisés', async () => {
+  const res = await book();
+  await book({ room_id: rooms[1].id, start_time: '16:00' });
   for (const suffix of ['/extend/quote', '/extend']) {
     rejected(await manager.post(`/api/reservations/${res.id}${suffix}`, { minutes: 30 }), 'MEMBRE_OCCUPE');
   }
   assert.equal(ok(await manager.get(`/api/reservations/${res.id}`)).reservation.duration_min, 60);
-  assert.equal(credit(members[0]).committed, 60);
+  assert.equal(credit(members[0]).committed, 120);
 });
 
 // Credit movements of a member's plan, whatever the booking.
 const movements = (member) => server.club.all('SELECT kind, minutes FROM credit_movements WHERE subscription_id = ?', member.subId).map((m) => ({ ...m }));
 
-test('membres présents : jamais débités, à la réservation, à l’entrée, en prolongation ou à la clôture', async () => {
-  const res = await book({ attendee_ids: [members[1].id] });
-  // Booking with an attendee: only the holder's plan is engaged; the attendee row keeps who was there.
-  assert.equal(credit(members[0]).committed, 60);
-  assert.deepEqual(movements(members[1]), []);
-  assert.deepEqual({ ...server.club.get('SELECT subscription_id, included_minutes FROM reservation_attendees WHERE reservation_id = ?', res.id) },
-    { subscription_id: null, included_minutes: 0 });
-  assert.deepEqual(res.attendees.map((a) => [a.member_id, a.included_minutes]), [[members[0].id, 60], [members[1].id, undefined]]);
-  ok(await manager.post(`/api/reservations/${res.id}/extend`, { minutes: 30 }));
-  assert.equal(credit(members[0]).committed, 90);
-  ok(await manager.del(`/api/reservations/${res.id}/attendees/${members[1].id}`));
-  const headers = { 'idempotency-key': 'return-to-room-once' };
-  for (let n = 0; n < 2; n += 1) {
-    ok(await manager.post(`/api/reservations/${res.id}/attendees`, { member_id: members[1].id }, headers));
-  }
-  // On entry in the room as well (« Membre (n/N) »): nothing of the member's is taken.
-  ok(await manager.post(`/api/reservations/${res.id}/attendees`, { member_id: members[2].id }));
-  ok(await manager.post(`/api/reservations/${res.id}/finish`));
-  assert.equal(ok(await manager.get(`/api/members/${members[1].id}`)).reservations[0].id, res.id);
-  // Finishing consumes the holder's minutes alone.
-  assert.deepEqual([credit(members[0]).committed, credit(members[0]).consumed, credit(members[0]).available], [0, 90, 30]);
-  for (const member of members.slice(1)) {
-    assert.deepEqual(movements(member), []);
-    assert.equal(credit(member).available, 120);
-  }
-});
+// A member row recorded on a booking before the one-member rule.
+const legacyAttendee = (res, member, minutes = 0) => server.club.run(
+  'INSERT INTO reservation_attendees (reservation_id, member_id, subscription_id, included_minutes, created_at) VALUES (?, ?, ?, ?, ?)',
+  res.id, member.id, minutes ? member.subId : null, minutes, server.club.nowIso(),
+);
 
-test('membres présents : un membre sans formule ni crédit peut entrer, sans aucun débit', async () => {
-  ok(await admin.post(`/api/subscriptions/${members[1].subId}/adjust`, { minutes: -120, reason: 'Crédit épuisé (test)' }));
-  const dora = ok(await manager.post('/api/members', { first_name: 'Dora', last_name: 'Test', phone: '+000 000001' }));
-  const quote = ok(await manager.post('/api/reservations/quote', request({ attendee_ids: [members[1].id, dora.id] })));
-  assert.deepEqual(quote.extra_attendees.map((a) => a.id), [members[1].id, dora.id]);
-  assert.equal(quote.extra_attendees.some((a) => 'included_minutes' in a || 'credit_available' in a), false);
-  const res = await book({ attendee_ids: [dora.id] });
-  const added = ok(await manager.post(`/api/reservations/${res.id}/attendees`, { member_id: members[1].id })).reservation;
-  assert.deepEqual(added.attendees.map((a) => a.member_id), [members[0].id, dora.id, members[1].id]);
-  assert.equal(movements(members[1]).filter((m) => m.kind !== 'ajustement').length, 0);
-  ok(await manager.post(`/api/reservations/${res.id}/cancel`, { reason: 'Annulation (test)' }));
-  assert.equal(movements(members[1]).filter((m) => m.kind !== 'ajustement').length, 0);
-  assert.equal(credit(members[0]).available, 120);
+test('ancienne réservation avec un autre membre : lue sans erreur, la ligne peut être retirée', async () => {
+  const res = await book({ party_size: 3 });
+  legacyAttendee(res, members[1]);
+  const detail = ok(await manager.get(`/api/reservations/${res.id}`)).reservation;
+  assert.equal(detail.party_size, 3);
+  // Only the bookings he holds are the member's: the old row no longer blocks him.
+  assert.equal(ok(await manager.get(`/api/members/${members[1].id}`)).reservations.length, 0);
+  await book({ room_id: rooms[1].id, member_id: members[1].id });
+  assert.equal(ok(await manager.get(`/api/members/${members[1].id}/statement`)).reservations.length, 1);
+  const removed = ok(await manager.del(`/api/reservations/${res.id}/attendees/${members[1].id}`)).reservation;
+  assert.equal(removed.party_size, 2);
+  assert.equal(server.club.get('SELECT COUNT(*) AS n FROM reservation_attendees').n, 0);
+  ok(await manager.post(`/api/reservations/${res.id}/finish`));
 });
 
 test('membres présents : au démarrage, le crédit encore engagé sur une séance active est rendu une seule fois', async () => {
-  const active = await book({ attendee_ids: [members[1].id] });
-  const done = await book({ attendee_ids: [members[2].id], room_id: rooms[1].id, member_id: members[0].id, start_time: '17:00' });
+  const active = await book();
+  const done = await book({ room_id: rooms[1].id, member_id: members[0].id, start_time: '17:00' });
   // What the live database holds from before the rule: attendees with engaged credit, one booking finished since.
   const legacy = (res, member, kind) => {
-    server.club.run('UPDATE reservation_attendees SET subscription_id = ?, included_minutes = 60 WHERE reservation_id = ? AND member_id = ?', member.subId, res.id, member.id);
+    legacyAttendee(res, member, 60);
     server.club.creditMove(null, member.subId, res.id, 'engagement', 60, 'Présence en salle (ancien)');
     if (kind) server.club.creditMove(null, member.subId, res.id, kind, 60, 'Réservation terminée (présence en salle)');
   };
@@ -176,8 +177,8 @@ test('concurrence : un seul engagement pour le même membre dans deux salles', a
   assert.equal(credit(members[0]).committed, 60);
 });
 
-test('abonnement : celui du titulaire est retenu par sa réservation active, pas celui d’un membre présent', async () => {
-  const res = await book({ attendee_ids: [members[1].id] });
+test('abonnement : celui du titulaire est retenu par sa réservation active', async () => {
+  const res = await book({ party_size: 2 });
   rejected(await admin.post(`/api/subscriptions/${members[0].subId}/cancel`, { reason: 'Demande du membre' }), 'RESERVATIONS_ACTIVES');
   ok(await admin.post(`/api/subscriptions/${members[1].subId}/cancel`, { reason: 'Demande du membre' }));
   ok(await manager.post(`/api/reservations/${res.id}/cancel`, { reason: 'Annulation collective' }));
@@ -231,46 +232,73 @@ test('accès salle : le titulaire doit avoir carte active, formule et crédit ; 
   rejected(await manager.post('/api/reservations', request({ member_id: members[2].id, require_credit: true })), 'CARTE_DESACTIVEE');
   rejected(await manager.post('/api/reservations', request({ member_id: dora.id, require_credit: true })), 'ABONNEMENT_INVALIDE');
 
-  // Membres présents : ni formule ni crédit demandés (seul le titulaire est débité), mais une carte désactivée
-  // reste refusée, à la création comme au devis.
-  rejected(await manager.post('/api/reservations/quote', request({ attendee_ids: [members[2].id] })), 'CARTE_DESACTIVEE');
-  rejected(await manager.post('/api/reservations', request({ attendee_ids: [members[2].id] })), 'CARTE_DESACTIVEE');
   assert.equal(credit(members[0]).committed, 0, 'aucune réservation partielle créée');
-
-  // Ajout en direct dans une salle occupée : Bruno (crédit épuisé) et Dora (sans formule) entrent sans débit.
-  const res = await book({ require_credit: true });
-  rejected(await manager.post(`/api/reservations/${res.id}/attendees`, { member_id: members[2].id }), 'CARTE_DESACTIVEE');
-  for (const id of [members[1].id, dora.id]) ok(await manager.post(`/api/reservations/${res.id}/attendees`, { member_id: id }));
-  const detail = ok(await manager.get(`/api/reservations/${res.id}`)).reservation;
-  assert.deepEqual(detail.attendees.map((a) => a.member_id), [members[0].id, members[1].id, dora.id]);
-  assert.deepEqual([credit(members[1]).committed, credit(members[1]).available], [0, 0]);
-  assert.equal(credit(members[0]).committed, 60);
 });
 
-test('consommations : chaque bouteille ou cigare est attribué au membre présent qui l’a pris', async () => {
-  const cigar = ok(await admin.post('/api/products', { category: 'cigare', name: 'Robusto test', reference: 'T-ROB', price: 1000000, initial_stock: 10 })).id;
-  const whisky = ok(await admin.post('/api/products', { category: 'bouteille', name: 'Whisky test', reference: 'T-WHI', price: 4000000, initial_stock: 10 })).id;
-  const res = await book();
-  ok(await manager.post(`/api/reservations/${res.id}/attendees`, { member_id: members[1].id }));
+const product = async (category, name, price) => ok(await admin.post('/api/products', {
+  category, name, reference: `T-${name.slice(0, 3).toUpperCase()}`, price, initial_stock: 10,
+})).id;
+
+test('consommations : tout ce qui est servi dans la séance est à la charge du titulaire', async () => {
+  const cigar = await product('cigare', 'Robusto test', 1000000);
+  const whisky = await product('bouteille', 'Whisky test', 4000000);
+  const res = await book({ party_size: 3 });
   ok(await manager.post(`/api/reservations/${res.id}/start`));
   ok(await manager.post(`/api/reservations/${res.id}/items`, { product_id: cigar, quantity: 2 }));
+  // A consumer sent by an older screen is ignored: the line is the holder's.
   ok(await manager.post(`/api/reservations/${res.id}/items`, { product_id: whisky, quantity: 1, consumer_member_id: members[1].id }));
-  const absent = await manager.post(`/api/reservations/${res.id}/items`, { product_id: cigar, quantity: 1, consumer_member_id: members[2].id });
-  assert.equal(absent.status, 400);
-  assert.equal(absent.data.error.code, 'MEMBRE_ABSENT');
-
-  // Billing stays with the holder; the consumer is kept per line.
   const lines = ok(await manager.get(`/api/reservations/${res.id}`)).charges.filter((c) => c.kind === 'produit');
-  assert.deepEqual(lines.map((c) => [c.label, c.member_id, c.consumer_member_id, c.consumer_name]), [
-    ['Robusto test', members[0].id, members[0].id, 'Alice TEST'],
-    ['Whisky test', members[0].id, members[1].id, 'Bruno TEST'],
+  assert.deepEqual(lines.map((c) => [c.label, c.member_id, c.status]), [
+    ['Robusto test', members[0].id, 'due'],
+    ['Whisky test', members[0].id, 'due'],
   ]);
+  assert.equal(lines.some((c) => 'consumer_member_id' in c), false);
+  assert.deepEqual(server.club.all("SELECT consumer_member_id FROM charges WHERE kind = 'produit'").map((c) => c.consumer_member_id), [null, null]);
+  // An older line that still names a consumer is read as it is.
+  server.club.run("UPDATE charges SET consumer_member_id = ? WHERE kind = 'produit' AND label = 'Whisky test'", members[1].id);
   const room = ok(await manager.get('/api/dashboard')).rooms_status.find((rm) => rm.id === res.room_id);
-  assert.deepEqual(room.current.consumptions.map((c) => [c.account, c.consumer_name, c.amount]), [
-    ['cigares', 'Alice TEST', 2000000],
-    ['alcool', 'Bruno TEST', 4000000],
+  assert.deepEqual(room.current.consumptions.map((c) => [c.account, c.label, c.amount]), [
+    ['cigares', 'Robusto test', 2000000],
+    ['alcool', 'Whisky test', 4000000],
   ]);
+  assert.equal(ok(await manager.get(`/api/members/${members[1].id}`)).charges.some((c) => c.kind === 'produit'), false);
+});
 
+test('consommation payée tout de suite : en espèces, avec la carte, ou à la note par défaut', async () => {
+  const cigar = await product('cigare', 'Robusto test', 1000000);
+  const whisky = await product('bouteille', 'Whisky test', 4000000);
+  const holder = members[0].id;
+  ok(await manager.post(`/api/members/${holder}/wallet/recharge`, { amount: 5000000, method: 'Espèces' }));
+  const res = await book();
+  ok(await manager.post(`/api/reservations/${res.id}/start`));
+  const due = async () => ok(await manager.get(`/api/reservations/${res.id}`)).reservation.due_amount;
+
+  // Cash on the spot: paid by itself, the card untouched, nothing left on the note.
+  const cash = ok(await manager.post(`/api/reservations/${res.id}/items`, { product_id: cigar, quantity: 1, pay_now: { method: 'Espèces' } }));
+  assert.equal(cash.payment.method, 'Espèces');
+  assert.equal(cash.payment.amount, 1000000);
+  assert.equal(cash.payment.card_amount, 0);
+  assert.equal(cash.charges.find((c) => c.label === 'Robusto test').status, 'payee');
+  assert.equal(server.club.walletBalance(holder), 5000000);
+  assert.equal(await due(), 0);
+
+  // With the card: the card pays it in full.
+  const byCard = ok(await manager.post(`/api/reservations/${res.id}/items`, { product_id: whisky, quantity: 1, pay_now: { card: true } }));
+  assert.equal(byCard.payment.method, 'Carte membre');
+  assert.equal(byCard.payment.card_amount, 4000000);
+  assert.equal(server.club.walletBalance(holder), 1000000);
+  assert.equal(await due(), 0);
+  // A card that does not hold the amount is refused, and nothing is served.
+  const short = await manager.post(`/api/reservations/${res.id}/items`, { product_id: whisky, quantity: 1, pay_now: { method: 'Carte membre' } });
+  rejected(short, 'SOLDE_INSUFFISANT');
+  assert.equal(server.club.get('SELECT stock_qty FROM products WHERE id = ?', whisky).stock_qty, 9);
+
+  // Without pay_now: on the note, paid at the end with the rest.
+  const onNote = ok(await manager.post(`/api/reservations/${res.id}/items`, { product_id: cigar, quantity: 1 }));
+  assert.equal('payment' in onNote, false);
+  assert.equal(await due(), 1000000);
+  assert.equal(server.club.walletBalance(holder), 1000000);
+  assert.equal((await manager.post(`/api/reservations/${res.id}/items`, { product_id: cigar, quantity: 1, pay_now: 'Espèces' })).status, 400);
 });
 
 test('désactivation d’un membre : historique conservé, accès bloqué, réactivation possible', async () => {
@@ -307,7 +335,7 @@ test('désactivation d’un membre : historique conservé, accès bloqué, réac
   ok(await manager.post('/api/reservations', request({ member_id: bruno.id, start_time: '18:00' })));
 });
 
-test('démonstration : une séance est déjà en cours au chargement, avec les consommations de chaque membre', async () => {
+test('démonstration : une séance est déjà en cours au chargement, avec ses consommations', async () => {
   ok(await admin.post('/api/admin/reset', { confirm: 'EFFACER' }));
   const author = server.club.userRow(ok(await admin.get('/api/me')).user.id);
   const realNow = Date.now;
@@ -319,13 +347,9 @@ test('démonstration : une séance est déjà en cours au chargement, avec les c
     assert.equal(live.length, 1, JSON.stringify(live.map((rm) => rm.name)));
     const session = live[0].current;
     assert.ok(Date.parse(session.started_at) < loadedAt && session.end_ms > loadedAt);
-    assert.equal(session.attendees.length, 2);
-    const byMember = new Map();
-    for (const line of session.consumptions) {
-      byMember.set(line.consumer_member_id, (byMember.get(line.consumer_member_id) ?? new Set()).add(line.account));
-    }
-    assert.deepEqual([...byMember.keys()].sort(), session.attendees.map((a) => a.member_id).sort());
-    for (const accounts of byMember.values()) assert.deepEqual([...accounts].sort(), ['alcool', 'cigares']);
+    assert.equal(session.party_size, 2);
+    assert.deepEqual([...new Set(session.consumptions.map((c) => c.account))].sort(), ['alcool', 'cigares']);
+    assert.equal(server.club.get('SELECT COUNT(*) AS n FROM reservation_attendees').n, 0);
   } finally {
     Date.now = realNow;
   }

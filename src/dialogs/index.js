@@ -2,7 +2,7 @@
 export {
   supplementText, openBookingDialog, openExtendDialog, openCancelReservationDialog,
   openConsumptionDialog, openQuickPayReservation, quickStartReservation, quickFinishReservation,
-  quickUpdatePartySize, quickChangeRoom, openAddAttendeeDialog, quickRemoveAttendee, memberRoomEligibility,
+  quickUpdatePartySize, quickChangeRoom, memberRoomEligibility,
   sendWhatsAppText,
 } from './reservationDialogs.jsx';
 export {
