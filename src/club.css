@@ -852,8 +852,9 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .ts-signature { padding: 2mm 0; }
 /* Two written lines of room for the member's signature. */
 .ts-signature-box { height: 14mm; margin-top: 1mm; border: 1px solid #000; }
-.ts-verify { display: grid; justify-items: center; gap: 1mm; padding: 3mm 0 2mm; text-align: center; }
-.ts-qr { width: 34mm; height: 34mm; display: block; }
+.ts-verify { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 3mm; row-gap: 1mm; align-items: center; padding: 2mm 0; text-align: left; }
+.ts-verify .ts-qr { grid-row: 1 / span 2; }
+.ts-qr { width: 22mm; height: 22mm; display: block; }
 .ts-code { font: 700 11pt/1.2 ui-monospace, Menlo, Consolas, monospace; letter-spacing: 0.08em; }
 .ts-footer { padding-top: 2mm; border-top: 1px dashed #000; text-align: center; white-space: pre-line; }
 .ts-demo { margin: 1mm 0 2mm; padding: 1.5mm; border: 2px solid #000; text-align: center; font-weight: 800; letter-spacing: 0.06em; }
