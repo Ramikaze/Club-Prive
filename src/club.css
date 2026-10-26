@@ -1148,3 +1148,8 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .share-ticket .ticket-image-box { margin: 0; }
 .share-ticket .ticket-image-preview { max-height: 52vh; }
 @media (max-width: 720px) { .share-ticket { grid-template-columns: minmax(0, 1fr); gap: 16px; } .share-ticket .ticket-image-box { margin: 0 auto; } }
+
+/* The agenda's empty day: a quiet note over the timeline, which stays clickable underneath. */
+.tl-empty { position: absolute; top: 18%; left: 50%; transform: translateX(-50%); z-index: 2; display: inline-flex; align-items: center; gap: 8px; margin: 0; padding: 8px 14px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text-2); font-size: 0.9rem; white-space: nowrap; pointer-events: none; box-shadow: 0 2px 8px rgba(36, 28, 21, 0.08); }
+.tl-empty svg { width: 16px; height: 16px; color: var(--text-3); }
+@media (max-width: 600px) { .tl-empty { white-space: normal; width: max-content; max-width: 85%; border-radius: var(--radius-sm); text-align: center; } }
