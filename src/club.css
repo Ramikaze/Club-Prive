@@ -1113,14 +1113,18 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .close-ticket { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
 .close-ticket input { margin-top: 3px; }
 .close-ticket.is-open .title { color: var(--warn, #b26b00); }
-.close-account { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; margin: 0; }
-.close-account legend { display: inline-flex; align-items: center; gap: 6px; font-weight: 650; padding: 0 4px; }
-.close-account legend svg { width: 16px; height: 16px; }
+.close-account { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 14px; }
+.close-account-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.close-account-head h3 { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-size: 1rem; }
+.close-account-head svg { width: 18px; height: 18px; color: var(--text-3); }
 .close-notes { display: grid; gap: 6px; }
 .close-note { display: grid; grid-template-columns: 120px 90px 1fr; align-items: center; gap: 10px; }
 .close-note > span:first-child { white-space: nowrap; }
-.close-note input { text-align: right; }
-.close-figures { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; font-size: 0.9rem; }
+.close-note input { text-align: right; font-variant-numeric: tabular-nums; -moz-appearance: textfield; }
+.close-note input::-webkit-inner-spin-button, .close-note input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.close-note .num, .close-figures, .close-ticket .num { font-variant-numeric: tabular-nums; }
+.close-figures { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); color: var(--text-2); font-size: 0.9rem; }
+.close-figures strong { color: var(--text); }
 
 /* Agenda day view: the timeline and, beside it, the day's bookings. */
 .day-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); gap: 16px; align-items: start; }
