@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
+import SmartSearch from '../components/ui/SmartSearch.jsx';
 import { AccountTag, Chip, Empty, FormError, Loaded, Notice, PageHead, Segmented } from '../components/ui/ui.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import { actionDialog } from '../components/ui/Modal.jsx';
@@ -14,6 +15,7 @@ import { ACTION_LABELS, auditSummary } from '../lib/audit.js';
 import { useBusy, useLoad } from '../lib/hooks.js';
 import { useIsAdmin, useRooms } from '../store/useStore.js';
 import { partyLabel } from '../../shared/rules.js';
+import { searchable, smartFilter } from '../../shared/search.js';
 import {
   openExtendDialog, openCancelReservationDialog, openPaymentDialog, openRefundDialog, cancelChargeDialog, supplementText, canRefund,
   quickChangeRoom,
@@ -29,6 +31,7 @@ function ReservationDetail({ d, products, reload }) {
   const sub = d.subscription;
   const itemKey = useRef(newKey());
   const [catFilter, setCatFilter] = useState('tous');
+  const [search, setSearch] = useState('');
   const [payWith, setPayWith] = useState(''); // '' = on the note, paid at the end
   const [addingId, setAddingId] = useState(null);
   const [itemError, setItemError] = useState(null);
@@ -38,7 +41,11 @@ function ReservationDetail({ d, products, reload }) {
   const nextDay = r.end_date > r.biz_day ? ' (lendemain)' : '';
   const totals = Object.entries(d.totals);
   const anyLine = d.charges.length > 0;
-  const activeProducts = products.filter((p) => p.active && (catFilter === 'tous' || p.category === catFilter));
+  const inCategory = products.filter((p) => p.active && (catFilter === 'tous' || p.category === catFilter));
+  // The search in « Ajouter en 1 clic »: name, reference, category and description (origin, strength…), typos forgiven.
+  const activeProducts = searchable(search)
+    ? smartFilter(inCategory, search, (p) => [p.name, p.reference, p.category === 'cigare' ? 'Cigare' : 'Bouteille', p.description])
+    : inCategory;
   const editableOccupancy = r.status === 'reservee' || r.status === 'en_cours';
 
   const lineActions = (c) => (
@@ -172,23 +179,29 @@ function ReservationDetail({ d, products, reload }) {
           <div className="card-head"><h2>Note</h2>
             {due.length ? <button type="button" className="btn btn-primary btn-sm" onClick={() => openPaymentDialog({ lines: d.charges, memberName: r.member_name }, reload)}><Icon name="wallet" /> Encaisser {money(dueTotal)}</button> : null}</div>
           {anyLine ? (
-            <div className="table-wrap"><table className="table stack-sm">
-              <thead><tr><th>Ligne</th><th>Sous-compte</th><th className="num">Montant</th><th>Statut</th><th><span className="sr-only">Actions</span></th></tr></thead>
-              <tbody>{d.charges.map((c) => (
-                <tr key={c.id} className={c.status === 'annulee' ? 'is-muted' : ''}>
-                  <td data-label="Ligne"><span className="strike">{c.label}</span>{c.quantity > 1 ? <> <span className="subtle">{c.quantity} × {money(c.unit_price)}</span></> : null}
-                    {c.cancel_reason ? <div className="subtle">{c.cancel_reason}</div> : null}{c.refund_reason ? <div className="subtle">Remboursé : {c.refund_reason}</div> : null}</td>
-                  <td data-label="Sous-compte"><AccountTag account={c.account} /></td>
-                  <td data-label="Montant" className="num">{money(c.amount)}</td>
-                  <td data-label="Statut"><Chip group="charge" value={c.status} /></td>
-                  <td className="actions">{lineActions(c)}</td></tr>
-              ))}</tbody>
-              <tfoot>{totals.filter(([, t]) => t.billed || t.refunded).map(([k, t]) => (
-                <tr key={k}>
-                  <td data-label="Sous-compte"><AccountTag account={k} /></td><td data-label="Encaissé" className="subtle">encaissé {money(t.paid)}</td>
-                  <td data-label="Facturé" className="num">{money(t.billed)}</td><td data-label="Reste">{t.due ? <span className="chip chip-warn">reste {money(t.due)}</span> : null}</td><td /></tr>
-              ))}</tfoot>
-            </table></div>
+            <>
+              {/* A list rather than a table: the note shares its row with « Ajouter en 1 clic », so everything stays inside the tile. */}
+              <div className="list note-lines">{d.charges.map((c) => (
+                <div key={c.id} className={`list-item note-line${c.status === 'annulee' ? ' is-muted' : ''}`}>
+                  <div className="grow">
+                    <div className="title"><span className="strike">{c.label}</span></div>
+                    <div className="meta"><AccountTag account={c.account} />{c.quantity > 1 ? <> · {c.quantity} × {money(c.unit_price)}</> : null}</div>
+                    {c.cancel_reason ? <div className="meta">{c.cancel_reason}</div> : null}{c.refund_reason ? <div className="meta">Remboursé : {c.refund_reason}</div> : null}
+                  </div>
+                  <div className="note-line-end">
+                    <span className="num note-amount"><span className="strike">{money(c.amount)}</span></span>
+                    <Chip group="charge" value={c.status} />
+                    <div className="note-line-actions">{lineActions(c)}</div>
+                  </div>
+                </div>
+              ))}</div>
+              <dl className="calc section-gap">{totals.filter(([, t]) => t.billed || t.refunded).map(([k, t]) => (
+                <div key={k}>
+                  <dt><AccountTag account={k} /> <span className="subtle">· encaissé {money(t.paid)}</span></dt>
+                  <dd>{money(t.billed)}{t.due ? <> <span className="chip chip-warn">reste {money(t.due)}</span></> : null}</dd>
+                </div>
+              ))}</dl>
+            </>
           ) : <Empty icon="list">Aucune ligne : ni supplément ni consommation.</Empty>}
         </section>
 
@@ -200,6 +213,23 @@ function ReservationDetail({ d, products, reload }) {
             </div>
             <FormError error={itemError} />
             <PayNowChoice value={payWith} onChange={setPayWith} cardBalance={d.card_balance ?? 0} />
+            <div className="section-gap">
+              <SmartSearch
+                value={search}
+                onChange={setSearch}
+                suggestions={activeProducts.filter((p) => p.stock_qty > 0)}
+                onPick={(p) => { setSearch(''); onQuickAddProduct(p); }}
+                placeholder="Rechercher un cigare, une bouteille…"
+                label="Rechercher un produit à ajouter"
+                renderSuggestion={(p) => (
+                  <div className="grow">
+                    <div className="title">{p.name}</div>
+                    <div className="meta">{money(p.price)} · {p.stock_qty} en stock</div>
+                  </div>
+                )}
+              />
+            </div>
+            {searchable(search) && !activeProducts.length && <p className="subtle section-gap">Aucun produit ne correspond à « {search.trim()} ».</p>}
             <div className="quick-product-grid">
               {activeProducts.map((p) => {
                 const out = p.stock_qty <= 0;

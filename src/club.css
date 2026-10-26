@@ -1159,3 +1159,28 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .tl-empty { position: absolute; top: 18%; left: 50%; transform: translateX(-50%); z-index: 2; display: inline-flex; align-items: center; gap: 8px; margin: 0; padding: 8px 14px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text-2); font-size: 0.9rem; white-space: nowrap; pointer-events: none; box-shadow: 0 2px 8px rgba(36, 28, 21, 0.08); }
 .tl-empty svg { width: 16px; height: 16px; color: var(--text-3); }
 @media (max-width: 600px) { .tl-empty { white-space: normal; width: max-content; max-width: 85%; border-radius: var(--radius-sm); text-align: center; } }
+
+/* A reservation's note: each line with its sub-account under the label, and on the right its amount, status and actions. */
+.note-line { align-items: flex-start; gap: 12px; }
+.note-line .title, .note-line .meta { overflow-wrap: anywhere; }
+.note-line-end { flex: none; display: grid; justify-items: end; gap: 4px; }
+.note-amount { font-weight: 650; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.note-line-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+.note-line-actions:empty { display: none; }
+.list-item.is-muted .note-amount .strike { text-decoration: line-through; }
+
+/* The payment dialog's methods, as tiles: the member's card first, greyed out when it holds no credit. */
+.pay-methods { border: 0; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+.pay-methods legend { font-weight: 600; margin-bottom: 6px; padding: 0; }
+.pay-method { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); cursor: pointer; transition: border-color 0.15s ease-out, background-color 0.15s ease-out; }
+.pay-method input { position: absolute; opacity: 0; pointer-events: none; }
+.pay-method svg { width: 18px; height: 18px; flex: none; color: var(--text-3); }
+.pay-method > span { display: grid; gap: 1px; min-width: 0; }
+.pay-method .subtle { font-size: 0.8rem; }
+.pay-method:hover { border-color: var(--bronze-text); }
+.pay-method:has(input:checked) { border-color: var(--bronze-text); background: var(--bronze-soft); box-shadow: inset 0 0 0 1px var(--bronze-text); }
+.pay-method:has(input:checked) svg { color: var(--bronze-text); }
+.pay-method:has(input:focus-visible) { box-shadow: var(--focus-ring); }
+.pay-method.is-empty { cursor: not-allowed; opacity: 0.55; filter: grayscale(1); }
+.pay-method.is-empty:hover { border-color: var(--border); }
+.form-row:has(.pay-methods) { display: grid; grid-template-columns: minmax(0, 1fr); }
