@@ -1,10 +1,11 @@
-// « Recettes »: the money received in the period, by type, then every recette, newest first, and the total. A sale
-// paid with the member's card stays listed, its amount muted: that money was received with the recharge.
+// « Recettes »: the money received in the period, grouped by nature (subscriptions, sales, card recharges…), each
+// group folding its recettes, newest first, then one total. What the member's card paid comes apart, muted: that
+// money was received with the recharge.
 import { Link } from 'react-router-dom';
 import Icon from '../ui/Icon.jsx';
 import { DemoChip } from '../ui/ui.jsx';
 import { CashRow, EntryCancel, TotalLine, metaLine } from './CashRow.jsx';
-import { cashOf, onAccount, paymentAdds, receiptSummary } from './flows.js';
+import { cancelledBy, cashOf, onAccount, paymentAdds, receiptSummary, saleCashByAccount } from './flows.js';
 import { bizDayOf, entryWhen, whenText } from './when.js';
 import { formatTicketNumber } from '../../../shared/ticket.js';
 import { money, paymentPurpose } from '../../lib/format.js';
@@ -29,6 +30,28 @@ function receiptRows(journal, entries, method, oneDay) {
     }),
   ];
   return rows.sort((x, y) => y.ms - x.ms);
+}
+
+// The groups, in this order. A row's nature, and what it counts in the total, as receiptSummary counts it, so the
+// groups add up to the total.
+const GROUPS = [['abonnement', 'Abonnements'], ['vente', 'Ventes et réservations'], ['repas', 'Repas extérieurs'],
+  ['recharge', 'Recharges cartes'], ['entree', 'Entrées diverses'], ['refund', 'Remboursements']];
+
+function natureOf(row) {
+  if (row.type === 'entry') return 'entree';
+  if (row.type === 'refund') return cashOf(row.r) === 0 ? 'card' : 'refund';
+  const { p } = row;
+  if (cashOf(p) === 0) return 'card';
+  return ['abonnement', 'recharge', 'repas'].includes(p.kind) ? p.kind : 'vente';
+}
+
+function countedOf(row, to) {
+  if (row.type === 'entry') return row.e.status === 'active' ? row.e.amount : 0;
+  if (row.type === 'refund') return -cashOf(row.r);
+  const { p } = row;
+  if (p.kind === 'recharge') return paymentAdds(p, to, bizDayOf);
+  if (p.kind === 'repas') return cancelledBy(p, to, bizDayOf) ? 0 : cashOf(p);
+  return Object.values(saleCashByAccount(p)).reduce((a, b) => a + b, 0);
 }
 
 function Row({ row, to, isAdmin, onChange }) {
@@ -78,6 +101,12 @@ export default function ReceiptsBlock({ journal, entries, method = '', oneDay, i
   const to = journal.to ?? journal.from;
   const sum = receiptSummary(journal, entries, { method, to, dayOf: bizDayOf });
   const rows = receiptRows(journal, entries, method, oneDay);
+  const groups = GROUPS.map(([nature, label]) => {
+    const list = rows.filter((row) => natureOf(row) === nature);
+    return { nature, label, list, amount: list.reduce((s, row) => s + countedOf(row, to), 0) };
+  }).filter((g) => g.list.length);
+  const byCard = rows.filter((row) => natureOf(row) === 'card');
+  const rowList = (list) => <div className="list">{list.map((row) => <Row key={row.key} row={row} to={to} isAdmin={isAdmin} onChange={onChange} />)}</div>;
   return (
     <section className="card cash-block" id="caisse-recettes" aria-labelledby="caisse-recettes-title">
       <div className="card-head">
@@ -86,19 +115,27 @@ export default function ReceiptsBlock({ journal, entries, method = '', oneDay, i
       </div>
       {rows.length ? (
         <>
-          <dl className="calc cash-summary">
-            {sum.lines.filter(([, v]) => v).map(([label, v, account]) => (
-              <div key={label}><dt>{account && <i className={`dot dot-${account}`} />} {label}</dt><dd>{money(v)}</dd></div>
-            ))}
-            {sum.refunds > 0 && <div><dt>Remboursements</dt><dd>−{money(sum.refunds)}</dd></div>}
-            <div className="total"><dt>Total des recettes</dt><dd>{money(sum.total)}</dd></div>
-          </dl>
-          {sum.card > 0 && (
-            <p className="subtle cash-note">Payé par carte membre : {money(sum.card)} — déjà encaissé lors de l’approvisionnement, non compté.</p>
+          {groups.length > 0 && <h3 className="sub-section-title cash-group-title">Argent reçu</h3>}
+          {groups.map((g) => (
+            <details key={g.nature} className="cash-group" open>
+              <summary>
+                <span>{g.label} <span className="subtle">({g.list.length})</span></span>
+                <span className="num">{g.amount < 0 ? '−' : ''}{money(Math.abs(g.amount))}</span>
+              </summary>
+              {rowList(g.list)}
+            </details>
+          ))}
+          <TotalLine label="Total encaissé" amount={sum.total} />
+          {byCard.length > 0 && (
+            <details className="cash-group cash-group-card">
+              <summary>
+                <span><Icon name="card" /> Payé par carte membre, non compté <span className="subtle">({byCard.length})</span></span>
+                <span className="num">{money(sum.card)}</span>
+              </summary>
+              <p className="subtle cash-note">Déjà encaissé lors de l’approvisionnement de la carte.</p>
+              {rowList(byCard)}
+            </details>
           )}
-          <h3 className="sub-section-title cash-list-title">Détail ({rows.length})</h3>
-          <div className="list">{rows.map((row) => <Row key={row.key} row={row} to={to} isAdmin={isAdmin} onChange={onChange} />)}</div>
-          <TotalLine label="Total des recettes" amount={sum.total} />
         </>
       ) : <p className="subtle">Aucune recette sur la période.</p>}
     </section>
