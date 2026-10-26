@@ -3,10 +3,9 @@ import Icon from '../components/ui/Icon.jsx';
 import { Chip, Empty, Loaded, Notice, PageHead, StocksTabs } from '../components/ui/ui.jsx';
 import { actionDialog } from '../components/ui/Modal.jsx';
 import { api, newKey } from '../lib/api.js';
-import { useLoad, useBusy } from '../lib/hooks.js';
+import { useLoad } from '../lib/hooks.js';
 import { dateTime, parts } from '../lib/format.js';
 import { useIsAdmin } from '../store/useStore.js';
-import { writeWorkbook } from '../utils/exportExcel.js';
 import { openHumidorForm, openReadingForm } from '../dialogs/loungeDialogs.jsx';
 
 const decimal = (v) => v == null ? '—' : new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 }).format(v);
@@ -103,7 +102,6 @@ export function HumidorPage() {
   const { id } = useParams();
   const admin = useIsAdmin();
   const state = useLoad(() => api.get(`/api/humidors/${id}`), [id], { refreshMs: 60000 });
-  const { busy, run } = useBusy();
   const cancel = (reading) => {
     const key = newKey();
     actionDialog({ title: 'Annuler ce relevé', message: `${dateTime(reading.measured_at)} · ${decimal(reading.humidity)} % · ${decimal(reading.temperature)} °C. Le relevé et le motif resteront dans l’historique.`,
@@ -129,12 +127,7 @@ export function HumidorPage() {
       <div className="reading-charts"><ReadingChart h={h} field="humidity" label="Humidité" unit="% HR" /><ReadingChart h={h} field="temperature" label="Température" unit="°C" /></div>
     </section>
     <section className="card section-gap">
-      <div className="card-head"><div><h2>Journal des contrôles</h2><p className="subtle">Les 60 derniers relevés, annulations comprises.</p></div>
-        <button type="button" className="btn btn-sm" disabled={busy || !h.readings.length} onClick={() => run(() => writeWorkbook([{
-          sheet: 'Relevés', header: ['Date', 'Cave', 'Humidité (%)', 'Température (°C)', 'Observation', 'Par', 'Annulé le', 'Motif'],
-          rows: h.readings.map((r) => [dateTime(r.measured_at), h.name, r.humidity, r.temperature, r.notes ?? '', r.created_by_name, r.voided_at ? dateTime(r.voided_at) : '', r.void_reason ?? '']),
-        }], `cave-${h.id}-releves.xlsx`))}><Icon name="download" /> Exporter</button>
-      </div>
+      <div className="card-head"><div><h2>Journal des contrôles</h2><p className="subtle">Les 60 derniers relevés, annulations comprises.</p></div></div>
       {h.readings.length ? <div className="table-wrap"><table className="table stack-sm"><thead><tr><th>Date & opérateur</th><th>Humidité</th><th>Température</th><th>Observation</th>{admin && <th><span className="sr-only">Actions</span></th>}</tr></thead>
         <tbody>{h.readings.map((r) => <tr key={r.id} className={r.voided_at ? 'is-muted' : ''}>
           <td data-label="Date"><strong>{dateTime(r.measured_at)}</strong><div className="subtle">{r.created_by_name}</div></td>

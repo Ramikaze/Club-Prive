@@ -1,11 +1,8 @@
 // The quiet part of the cash page, under the three blocks: what is left to collect, and (administrators) the
-// sub-account details, the payment methods and the exports, folded in one « Détails et exports ».
+// sub-account details and the payment methods, folded in one « Détails ».
 import { Link } from 'react-router-dom';
 import Icon from '../ui/Icon.jsx';
-import { api, qs } from '../../lib/api.js';
 import { ACCOUNT_LABEL, money } from '../../lib/format.js';
-import { useBusy } from '../../lib/hooks.js';
-import { downloadExcel } from '../../utils/exportExcel.js';
 import { openPaymentDialog } from '../../dialogs/index.js';
 
 function Ventilation({ byAccount }) {
@@ -52,52 +49,22 @@ function AccountCard({ a, total = false }) {
   );
 }
 
-const EXPORTS = [['synthese', 'Synthèse'], ['lignes', 'Lignes facturées'], ['encaissements', 'Encaissements'],
-  ['remboursements', 'Remboursements'], ['reservations', 'Réservations'], ['operations', 'Dépenses et opérations'],
-  ['stock', 'Mouvements de stock']];
-
-export function DetailsAndExports({ sum, from, to, account, onAccount, currency }) {
-  const excel = useBusy();
-  const csv = useBusy();
-  const exportLink = (kind, label) => (
-    <span key={kind} className="row">
-      <button type="button" className="btn btn-sm" disabled={csv.busy} aria-busy={csv.busy}
-        onClick={() => csv.run(() => api.download(`/api/export/${kind}${qs({ from, to, account })}`))}>
-        <Icon name="download" /> {label}</button>
-      <button type="button" className="btn btn-sm" title={`${label} (Excel)`} disabled={excel.busy} aria-busy={excel.busy}
-        onClick={() => excel.run(() => downloadExcel([{ kind, params: { from, to, account } }]))}>
-        <Icon name="excel" /> Excel<span className="sr-only"> : {label}</span></button>
-    </span>
-  );
+export function Details({ sum }) {
   return (
     <details className="card cash-details">
-      <summary>Détails et exports</summary>
+      <summary>Détails</summary>
       <h3 className="sub-section-title cash-list-title">Par sous-compte</h3>
       <div className="account-cards">
         {sum.accounts.map((a) => <AccountCard key={a.account} a={a} />)}
         <AccountCard a={sum.total} total />
       </div>
-      <div className="grid-2 section-gap">
-        <div>
-          <h3 className="sub-section-title">Par moyen de paiement</h3>
+      <div className="section-gap">
+        <h3 className="sub-section-title">Par moyen de paiement</h3>
           {sum.methods.length ? (
             <dl className="calc">{sum.methods.map((x) => (
               <div key={x.method}><dt>{x.method} <span className="subtle">({x.n})</span></dt><dd>{money(x.total)}</dd></div>
             ))}</dl>
           ) : <p className="subtle">Aucun encaissement sur la période.</p>}
-        </div>
-        <div>
-          <h3 className="sub-section-title">Exports CSV</h3>
-          <div className="form-grid">
-            <label className="field"><span>Sous-compte</span>
-              <select value={account} onChange={(e) => onAccount(e.target.value)}>
-                <option value="">Tous les sous-comptes</option>
-                {Object.entries(ACCOUNT_LABEL).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
-              </select></label>
-            <div className="row">{EXPORTS.map(([kind, label]) => exportLink(kind, label))}</div>
-            <p className="subtle">Format CSV (séparateur « ; »), lisible dans Excel ou LibreOffice. Les montants sont exprimés en {currency}.</p>
-          </div>
-        </div>
       </div>
     </details>
   );

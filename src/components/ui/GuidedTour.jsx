@@ -78,7 +78,7 @@ const STEPS = [
   {
     route: '/caisse', targets: ['#caisse-recettes', '[data-tour="cash"]'], icon: 'wallet', title: 'Caisse',
     body: 'Une seule page : les soldes, puis les recettes et les dépenses de la période, chacune détaillée avec son total. Les recettes sont ventilées exactement entre Réservations, Alcool et Cigares.',
-    features: ['Notes ouvertes encaissées ligne par ligne, en totalité', 'Remboursement tracé avec son motif', 'Détails et exports CSV et Excel en bas de page'],
+    features: ['Notes ouvertes encaissées ligne par ligne, en totalité', 'Remboursement tracé avec son motif', 'Détails par sous-compte en bas de page'],
   },
   {
     route: '/caisse', targets: ['[data-tour="cash"] .actions .btn-primary', '[data-tour="cash"]'], icon: 'receipt', title: 'Nouvelle dépense',
@@ -102,7 +102,7 @@ const STEPS = [
   },
   {
     admin: true, route: '/grand-livre', targets: ['[data-tour="ledger"]'], icon: 'book', title: 'Grand livre',
-    body: 'Tous les mouvements de trésorerie dans l’ordre, avec le solde courant. Filtrez par compte ou par sous-compte ; exportez en CSV ou Excel.',
+    body: 'Tous les mouvements de trésorerie dans l’ordre, avec le solde courant. Filtrez par compte ou par sous-compte.',
   },
   {
     admin: true, route: '/cloture', targets: ['[data-tour="closing"]'], icon: 'lock', title: 'Clôture mensuelle',

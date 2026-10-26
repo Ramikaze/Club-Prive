@@ -1,6 +1,6 @@
 // The cash desk (/caisse), one page: « Soldes » (administrators), then « Recettes » and « Dépenses » side by side,
 // each with its summary, its detailed list and its total, and under them what is left to collect, the transfers
-// and the folded details and exports. The manager sees the day only, without the balances (treasury is the
+// and the folded details. The manager sees the day only, without the balances (treasury is the
 // administrators'), and records the day's expenses within his cap.
 import { useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -13,12 +13,11 @@ import CashBalance from '../components/cash/CashBalance.jsx';
 import CountDialog from '../components/cash/CountDialog.jsx';
 import ReceiptsBlock from '../components/cash/ReceiptsBlock.jsx';
 import ExpensesBlock, { TransfersBlock } from '../components/cash/ExpensesBlock.jsx';
-import { DetailsAndExports, OpenNotes } from '../components/cash/CashDetails.jsx';
+import { Details, OpenNotes } from '../components/cash/CashDetails.jsx';
 import { api, qs } from '../lib/api.js';
 import { ACCOUNT_LABEL, bizToday, dayLabel } from '../lib/format.js';
-import { useBusy, useLoad } from '../lib/hooks.js';
+import { useLoad } from '../lib/hooks.js';
 import { useIsAdmin, useSettings } from '../store/useStore.js';
-import { downloadExcel } from '../utils/exportExcel.js';
 import { isValidDate } from '../../shared/time.js';
 import { CARD_METHOD } from '../../shared/rules.js';
 
@@ -69,10 +68,6 @@ function AdminCash() {
   const settings = useSettings();
   const period = useCashPeriod();
   const { from, to } = period;
-  // The sub-account of the CSV exports, and the treasury account the whole page shows (all of them by default).
-  const sub = period.params.get('sous_compte');
-  const account = Object.hasOwn(ACCOUNT_LABEL, sub ?? '') ? sub : '';
-  const excel = useBusy();
   const state = useLoad(async () => {
     const [sum, journal, open, ledger, categories, treasury] = await Promise.all([
       api.get(`/api/finance/summary${qs({ from, to })}`),
@@ -93,7 +88,6 @@ function AdminCash() {
 
   const add = (kind) => openDialog(EntryDialog, { kind, categories: state.data?.categories ?? [], onDone: state.reload });
   const count = () => openDialog(CountDialog, { method, onDone: state.reload });
-  const params = { from, to };
   const oneDay = from === to;
 
   return (
@@ -107,11 +101,6 @@ function AdminCash() {
             <button type="button" className="btn btn-sm btn-ghost" disabled={!state.data} onClick={() => add('recette')}><Icon name="plus" /> Entrée diverse</button>
             <button type="button" className="btn btn-sm btn-ghost" disabled={!state.data} onClick={() => add('transfert')}><Icon name="transfer" /> Transfert</button>
             <Link className="btn btn-sm btn-ghost" to="/caisse/historique-tickets"><Icon name="receipt" /> Historique des tickets</Link>
-            <button type="button" className="btn btn-sm btn-ghost" disabled={excel.busy} aria-busy={excel.busy} title="Synthèse, encaissements, remboursements et opérations de la période"
-              onClick={() => excel.run(() => downloadExcel([
-                { kind: 'synthese', params }, { kind: 'encaissements', params }, { kind: 'remboursements', params }, { kind: 'operations', params },
-              ], `caisse_${from}_${to}.xlsx`))}>
-              <Icon name="excel" /> Excel</button>
             <button type="button" className="btn btn-primary" disabled={!state.data} onClick={() => add('depense')}><Icon name="plus" /> Nouvelle dépense</button>
           </>
         )}
@@ -135,8 +124,7 @@ function AdminCash() {
           </div>
           <OpenNotes groups={d.open} onDone={state.reload} allPeriods />
           <TransfersBlock entries={d.entries} method={method} oneDay={oneDay} isAdmin onChange={state.reload} />
-          <DetailsAndExports sum={d.sum} from={from} to={to} account={account} currency={settings.currency.label}
-            onAccount={(k) => period.setParam('sous_compte', k)} />
+          <Details sum={d.sum} />
         </div>
       )}</Loaded>
     </>
