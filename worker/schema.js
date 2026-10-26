@@ -648,7 +648,18 @@ const V16 = [
   'CREATE INDEX reservation_attendees_member ON reservation_attendees(member_id, reservation_id)',
 ];
 
-export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16];
+// The evening closing of the cash desk: a closed business day refuses any new or cancelled money movement dated on
+// it, as a closed month does. The summary keeps the counts, the gaps and the tickets left unchecked, with their reasons.
+const V17 = [
+  `CREATE TABLE day_closings (
+    biz_day TEXT PRIMARY KEY,
+    closed_at TEXT NOT NULL,
+    closed_by INTEGER REFERENCES users(id),
+    summary TEXT NOT NULL
+  )`,
+];
+
+export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17];
 
 export function migrate(db) {
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');

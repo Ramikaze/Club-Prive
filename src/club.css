@@ -1099,6 +1099,29 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .cash-details > summary { cursor: pointer; font-weight: 600; color: var(--text-2); padding: 4px 0; }
 .cash-details > summary:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 6px; }
 
+/* The evening closing of the till: the bar on the cash page and the three-step dialog. */
+.close-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-top: 12px; padding-bottom: 12px; }
+.close-bar > span { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.close-bar svg { width: 18px; height: 18px; flex: none; }
+.close-bar.is-closed { background: var(--bronze-soft); color: var(--bronze-text); }
+.close-steps { display: flex; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.close-steps li { flex: 1; display: inline-flex; justify-content: center; align-items: center; gap: 4px; padding: 5px 0; border-radius: var(--radius-sm); background: var(--surface-2, rgba(0,0,0,.04)); color: var(--text-3); font-size: 0.85rem; font-weight: 600; }
+.close-steps li.current { background: var(--bronze-soft); color: var(--bronze-text); }
+.close-steps li.done { color: var(--ok); }
+.close-steps svg { width: 14px; height: 14px; }
+.close-tickets { max-height: 45vh; overflow: auto; }
+.close-ticket { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+.close-ticket input { margin-top: 3px; }
+.close-ticket.is-open .title { color: var(--warn, #b26b00); }
+.close-account { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; margin: 0; }
+.close-account legend { display: inline-flex; align-items: center; gap: 6px; font-weight: 650; padding: 0 4px; }
+.close-account legend svg { width: 16px; height: 16px; }
+.close-notes { display: grid; gap: 6px; }
+.close-note { display: grid; grid-template-columns: 120px 90px 1fr; align-items: center; gap: 10px; }
+.close-note > span:first-child { white-space: nowrap; }
+.close-note input { text-align: right; }
+.close-figures { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; font-size: 0.9rem; }
+
 /* Agenda day view: the timeline and, beside it, the day's bookings. */
 .day-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); gap: 16px; align-items: start; }
 .day-side { display: flex; flex-direction: column; gap: 16px; position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; }
