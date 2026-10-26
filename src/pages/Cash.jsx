@@ -14,6 +14,7 @@ import CountDialog from '../components/cash/CountDialog.jsx';
 import ReceiptsBlock from '../components/cash/ReceiptsBlock.jsx';
 import ExpensesBlock, { TransfersBlock } from '../components/cash/ExpensesBlock.jsx';
 import { Details, OpenNotes } from '../components/cash/CashDetails.jsx';
+import { DayClosingBar } from '../components/cash/CloseDay.jsx';
 import { api, qs } from '../lib/api.js';
 import { ACCOUNT_LABEL, bizToday, dayLabel } from '../lib/format.js';
 import { useLoad } from '../lib/hooks.js';
@@ -115,6 +116,7 @@ function AdminCash() {
       </div>
       <Loaded state={state}>{(d) => (
         <div className="cash-page">
+          <DayClosingBar isAdmin onChange={state.reload} />
           <CashBalance t={d.treasury} method={method} entries={d.entries} journal={d.journal} openingBalances={settings.opening_balances} onCount={count} />
           <div className="cash-columns">
             <div className="cash-columns-inner">
@@ -153,6 +155,7 @@ function ManagerCash() {
       </div>
       <Loaded state={state}>{(d) => (
         <div className="cash-page">
+          <DayClosingBar isAdmin={false} onChange={state.reload} />
           <div className="cash-columns">
             <div className="cash-columns-inner">
               <ReceiptsBlock journal={d.journal} entries={d.entries} oneDay isAdmin={false} onChange={state.reload} title="Recettes du jour" />

@@ -51,6 +51,9 @@ export const ledgerMethods = {
         `${what} tombe en ${monthLabel(day.slice(0, 7))}, une période clôturée. Un administrateur doit d'abord la rouvrir.`,
       );
     }
+    if (this.get('SELECT 1 AS x FROM day_closings WHERE biz_day = ?', day)) {
+      throw conflict('JOURNEE_FERMEE', `${what} tombe le ${day.split('-').reverse().join('/')}, une journée dont la caisse est fermée. Un administrateur doit d'abord la rouvrir.`);
+    }
   },
 
   normalizeOpeningBalances(v, current) {
@@ -401,15 +404,91 @@ export const ledgerMethods = {
     const reason = text(input.reason, 'Motif', { max: 120 }) ?? 'Comptage de caisse';
     const expected = this.treasuryBalances(today, today).accounts.find((a) => a.method === method)?.closing ?? 0;
     const gap = counted - expected;
-    let entry = null;
-    if (gap !== 0) {
-      const kind = gap > 0 ? 'recette' : 'depense';
-      const category = this.get('SELECT id FROM categories WHERE kind = ? AND name = ?', kind, CASH_GAP_CATEGORY);
-      if (!category) throw conflict('CATEGORIE_ECART_ABSENTE', `La catégorie « ${CASH_GAP_CATEGORY} » est introuvable : contactez l'administrateur.`);
-      entry = this.createEntry(actor, { kind, biz_date: today, category_id: category.id, amount: Math.abs(gap), method, label: reason });
-    }
+    const entry = this.recordCashGap(actor, today, method, gap, reason);
     this.audit(actor, 'caisse.compter', 'ledger', entry?.id ?? null, { compte: method, attendu: expected, montant_compte: counted, ecart: gap, motif: reason });
     return { expected, counted, gap, entry_id: entry?.id ?? null, treasury: this.treasury(today, today) };
+  },
+
+  // A gap found counting the till, recorded on its day: a surplus as an other receipt, a shortage as an expense, both
+  // in « Écart de caisse », so that the balance becomes what was counted. The manager closing the till records it
+  // too, above his own limits: it is the till's correction, not an expense of his. No gap, no entry.
+  recordCashGap(actor, day, method, gap, reason) {
+    if (gap === 0) return null;
+    const kind = gap > 0 ? 'recette' : 'depense';
+    const category = this.get('SELECT id FROM categories WHERE kind = ? AND name = ?', kind, CASH_GAP_CATEGORY);
+    if (!category) throw conflict('CATEGORIE_ECART_ABSENTE', `La catégorie « ${CASH_GAP_CATEGORY} » est introuvable : contactez l'administrateur.`);
+    return this.createEntry({ ...actor, role: 'admin' }, { kind, biz_date: day, category_id: category.id, amount: Math.abs(gap), method, label: reason });
+  },
+
+  // ---------------------------------------------------------------- closing the till (evening)
+
+  // The day's tickets to check, by key: the payments (P-), the refunds (R-) and the active entries (E-).
+  dayTickets(day) {
+    const j = this.journal(day, day);
+    const entries = this.all("SELECT id FROM ledger_entries WHERE biz_date = ? AND status = 'active'", day);
+    return [...j.payments.map((p) => `P-${p.id}`), ...j.refunds.map((r) => `R-${r.id}`), ...entries.map((e) => `E-${e.id}`)];
+  },
+
+  // What the closing of a day shows: whether it is closed (and how), and each till and account with the balance the
+  // books expect at the end of the day. An account with neither balance nor movement has nothing to count.
+  dayClosing(day) {
+    const d = day ?? this.bizToday();
+    if (!isValidDate(d)) throw invalid('Date invalide.');
+    const row = this.get('SELECT dc.*, u.name AS closed_by_name FROM day_closings dc LEFT JOIN users u ON u.id = dc.closed_by WHERE dc.biz_day = ?', d);
+    const accounts = this.treasuryBalances(d, d).accounts
+      .map((a) => ({ method: a.method, expected: a.closing, in: a.in, out: a.out, to_count: a.closing !== 0 || a.in !== 0 || a.out !== 0 }));
+    return {
+      day: d, today: this.bizToday(), accounts,
+      closed: row ? { closed_at: row.closed_at, closed_by_name: row.closed_by_name ?? null, summary: JSON.parse(row.summary) } : null,
+    };
+  },
+
+  // Closes the till of a day (today or a past day left open): every ticket checked, or a reason for those left; every
+  // account to count counted, the gaps recorded as when counting the till, with a reason when there is one. Then the
+  // day is locked: no money movement dated on it until an administrator reopens it.
+  closeDay(actor, input) {
+    const day = input.day ?? this.bizToday();
+    if (!isValidDate(day)) throw invalid('Date invalide.');
+    if (day > this.bizToday()) throw invalid('Seule une journée commencée peut être fermée.');
+    if (this.get('SELECT 1 AS x FROM day_closings WHERE biz_day = ?', day)) {
+      throw conflict('DEJA_FERMEE', 'La caisse de cette journée est déjà fermée.');
+    }
+    this.assertOpen(day, 'Cette fermeture');
+    const tickets = this.dayTickets(day);
+    const checked = new Set(Array.isArray(input.checked) ? input.checked.map(String) : []);
+    const unchecked = tickets.filter((k) => !checked.has(k));
+    const uncheckedReason = unchecked.length ? text(input.unchecked_reason, 'Motif des tickets non pointés', { required: true, min: 3, max: 300 }) : null;
+    const counts = input.counts && typeof input.counts === 'object' && !Array.isArray(input.counts) ? input.counts : {};
+    const lines = this.dayClosing(day).accounts.flatMap((a) => {
+      if (!a.to_count && (counts[a.method] === undefined || counts[a.method] === null || counts[a.method] === '')) return [];
+      const counted = int(counts[a.method], `Montant compté (${a.method})`, { min: 0, max: 1e13 });
+      return [{ method: a.method, expected: a.expected, counted, gap: counted - a.expected }];
+    });
+    const gapReason = lines.some((l) => l.gap !== 0) ? text(input.gap_reason, "Motif de l'écart", { required: true, min: 3, max: 300 }) : null;
+    const detail = {};
+    for (const [k, v] of Object.entries(input.cash_detail && typeof input.cash_detail === 'object' ? input.cash_detail : {})) {
+      detail[text(k, 'Billetage', { required: true, max: 20 })] = int(v ?? 0, 'Billetage', { min: 0, max: 1e13 });
+    }
+    for (const l of lines) l.entry_id = this.recordCashGap(actor, day, l.method, l.gap, `Fermeture de caisse : ${gapReason}`)?.id ?? null;
+    const summary = {
+      accounts: lines, cash_detail: detail, gap_reason: gapReason,
+      tickets: tickets.length, unchecked, unchecked_reason: uncheckedReason,
+    };
+    this.run('INSERT INTO day_closings (biz_day, closed_at, closed_by, summary) VALUES (?, ?, ?, ?)', day, this.nowIso(), actor.id, JSON.stringify(summary));
+    this.audit(actor, 'caisse.fermer', 'day', null, {
+      jour: day, ecart: lines.reduce((s, l) => s + l.gap, 0), motif_ecart: gapReason, non_pointes: unchecked.length, motif_non_pointes: uncheckedReason,
+    });
+    return this.dayClosing(day);
+  },
+
+  reopenDay(actor, day, input) {
+    if (!isValidDate(day)) throw invalid('Date invalide.');
+    const row = this.get('SELECT * FROM day_closings WHERE biz_day = ?', day);
+    if (!row) throw conflict('NON_FERMEE', "La caisse de cette journée n'est pas fermée.");
+    const reason = text(input.reason, 'Motif de réouverture', { required: true, min: 3, max: 300 });
+    this.run('DELETE FROM day_closings WHERE biz_day = ?', day);
+    this.audit(actor, 'caisse.rouvrir', 'day', null, { jour: day, motif: reason, fermee_le: row.closed_at, synthese_a_la_fermeture: JSON.parse(row.summary) });
+    return this.dayClosing(day);
   },
 
   // ---------------------------------------------------------------- general ledger
