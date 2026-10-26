@@ -1083,6 +1083,18 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .list-item.is-muted .strike { text-decoration: line-through; }
 .cash-quiet { display: flex; align-items: center; gap: 6px; margin: 0; padding: 0 4px; }
 .cash-quiet svg { width: 16px; height: 16px; flex: none; color: var(--ok); }
+.cash-group-title { margin: 4px 0 6px; }
+.cash-group { border-top: 1px solid var(--border); }
+.cash-group > summary { display: flex; justify-content: space-between; gap: 12px; cursor: pointer; padding: 9px 2px; font-weight: 600; list-style: none; }
+.cash-group > summary::-webkit-details-marker { display: none; }
+.cash-group > summary::before { content: '›'; display: inline-block; width: 14px; color: var(--text-3); transition: transform 0.15s; }
+.cash-group[open] > summary::before { transform: rotate(90deg); }
+.cash-group > summary > span:first-child { flex: 1; }
+.cash-group > summary:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 6px; }
+.cash-group > .list { padding-left: 14px; }
+.cash-group-card { margin-top: 14px; border: 1px dashed var(--border); border-radius: var(--radius-sm); padding: 0 10px; color: var(--text-2); }
+.cash-group-card > summary { font-weight: 500; }
+.cash-group-card > summary svg { width: 16px; height: 16px; vertical-align: -3px; }
 .cash-details { padding-top: 14px; padding-bottom: 14px; }
 .cash-details > summary { cursor: pointer; font-weight: 600; color: var(--text-2); padding: 4px 0; }
 .cash-details > summary:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 6px; }
