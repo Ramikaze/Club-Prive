@@ -189,6 +189,9 @@ function DayView({ day, list, now, settings, maxRooms, onSlot }) {
           {slots(day, active, { now, settings, maxRooms, onSlot, from, to })}
           <div className="tl-events">{active.map((r) => <Event key={r.id} r={r} day={day} slotH={slotH} compact={slotH < 24} settings={settings} from={from} />)}</div>
           <NowLine day={day} slotH={slotH} now={now} settings={settings} from={from} to={to} />
+          {active.length === 0 && (
+            <p className="tl-empty"><Icon name="calendar" /> Aucune réservation ce jour. Touchez un créneau pour en créer une.</p>
+          )}
         </div>
         <div className="legend">
           <span><i style={{ background: 'var(--info-soft)', borderLeft: '3px solid var(--info)' }} /> Réservée</span>

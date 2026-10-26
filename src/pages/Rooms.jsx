@@ -271,7 +271,7 @@ export default function Rooms() {
           <>
             <PageHead
               title="Salles & Salons"
-              lead={`${freeCount} salle(s) disponible(s) sur ${roomsStatus.length}${occupiedCount > 0 ? ` · ${occupiedCount} occupée(s) (${totalGuestsNow} personne(s) présente(s))` : ''}`}
+              lead={`${freeCount} ${freeCount > 1 ? 'salles disponibles' : 'salle disponible'} sur ${roomsStatus.length}${occupiedCount > 0 ? ` · ${occupiedCount} ${occupiedCount > 1 ? 'occupées' : 'occupée'} (${totalGuestsNow} ${totalGuestsNow > 1 ? 'personnes présentes' : 'personne présente'})` : ''}`}
               actions={(
                 <>
                   {admin && (
