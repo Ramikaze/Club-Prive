@@ -339,6 +339,8 @@ main:focus { outline: none; }
 .kpis { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 16px; }
 @media (max-width: 699px) { .kpis { grid-template-columns: minmax(0, 1fr); } }
 .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); min-width: 0; }
+.list-go { width: 16px; height: 16px; flex: none; color: var(--text-3); transition: transform 0.15s ease-out, color 0.15s ease-out; }
+a.list-item:hover .list-go { color: var(--text); transform: translateX(2px); }
 .kpi .label { color: var(--text-2); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
 .kpi .value { font-size: 1.45rem; font-weight: 650; margin-top: 4px; font-variant-numeric: tabular-nums; }
 @media (max-width: 599px) { .kpi .value { font-size: 1.15rem; } .kpi { padding: 12px 14px; } }
