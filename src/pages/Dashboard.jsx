@@ -19,6 +19,11 @@ import {
 
 const PERIODS = [['jour', 'Jour'], ['semaine', '7 jours'], ['mois', 'Mois']];
 
+// « 1 produit », « 3 produits »: the counts of the alerts read as French, not « produit(s) ».
+const count = (n, one, many) => `${n} ${n > 1 ? many : one}`;
+// The way into an alert's page, at the end of its row.
+const Go = () => <Icon name="right" className="list-go" aria-hidden="true" />;
+
 function TodaySessionRow({ r, onReload }) {
   return (
     <div className="list-item list-item-interactive">
@@ -258,7 +263,7 @@ export default function Dashboard() {
                           <div className="title">Séances dont l’horaire est dépassé</div>
                           <div className="meta">{d.to_close.map((r) => r.member_name).join(', ')}</div>
                         </div>
-                        <span className="chip chip-warn">{d.to_close.length} à clôturer</span>
+                        <span className="chip chip-warn">{d.to_close.length} à clôturer</span><Go />
                       </Link>
                     )}
                     {d.stock_alerts.length > 0 && (
@@ -267,7 +272,7 @@ export default function Dashboard() {
                           <div className="title">Cigares & bouteilles à réapprovisionner</div>
                           <div className="meta">{d.stock_alerts.slice(0, 3).map((p) => p.name).join(', ')}{d.stock_alerts.length > 3 ? '…' : ''}</div>
                         </div>
-                        <span className="chip chip-danger">{d.stock_alerts.length} produit(s)</span>
+                        <span className="chip chip-danger">{count(d.stock_alerts.length, 'produit', 'produits')}</span><Go />
                       </Link>
                     )}
                     {humidorAlerts > 0 && (
@@ -276,16 +281,19 @@ export default function Dashboard() {
                           <div className="title">Caves à cigares (humidité / température)</div>
                           <div className="meta">Contrôle ou ajustement requis</div>
                         </div>
-                        <span className="chip chip-warn">{humidorAlerts} cave(s)</span>
+                        <span className="chip chip-warn">{count(humidorAlerts, 'cave', 'caves')}</span><Go />
                       </Link>
                     )}
                     {memberAlerts > 0 && (
                       <Link className="list-item" to="/membres">
                         <div className="grow">
                           <div className="title">Abonnements à renouveler</div>
-                          <div className="meta">{d.expired.length} expiré(s) · {d.expiring.length} arrivant à échéance</div>
+                          <div className="meta">{[
+                            d.expired.length && count(d.expired.length, 'expiré', 'expirés'),
+                            d.expiring.length && `${d.expiring.length} arrivant à échéance`,
+                          ].filter(Boolean).join(' · ')}</div>
                         </div>
-                        <span className="chip chip-info">{memberAlerts} membre(s)</span>
+                        <span className="chip chip-info">{count(memberAlerts, 'membre', 'membres')}</span><Go />
                       </Link>
                     )}
                     {totalAlerts === 0 && (
