@@ -7,14 +7,36 @@ import { Modal, actionDialog, openDialog } from '../components/ui/Modal.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import { api, newKey } from '../lib/api.js';
 import { dateTime, money, parseMoney, toMajor } from '../lib/format.js';
-import { useLoad, useSubmit } from '../lib/hooks.js';
+import { useBusy, useLoad, useSubmit } from '../lib/hooks.js';
 import { preparePhoto } from '../lib/photo.js';
 import { useIsAdmin, useSettings, useStore } from '../store/useStore.js';
+import { writeWorkbook } from '../utils/exportExcel.js';
 import { searchable, smartFilter } from '../../shared/search.js';
 
 const CATEGORY = { cigare: 'Cigare', bouteille: 'Bouteille' };
 
 const formValues = (form) => Object.fromEntries(new FormData(form));
+
+// Excel exports, built here from what the page already loaded: the catalogue as listed (category, search and
+// inactive filter applied), and one product's movements.
+const fileSlug = (text) => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '');
+
+function exportCatalogue(products, currency) {
+  return writeWorkbook([{
+    sheet: 'Catalogue',
+    header: ['Référence', 'Produit', 'Catégorie', 'Description', `Prix (${currency})`, 'Stock', 'Seuil d’alerte', 'État'],
+    rows: products.map((p) => [p.reference, p.name, CATEGORY[p.category], p.description ?? '', p.price / 100, p.stock_qty,
+      p.low_stock_threshold, p.active ? 'Actif' : 'Inactif']),
+  }], 'catalogue.xlsx');
+}
+
+function exportHistory(product, rows) {
+  return writeWorkbook([{
+    sheet: 'Mouvements',
+    header: ['Date', 'Mouvement', 'Quantité', 'Stock après', 'Motif', 'Par'],
+    rows: rows.map((mv) => [dateTime(mv.created_at), mv.kind_label, mv.quantity, mv.stock_after, mv.reason ?? '', mv.created_by_name ?? '']),
+  }], `mouvements-${fileSlug(product.reference || product.name)}.xlsx`);
+}
 
 function StockChip({ p }) {
   if (p.stock_qty === 0) return <span className="chip chip-danger">rupture</span>;
@@ -151,10 +173,23 @@ function StockDialog({ close, product, kind, onDone }) {
 
 function HistoryDialog({ close, product }) {
   const { data, error } = useLoad(() => api.get(`/api/stock-movements?product_id=${product.id}&limit=200`), []);
+  const excel = useBusy();
   let content;
   if (error) content = <div className="form-error">{error.message}</div>;
   else if (data === undefined) content = <p className="subtle">Chargement…</p>;
-  else content = <MovementsTable rows={data} withProduct={false} />;
+  else {
+    content = (
+      <>
+        {data.length > 0 && (
+          <div className="row" style={{ justifyContent: 'flex-end', marginBottom: 12 }}>
+            <button type="button" className="btn btn-sm" disabled={excel.busy} aria-busy={excel.busy}
+              onClick={() => excel.run(() => exportHistory(product, data))}><Icon name="excel" /> Exporter en Excel</button>
+          </div>
+        )}
+        <MovementsTable rows={data} withProduct={false} />
+      </>
+    );
+  }
   return <Modal title={`Mouvements — ${product.name}`} size="wide" onClose={close}>{content}</Modal>;
 }
 
@@ -244,6 +279,8 @@ const historyDialog = (product) => openDialog(HistoryDialog, { product });
 
 export default function Products() {
   const admin = useIsAdmin();
+  const settings = useSettings();
+  const excel = useBusy();
   const [searchParams, setSearchParams] = useSearchParams();
   const catParam = searchParams.get('cat');
   const cat = ['cigare', 'bouteille'].includes(catParam) ? catParam : '';
@@ -270,7 +307,13 @@ export default function Products() {
           <PageHead
             title="Catalogue & Stocks"
             lead="Cigares et bouteilles du club."
-            actions={admin ? <button type="button" className="btn btn-primary" onClick={() => productDialog(null, reload)}><Icon name="plus" /> Nouveau produit</button> : null}
+            actions={(
+              <>
+                <button type="button" className="btn" disabled={excel.busy || !list.length} aria-busy={excel.busy}
+                  onClick={() => excel.run(() => exportCatalogue(list, settings.currency.label))}><Icon name="excel" /> Exporter en Excel</button>
+                {admin && <button type="button" className="btn btn-primary" onClick={() => productDialog(null, reload)}><Icon name="plus" /> Nouveau produit</button>}
+              </>
+            )}
             tour="products"
           />
           <div className="toolbar">
