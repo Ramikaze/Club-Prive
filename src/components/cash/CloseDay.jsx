@@ -37,7 +37,7 @@ function dayTickets(journal, entries) {
 const Steps = ({ step }) => (
   <ol className="close-steps">
     {['Tickets', 'Compter', 'Valider'].map((label, i) => (
-      <li key={label} className={i < step ? 'done' : i === step ? 'current' : ''}>{i < step ? <Icon name="check" /> : i + 1} {label}</li>
+      <li key={label} className={i < step ? 'done' : i === step ? 'current' : ''} aria-current={i === step ? 'step' : undefined}>{i < step ? <Icon name="check" /> : i + 1} {label}</li>
     ))}
   </ol>
 );
@@ -140,8 +140,11 @@ function Wizard({ close, day, data, onDone }) {
       {step === 1 && (
         <>
           {lines.length ? lines.map((l) => (
-            <fieldset key={l.method} className="close-account">
-              <legend><Icon name={isCash(l.method) ? 'cash' : 'bank'} /> {l.method}</legend>
+            <section key={l.method} className="close-account" aria-label={l.method}>
+              <div className="close-account-head">
+                <h3><Icon name={isCash(l.method) ? 'cash' : 'bank'} /> {l.method}</h3>
+                {l.gap !== null && <span className={`chip ${l.gap === 0 ? 'chip-ok' : 'chip-danger'}`}>{l.gap === 0 ? 'juste' : gapText(l.gap)}</span>}
+              </div>
               {isCash(l.method) ? (
                 <div className="close-notes">
                   {NOTES.map((n) => (
@@ -159,10 +162,14 @@ function Wizard({ close, day, data, onDone }) {
               <div className="close-figures">
                 <span>Compté <strong>{l.counted === null ? '—' : money(l.counted)}</strong></span>
                 <span>Attendu <strong>{money(l.expected)}</strong></span>
-                {l.gap !== null && <span className={l.gap > 0 ? 'amount-in' : l.gap < 0 ? 'amount-out' : ''}>{gapText(l.gap)}</span>}
               </div>
-            </fieldset>
+            </section>
           )) : <p className="subtle">Aucune caisse ni compte à compter aujourd’hui.</p>}
+          {lines.length > 0 && (
+            <dl className="calc" aria-live="polite">
+              <div className="total"><dt>Écart total</dt><dd>{lines.some((l) => l.gap === null) ? '—' : gapText(totalGap)}</dd></div>
+            </dl>
+          )}
         </>
       )}
       {step === 2 && (
