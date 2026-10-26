@@ -2260,12 +2260,14 @@ export class Club {
     return this.reservationDetail(r.id);
   }
 
-  finishReservation(actor, id) {
+  // `input.left_time` (HH:MM, optional): when the member left, for a « Terminé » pressed late. The overrun is
+  // counted up to it rather than up to now, so a forgotten button bills nothing that did not happen.
+  finishReservation(actor, id, input = {}) {
     const r = this.reservationRow(id);
     if (!['reservee', 'en_cours'].includes(r.status)) {
       throw conflict('STATUT', `Impossible de terminer une réservation au statut « ${RES_STATUS[r.status]} ».`);
     }
-    if (r.status === 'en_cours') this.recordOvertime(actor, r);
+    if (r.status === 'en_cours') this.recordOvertime(actor, r, this.departureMs(r, input.left_time));
     // A booking without a plan has no minutes of its holder to consume.
     const open = r.subscription_id ? this.committedFor(r.id, r.subscription_id) : 0;
     // Only the holder's minutes are consumed: the members present were never debited.
@@ -2276,6 +2278,87 @@ export class Club {
     );
     this.audit(actor, 'reservation.terminer', 'reservation', r.id, { minutes_consommees: open });
     return this.reservationDetail(r.id);
+  }
+
+  // « Terminé » pressed late, already recorded: an administrator gives the time the member really left. The
+  // overrun recorded at the exit is undone (its credit minutes go back to the plan, what the card paid goes back to
+  // the card, what was paid otherwise is refunded through `input.method`, what was left to collect is cancelled),
+  // then the overrun up to that time, if any, is recorded again as at the exit. Only the last exit's overrun, once.
+  correctDeparture(actor, id, input = {}) {
+    if (actor.role !== 'admin') throw forbidden("Seul un administrateur peut corriger l'heure de départ.");
+    const r = this.reservationRow(id);
+    if (r.status !== 'terminee') throw conflict('STATUT', "Seule une séance terminée peut voir son heure de départ corrigée.");
+    const overrun = this.get(
+      "SELECT id, details FROM audit_log WHERE entity = 'reservation' AND entity_id = ? AND action = 'reservation.depassement' ORDER BY id DESC LIMIT 1",
+      r.id,
+    );
+    const corrected = this.get(
+      "SELECT MAX(id) AS id FROM audit_log WHERE entity = 'reservation' AND entity_id = ? AND action = 'reservation.corriger_depart'", r.id,
+    ).id;
+    if (!overrun || (corrected && corrected > overrun.id)) {
+      throw conflict('AUCUN_DEPASSEMENT', 'Aucun dépassement enregistré à la sortie : rien à corriger.');
+    }
+    const d = JSON.parse(overrun.details);
+    const leftMs = this.departureMs(r, input.left_time);
+    const reason = `Heure de départ corrigée : ${input.left_time}`;
+    let method = null;
+    const lines = this.all(
+      "SELECT * FROM charges WHERE reservation_id = ? AND kind = 'temps_supplementaire' AND label LIKE 'Dépassement +%' AND status IN ('due', 'payee')",
+      r.id,
+    );
+    for (const c of lines) {
+      if (c.status === 'due') {
+        this.voidCharge(actor, c, reason);
+        continue;
+      }
+      const { payment, cardPart } = this.cardPartOf(c);
+      if (cardPart < c.amount && !method) {
+        method = text(input.method ?? CASH_METHOD, 'Moyen de remboursement', { required: true, max: 40 });
+        if (!this.settings().payment_methods.includes(method)) throw invalid('Moyen de paiement non configuré.');
+      }
+      this.writeRefund(actor, c, payment, cardPart, { method: cardPart < c.amount ? method : CARD_METHOD, reason });
+    }
+    if (d.minutes_incluses > 0) {
+      this.creditMove(actor, r.subscription_id, r.id, 'liberation', d.minutes_incluses, reason);
+      this.creditMove(actor, r.subscription_id, r.id, 'consommation', -d.minutes_incluses, reason);
+    }
+    this.run(
+      `UPDATE reservations SET end_ms = ?, duration_min = duration_min - ?, included_minutes = included_minutes - ?,
+         paid_minutes = paid_minutes - ?, supplement_amount = supplement_amount - ?, updated_at = ?, updated_by = ?
+       WHERE id = ?`,
+      Date.parse(d.ancienne_fin), d.minutes, d.minutes_incluses, d.minutes_payantes, d.montant, this.nowIso(), actor.id, r.id,
+    );
+    const restored = this.reservationRow(r.id);
+    this.recordOvertime(actor, restored, leftMs);
+    const open = r.subscription_id ? this.committedFor(r.id, r.subscription_id) : 0;
+    if (open) this.creditMove(actor, r.subscription_id, r.id, 'consommation', open, reason);
+    const { timezone: tz } = this.settings();
+    const now = this.reservationRow(r.id);
+    this.audit(actor, 'reservation.corriger_depart', 'reservation', r.id, {
+      depart: localParts(leftMs, tz).time, minutes_annulees: d.minutes, montant_annule: d.montant,
+      minutes: Math.round((now.end_ms - restored.end_ms) / 60000), nouvelle_fin: new Date(now.end_ms).toISOString(),
+    });
+    return this.reservationDetail(r.id);
+  }
+
+  // The instant a member left, from a bare time: its first occurrence from the arrival on (01:10 after an
+  // arrival at 23:00 is that night's), so a session forgotten for days still ends on its own day. It must lie
+  // between the arrival and both now and the club's closing time. Without a time, now.
+  departureMs(r, time) {
+    if (time == null || time === '') return this.nowMs();
+    if (parseHHMM(time) === null) throw invalid('Heure de départ invalide (format HH:MM).');
+    const { timezone: tz } = this.settings();
+    const arrival = Date.parse(r.started_at);
+    const day = localParts(arrival, tz).date;
+    let ms = localToUtcMs(day, time, tz);
+    // The arrival is recorded to the second, the departure to the minute: the arrival's own minute is allowed.
+    if (ms < arrival - 60000) ms = localToUtcMs(addDays(day, 1), time, tz);
+    const closing = this.closingMs(r.biz_day);
+    if (ms > this.nowMs() || ms > closing) {
+      throw invalid(`L'heure de départ doit être entre l'arrivée (${localParts(arrival, tz).time}) et ${
+        this.nowMs() < closing ? 'maintenant' : `la fermeture (${localParts(closing, tz).time})`}.`);
+    }
+    return ms;
   }
 
   // How far a session can run past its planned end on its own: until the club closes, the next booking of the
@@ -2295,7 +2378,7 @@ export class Club {
   // of an extension (the people have stayed). It is taken first from the holder's plan credit (the holder is
   // the session's only member); the rest is paid time, priced by the minute at the booking's
   // hourly tariff, to the franc: the holder's card pays what it can, the rest is left to collect.
-  recordOvertime(actor, r) {
+  recordOvertime(actor, r, leftMs = this.nowMs()) {
     const next = this.get(
       "SELECT MIN(start_ms) AS t FROM reservations WHERE status <> 'annulee' AND COALESCE(room_id, 1) = ? AND start_ms >= ? AND id <> ?",
       r.room_id ?? 1, r.end_ms, r.id,
@@ -2303,7 +2386,7 @@ export class Club {
     const limit = this.overtimeLimit(r, next);
     // From the planned end, or from the arrival for a session started after it (nobody was in the room before).
     const from = Math.max(r.end_ms, r.started_at ? Date.parse(r.started_at) : r.end_ms);
-    const add = Math.min(Math.ceil((this.nowMs() - from) / 60000), limit.minutes);
+    const add = Math.min(Math.ceil((leftMs - from) / 60000), limit.minutes);
     if (add <= 0) return;
     const included = Math.min(limit.credit, add);
     const paid = add - included;

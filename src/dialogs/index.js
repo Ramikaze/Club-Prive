@@ -1,7 +1,7 @@
 // Dialogs shared by several screens.
 export {
   supplementText, openBookingDialog, openExtendDialog, openCancelReservationDialog,
-  openConsumptionDialog, openQuickPayReservation, quickStartReservation, quickFinishReservation,
+  openConsumptionDialog, openQuickPayReservation, quickStartReservation, quickFinishReservation, openFinishDialog, openCorrectDepartureDialog, correctableOverrun,
   quickUpdatePartySize, quickChangeRoom, memberRoomEligibility,
   sendWhatsAppText,
 } from './reservationDialogs.jsx';

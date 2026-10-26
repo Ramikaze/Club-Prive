@@ -296,7 +296,8 @@ export function createApi({ db, env = {}, demo = false }) {
   add('POST', '/api/reservations/:id/extend/quote', READONLY, (ctx) => club.quoteExtension(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/reservations/:id/extend', {}, (ctx) => club.extendReservation(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/reservations/:id/start', {}, (ctx) => club.startReservation(ctx.user, ctx.params.id));
-  add('POST', '/api/reservations/:id/finish', {}, (ctx) => club.finishReservation(ctx.user, ctx.params.id));
+  add('POST', '/api/reservations/:id/finish', {}, (ctx) => club.finishReservation(ctx.user, ctx.params.id, ctx.body));
+  add('POST', '/api/reservations/:id/departure', {}, (ctx) => club.correctDeparture(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/reservations/:id/cancel', {}, (ctx) => club.cancelReservation(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/reservations/:id/items', {}, (ctx) => club.addItem(ctx.user, ctx.params.id, ctx.body));
 

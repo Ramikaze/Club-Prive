@@ -854,16 +854,111 @@ export async function quickStartReservation(r, onDone) {
   }
 }
 
+// « Terminer » on a session. Pressed after the planned end, it asks when the member left (the planned end is
+// offered): the overrun is counted up to that time only, so a button pressed late bills nothing that did not happen.
+function FinishDialog({ close, r, title, message, confirmLabel, doneText, onDone }) {
+  const late = r.status === 'en_cours' && Boolean(r.started_at) && Date.now() > Date.parse(r.end_at);
+  const [leftTime, setLeftTime] = useState(r.end_time);
+  const { busy, error, submit } = useSubmit();
+  const onSubmit = (e) => {
+    e.preventDefault();
+    submit(async () => {
+      if (late && parseHHMM(leftTime) === null) throw new Error('Indiquez l’heure de départ du client.');
+      await api.post(`/api/reservations/${r.id}/finish`, late ? { left_time: leftTime } : {});
+      toast(doneText);
+      close();
+      onDone?.();
+    });
+  };
+  return (
+    <Modal title={title} onClose={close}>
+      <form className="form-grid" onSubmit={onSubmit} noValidate>
+        <p>{message}</p>
+        {late && (
+          <label className="field"><span>Heure de départ du client</span>
+            <input type="time" step={60} value={leftTime} onChange={(e) => setLeftTime(e.target.value)} required />
+            <span className="help">{`Fin prévue à ${r.end_time}, arrivée à ${parts(Date.parse(r.started_at)).time}. Le dépassement est compté jusqu’à l’heure de départ, pas jusqu’à maintenant.`}</span>
+          </label>
+        )}
+        <FormError error={error} />
+        <div className="modal-actions">
+          <button type="button" className="btn" onClick={close}>Retour</button>
+          <button type="submit" className="btn btn-primary" disabled={busy} aria-busy={busy}>{confirmLabel}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+export function openFinishDialog(r, onDone, options) {
+  openDialog(FinishDialog, { r, onDone, ...options });
+}
+
+// A session finished late, its overrun already recorded: an administrator gives the time the member really
+// left. The server undoes the overrun (credit and card given back, what was left to collect cancelled) and counts
+// it again up to that time. A part paid other than by the card is refunded through the method chosen here.
+function CorrectDepartureDialog({ close, d, overrun, onDone }) {
+  const r = d.reservation;
+  const methods = useSettings().payment_methods;
+  const plannedEnd = parts(Date.parse(overrun.details.ancienne_fin)).time;
+  const [leftTime, setLeftTime] = useState(plannedEnd);
+  const [method, setMethod] = useState(methods[0]);
+  const paidOtherwise = d.charges.some((c) => c.label.startsWith('Dépassement') && c.status === 'payee' && c.payment_method !== 'Carte membre');
+  const { busy, error, submit } = useSubmit();
+  const onSubmit = (e) => {
+    e.preventDefault();
+    submit(async () => {
+      if (parseHHMM(leftTime) === null) throw new Error('Indiquez l’heure de départ du client.');
+      await api.post(`/api/reservations/${r.id}/departure`, { left_time: leftTime, ...(paidOtherwise ? { method } : {}) });
+      toast('Heure de départ corrigée.');
+      close();
+      onDone?.();
+    });
+  };
+  return (
+    <Modal title={`Corriger l’heure de départ — ${r.member_name}`} onClose={close}>
+      <form className="form-grid" onSubmit={onSubmit} noValidate>
+        <p>{`Dépassement compté à la sortie : ${fmtDuration(overrun.details.minutes)}${overrun.details.montant ? `, ${money(overrun.details.montant)}` : ''}. Il est annulé (crédit temps et carte rendus, reste à encaisser supprimé), puis recompté jusqu’à l’heure indiquée.`}</p>
+        <label className="field"><span>Heure de départ du client</span>
+          <input type="time" step={60} value={leftTime} onChange={(e) => setLeftTime(e.target.value)} required />
+          <span className="help">{`Fin prévue à ${plannedEnd}. À ${plannedEnd}, aucun dépassement n’est compté.`}</span>
+        </label>
+        {paidOtherwise && (
+          <label className="field"><span>Rembourser la part payée hors carte en</span>
+            <select value={method} onChange={(e) => setMethod(e.target.value)}>
+              {methods.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </label>
+        )}
+        <FormError error={error} />
+        <div className="modal-actions">
+          <button type="button" className="btn" onClick={close}>Retour</button>
+          <button type="submit" className="btn btn-primary" disabled={busy} aria-busy={busy}>Corriger</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+// The overrun an administrator can still correct: the last one recorded at the exit, unless corrected since.
+export function correctableOverrun(d) {
+  if (d.reservation.status !== 'terminee') return null;
+  const last = (action) => d.history.reduce((found, h) => (h.action === action ? h : found), null);
+  const overrun = last('reservation.depassement');
+  const fix = last('reservation.corriger_depart');
+  return overrun && (!fix || fix.id < overrun.id) ? overrun : null;
+}
+
+export function openCorrectDepartureDialog(d, overrun, onDone) {
+  openDialog(CorrectDepartureDialog, { d, overrun, onDone });
+}
+
 export function quickFinishReservation(r, onDone) {
-  actionDialog({
+  openFinishDialog(r, onDone, {
     title: `Libérer ${r.room_name ?? 'la salle'} — ${r.member_name}`,
     message: `Confirmer la fin de l’occupation (${r.start_time} – ${r.end_time})${r.due_amount ? ` ? Il reste ${money(r.due_amount)} à encaisser sur la note.` : ' ?'}`,
     confirmLabel: 'Terminer et libérer la salle',
-    run: async () => {
-      await api.post(`/api/reservations/${r.id}/finish`, {});
-      toast('Salle libérée.');
-      onDone?.();
-    },
+    doneText: 'Salle libérée.',
   });
 }
 
