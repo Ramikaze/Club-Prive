@@ -7,22 +7,13 @@ import { AdminTabs, ErrorState, FormError, Loaded, Notice, PageHead, Skeleton } 
 import { toast } from '../components/ui/toast.jsx';
 import { api, newKey, qs } from '../lib/api.js';
 import { money, monthTitle, dateTime } from '../lib/format.js';
-import { useLoad, useSubmit, useBusy } from '../lib/hooks.js';
-import { downloadExcel } from '../utils/exportExcel.js';
+import { useLoad, useSubmit } from '../lib/hooks.js';
 
 const CHECKS = [
   'Les espèces ont été comptées et correspondent au solde affiché.',
   'Les relevés bancaires et mobile money ont été rapprochés des soldes affichés.',
   'Toutes les dépenses et entrées du mois sont saisies.',
 ];
-
-const monthExports = (m) => {
-  const params = { from: m.first, to: m.last };
-  return [
-    { kind: 'tresorerie', params }, { kind: 'synthese', params }, { kind: 'grand-livre', params },
-    { kind: 'operations', params }, { kind: 'encaissements', params }, { kind: 'remboursements', params },
-  ];
-};
 
 function CloseDialog({ close, month, onDone }) {
   const [key] = useState(newKey);
@@ -88,7 +79,7 @@ function CloseDialog({ close, month, onDone }) {
   );
 }
 
-function MonthRow({ m, closing, onClose, onReopen, onExport, exporting }) {
+function MonthRow({ m, closing, onClose, onReopen }) {
   return (
     <tr>
       <td data-label="Mois" className="strong">{monthTitle(m.month)}</td>
@@ -105,8 +96,6 @@ function MonthRow({ m, closing, onClose, onReopen, onExport, exporting }) {
       <td data-label="Clôture" className="subtle">{closing ? `${dateTime(closing.closed_at)} par ${closing.closed_by_name ?? '—'}` : ''}</td>
       <td className="actions">
         <span className="row">
-          <button type="button" className="btn btn-sm" disabled={exporting} onClick={() => onExport(m)} title={`Exporter ${monthTitle(m.month)} vers Excel`}>
-            <Icon name="excel" /><span className="sr-only">Exporter vers Excel</span></button>
           {m.closable && <button type="button" className="btn btn-sm btn-primary" onClick={() => onClose(m)}><Icon name="lock" /> Clôturer…</button>}
           {m.closed && <button type="button" className="btn btn-sm" onClick={() => onReopen(m)}><Icon name="unlock" /> Rouvrir…</button>}
         </span>
@@ -117,7 +106,6 @@ function MonthRow({ m, closing, onClose, onReopen, onExport, exporting }) {
 
 export default function Closing() {
   const state = useLoad(() => api.get('/api/closings'), []);
-  const excel = useBusy();
   const closeMonth = (m) => openDialog(CloseDialog, { month: m, onDone: state.reload });
   const reopen = (m) => actionDialog({
     title: `Rouvrir ${monthTitle(m.month)}`,
@@ -130,7 +118,6 @@ export default function Closing() {
       state.reload();
     },
   });
-  const exportMonth = (m) => excel.run(() => downloadExcel(monthExports(m), `mois_${m.month}.xlsx`));
 
   return (
     <>
@@ -152,8 +139,7 @@ export default function Closing() {
                     <thead><tr><th>Mois</th><th>État</th><th>Réservations</th><th>Clôture</th><th /></tr></thead>
                     <tbody>
                       {data.months.map((m) => (
-                        <MonthRow key={m.month} m={m} closing={closings.get(m.month)} onClose={closeMonth} onReopen={reopen}
-                          onExport={exportMonth} exporting={excel.busy} />
+                        <MonthRow key={m.month} m={m} closing={closings.get(m.month)} onClose={closeMonth} onReopen={reopen} />
                       ))}
                     </tbody>
                   </table>

@@ -1,13 +1,11 @@
 // General ledger (/grand-livre, administrators): every cash movement of the period in order, with
 // the running balance of one treasury account or of all of them.
-import Icon from '../components/ui/Icon.jsx';
 import { AccountTag, AdminTabs, Empty, Loaded, Notice, PageHead } from '../components/ui/ui.jsx';
 import PeriodPicker, { usePeriod } from '../components/ui/PeriodPicker.jsx';
 import { api, qs } from '../lib/api.js';
 import { money, dayLabel, ACCOUNT_LABEL } from '../lib/format.js';
-import { useLoad, useBusy } from '../lib/hooks.js';
+import { useLoad } from '../lib/hooks.js';
 import { useStore } from '../store/useStore.js';
-import { downloadExcel } from '../utils/exportExcel.js';
 
 export default function Ledger() {
   const period = usePeriod('month');
@@ -15,8 +13,6 @@ export default function Ledger() {
   const method = period.params.get('compte') ?? '';
   const account = ACCOUNT_LABEL[period.params.get('sous_compte')] ? period.params.get('sous_compte') : '';
   const configured = useStore((s) => s.settings.payment_methods);
-  const excel = useBusy();
-  const csv = useBusy();
   const filters = { from, to, method, account };
   const state = useLoad(() => api.get(`/api/ledger/book${qs(filters)}`), [from, to, method, account]);
   const methods = [...new Set([...configured, ...(state.data?.methods ?? []), ...(method ? [method] : [])])];
@@ -28,16 +24,6 @@ export default function Ledger() {
         title="Grand livre"
         lead="Tous les mouvements de trésorerie dans l’ordre, avec le solde courant."
         tour="ledger"
-        actions={(
-          <>
-            <button type="button" className="btn" disabled={csv.busy} aria-busy={csv.busy}
-              onClick={() => csv.run(() => api.download(`/api/export/grand-livre${qs(filters)}`))}>
-              <Icon name="download" /> CSV</button>
-            <button type="button" className="btn" disabled={excel.busy} aria-busy={excel.busy}
-              onClick={() => excel.run(() => downloadExcel([{ kind: 'grand-livre', params: filters }]))}>
-              <Icon name="excel" /> Excel</button>
-          </>
-        )}
       />
       <div className="toolbar">
         <PeriodPicker period={period} />

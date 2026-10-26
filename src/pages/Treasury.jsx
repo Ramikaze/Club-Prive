@@ -6,8 +6,7 @@ import { AccountTag, AdminTabs, Loaded, Notice, PageHead } from '../components/u
 import PeriodPicker, { usePeriod } from '../components/ui/PeriodPicker.jsx';
 import { api, qs } from '../lib/api.js';
 import { money, dayLabel } from '../lib/format.js';
-import { useLoad, useBusy } from '../lib/hooks.js';
-import { downloadExcel } from '../utils/exportExcel.js';
+import { useLoad } from '../lib/hooks.js';
 
 const methodIcon = (m) => (/esp[eè]ce/i.test(m) ? 'cash' : /carte/i.test(m) ? 'card' : /virement|banque/i.test(m) ? 'bank' : 'wallet');
 
@@ -27,9 +26,7 @@ function AccountCard({ a, from, to, total = false }) {
 export default function Treasury() {
   const period = usePeriod('month');
   const { from, to } = period;
-  const excel = useBusy();
   const state = useLoad(() => api.get(`/api/treasury${qs({ from, to })}`), [from, to]);
-  const params = { from, to };
 
   return (
     <>
@@ -38,13 +35,6 @@ export default function Treasury() {
         title="Trésorerie & Bilans"
         lead="Soldes des caisses et des comptes, et résultat de la période."
         tour="treasury"
-        actions={(
-          <button type="button" className="btn" disabled={excel.busy} aria-busy={excel.busy}
-            onClick={() => excel.run(() => downloadExcel([
-              { kind: 'tresorerie', params }, { kind: 'grand-livre', params }, { kind: 'operations', params }, { kind: 'synthese', params },
-            ], `tresorerie_${from}_${to}.xlsx`))}>
-            <Icon name="excel" /> Excel</button>
-        )}
       />
       <div className="toolbar"><PeriodPicker period={period} /></div>
       <Loaded state={state}>
