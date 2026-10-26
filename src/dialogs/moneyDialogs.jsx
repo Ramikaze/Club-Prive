@@ -10,6 +10,7 @@ import { openDialog, Modal, actionDialog } from '../components/ui/Modal.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import { Hypothesis, AccountTag, FormError, Notice } from '../components/ui/ui.jsx';
 import { useLoad, useSubmit } from '../lib/hooks.js';
+import Icon from '../components/ui/Icon.jsx';
 import { CARD_METHOD } from '../../shared/rules.js';
 import { renewalWhatsAppText } from '../../shared/wallet.js';
 import { sendWhatsAppText } from './reservationDialogs.jsx';
@@ -90,10 +91,24 @@ function PaymentDialog({ close, due, memberName, onDone }) {
             </>
           ) : null}</dl></div>
         <div className="form-row">
-          <label className="field"><span>Moyen de paiement</span>
-            <select name="method" required value={method} onChange={(e) => setPicked(e.target.value)}>
-              {balance > 0 ? <option value={CARD_METHOD}>{`${CARD_METHOD} (${money(balance)} disponibles)`}</option> : null}
-              {methods.map((x) => <option key={x}>{x}</option>)}</select></label>
+          {/* The member's card always shows, first: chosen by default when it holds credit, greyed out when it holds none. */}
+          <fieldset className="field pay-methods">
+            <legend>Moyen de paiement</legend>
+            <label className={`pay-method pay-method-card${balance > 0 ? '' : ' is-empty'}`}>
+              <input type="radio" name="method" value={CARD_METHOD} checked={byCard} disabled={balance <= 0 || loadingBalance}
+                onChange={() => setPicked(CARD_METHOD)} />
+              <Icon name="card" />
+              <span><strong>{CARD_METHOD}</strong>
+                <span className="subtle">{loadingBalance ? 'Lecture du solde…' : balance > 0 ? `${money(balance)} disponibles` : 'Aucun crédit sur la carte'}</span></span>
+            </label>
+            {methods.map((x) => (
+              <label key={x} className="pay-method">
+                <input type="radio" name="method" value={x} checked={method === x} onChange={() => setPicked(x)} />
+                <Icon name={/esp[eè]ce/i.test(x) ? 'cash' : /virement|banque/i.test(x) ? 'bank' : 'wallet'} />
+                <span><strong>{x}</strong></span>
+              </label>
+            ))}
+          </fieldset>
           {byCard && rest > 0 ? (
             <label className="field"><span>{`Moyen pour le reste (${money(rest)})`}</span>
               <select name="rest_method" required value={restMethod} onChange={(e) => setRestMethod(e.target.value)}>
