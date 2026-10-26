@@ -4,7 +4,6 @@ import Icon from '../components/ui/Icon.jsx';
 import SmartSearch from '../components/ui/SmartSearch.jsx';
 import { AccountTag, Chip, Empty, FormError, Loaded, Notice, PageHead, Segmented } from '../components/ui/ui.jsx';
 import { toast } from '../components/ui/toast.jsx';
-import { actionDialog } from '../components/ui/Modal.jsx';
 import SessionTimer, { isRunning } from '../components/ui/SessionTimer.jsx';
 import SessionConsumptions, {
   PayNowChoice, consumptionOf, payNowBody, cardShort, servedToast,
@@ -18,7 +17,7 @@ import { partyLabel } from '../../shared/rules.js';
 import { searchable, smartFilter } from '../../shared/search.js';
 import {
   openExtendDialog, openCancelReservationDialog, openPaymentDialog, openRefundDialog, cancelChargeDialog, supplementText, canRefund,
-  quickChangeRoom,
+  quickChangeRoom, openFinishDialog, openCorrectDepartureDialog, correctableOverrun,
 } from '../dialogs/index.js';
 
 const CAT_FILTERS = [['tous', 'Tous'], ['cigare', 'Cigares'], ['bouteille', 'Bouteilles']];
@@ -69,19 +68,16 @@ function ReservationDetail({ d, products, reload }) {
     reload();
   });
 
-  const onFinish = () => actionDialog({
+  const onFinish = () => openFinishDialog(r, reload, {
     title: 'Terminer la réservation',
     message: `Le crédit engagé du titulaire sera compté comme consommé.${dueTotal ? ` Il reste ${money(dueTotal)} à encaisser sur la note.` : ''}`,
     confirmLabel: 'Terminer',
-    run: async () => {
-      await api.post(`/api/reservations/${r.id}/finish`, {});
-      toast('Réservation terminée.');
-      reload();
-    },
+    doneText: 'Réservation terminée.',
   });
 
   // What the server says about extending this booking. "Prolonger" is offered only when it can be (the reason
   // is shown instead); a detail sent without the window keeps the button, and the server decides.
+  const overrun = correctableOverrun(d);
   const extension = d.extension_window;
   const canExtend = !extension || extension.possible;
   const onExtend = () => openExtendDialog(r, reload, extension);
@@ -136,6 +132,11 @@ function ReservationDetail({ d, products, reload }) {
                 {extendButton}
                 <button type="button" className="btn btn-primary" onClick={onFinish}>Terminer</button>
               </>
+            ) : null}
+            {isAdmin && overrun ? (
+              <button type="button" className="btn" onClick={() => openCorrectDepartureDialog(d, overrun, reload)}>
+                <Icon name="clock" /> Corriger l’heure de départ
+              </button>
             ) : null}
           </>
         )}

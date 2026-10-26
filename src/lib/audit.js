@@ -33,6 +33,8 @@ export const ACTION_LABELS = {
   'reservation.prolonger': 'Prolongation',
   'reservation.demarrer': 'Arrivée : réservation démarrée',
   'reservation.terminer': 'Réservation terminée',
+  'reservation.depassement': 'Dépassement compté à la sortie',
+  'reservation.corriger_depart': 'Heure de départ corrigée',
   'reservation.annuler': 'Réservation annulée',
   'reservation.absence': 'Absence du membre : réservation close',
   'reservation.consommation.ajouter': 'Consommation ajoutée',
@@ -82,6 +84,10 @@ export function auditSummary(a) {
       return `+${fmtDuration(d.minutes ?? 0)}${d.supplement_ajoute ? ` ; supplément +${money(d.supplement_ajoute)}` : ''}${d.hors_horaires ? ' ; hors horaires autorisé' : ''}`;
     case 'reservation.terminer':
       return `${fmtDuration(d.minutes_consommees ?? 0)} consommées`;
+    case 'reservation.depassement':
+      return `+${fmtDuration(d.minutes ?? 0)}${d.montant ? ` ; ${money(d.montant)}` : ''}`;
+    case 'reservation.corriger_depart':
+      return `départ à ${d.depart} ; dépassement de ${fmtDuration(d.minutes_annulees ?? 0)} annulé${d.minutes ? `, ${fmtDuration(d.minutes)} recomptées` : ''}`;
     case 'reservation.annuler':
     case 'reservation.absence':
       return `${d.motif ?? ''} ; ${fmtDuration(d.minutes_liberees ?? 0)} libérées${d.acompte_conserve ? ` ; acompte de ${money(d.acompte_conserve)} conservé` : ''}`;

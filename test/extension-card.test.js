@@ -115,12 +115,13 @@ test('prolongation : l’heure de fermeture arrête la fenêtre sans un mot', as
 
 // ---------------------------------------------------------------- past the planned end, at the exit
 
-// Starts the booking at its start time, then finishes it `late` ms after its planned end.
-const runAndFinish = async (r, late) => {
+// Starts the booking at its start time, then finishes it `late` ms after its planned end (`body`: the
+// departure time the manager gives, when « Terminé » is pressed late).
+const runAndFinish = async (r, late, body) => {
   server.club.at = r.start_ms + MIN;
   ok(await manager.post(`/api/reservations/${r.id}/start`));
   server.club.at = r.end_ms + late;
-  return ok(await manager.post(`/api/reservations/${r.id}/finish`));
+  return ok(await manager.post(`/api/reservations/${r.id}/finish`, body));
 };
 
 test('dépassement : pris sur le crédit temps à la minute, sans rien à payer', async () => {
@@ -189,4 +190,103 @@ test('dépassement : arrêté à la séance suivante de la salle, la sortie n’
   assert.equal(d.reservation.status, 'terminee');
   assert.equal(d.reservation.end_time, '17:30');
   assert.equal(d.reservation.paid_minutes, 30);
+});
+
+// ---------------------------------------------------------------- « Terminé » pressed late
+
+test('départ indiqué : « Terminé » oublié, rien n’est compté après l’heure de départ donnée', async () => {
+  const max = await enroll('Max', 100000);
+  const r = await book(max, 120); // 15:00-17:00, no credit left
+  const d = await runAndFinish(r, 3 * 60 * MIN, { left_time: '17:00' }); // pressed at 20:00, left at 17:00
+  assert.deepEqual([d.reservation.status, d.reservation.end_time, d.charges.length], ['terminee', '17:00', 0]);
+  assert.equal(wallet(max), 100000 * UM);
+  assert.equal(d.history.some((h) => h.action === 'reservation.depassement'), false);
+});
+
+test('départ indiqué : le dépassement réel reste compté jusqu’à cette heure', async () => {
+  const ned = await enroll('Ned', 100000);
+  const r = await book(ned, 120); // 15:00-17:00
+  const d = await runAndFinish(r, 2 * 60 * MIN, { left_time: '17:20' }); // pressed at 19:00
+  assert.deepEqual([d.reservation.end_time, d.reservation.paid_minutes], ['17:20', 20]);
+  assert.equal(wallet(ned), 100000 * UM - 8333 * UM);
+});
+
+test('départ indiqué : la nuit, une heure après minuit est celle de la nuit même', async () => {
+  const oli = await enroll('Oli', 100000);
+  const r = await book(oli, 60, { start_time: '23:00' }); // 23:00-00:00
+  const d = await runAndFinish(r, 90 * MIN, { left_time: '00:10' }); // pressed at 01:30
+  assert.deepEqual([d.reservation.end_time, d.reservation.included_minutes + d.reservation.paid_minutes], ['00:10', 70]);
+});
+
+test('départ indiqué : une séance oubliée plusieurs jours se termine le jour même', async () => {
+  const quy = await enroll('Quy', 100000);
+  const r = await book(quy, 120); // 15:00-17:00
+  const d = await runAndFinish(r, 3 * 24 * 60 * MIN, { left_time: '17:15' }); // pressed three days later
+  assert.deepEqual([d.reservation.end_time, d.reservation.paid_minutes], ['17:15', 15]);
+});
+
+test('départ indiqué : refusé dans le futur ou avant l’arrivée', async () => {
+  const pia = await enroll('Pia', 100000);
+  const r = await book(pia, 120); // 15:00-17:00
+  server.club.at = r.start_ms + MIN;
+  ok(await manager.post(`/api/reservations/${r.id}/start`));
+  server.club.at = r.end_ms + 30 * MIN; // 17:30
+  const future = await manager.post(`/api/reservations/${r.id}/finish`, { left_time: '17:45' });
+  assert.equal(future.status, 400);
+  const before = await manager.post(`/api/reservations/${r.id}/finish`, { left_time: '14:30' });
+  assert.equal(before.status, 400);
+  assert.equal((await detail(r.id)).reservation.status, 'en_cours');
+});
+
+// ---------------------------------------------------------------- « Terminé » already pressed late: corrected
+
+const correct = (client, r, left_time) => client.post(`/api/reservations/${r.id}/departure`, { left_time });
+
+test('correction du départ : le dépassement est annulé, crédit et carte rendus', async () => {
+  const ray = await enroll('Ray', 100000);
+  const r = await book(ray, 90); // 15:00-16:30, 30 minutes of credit left
+  await runAndFinish(r, 50 * MIN); // 30 minutes on the credit, 20 paid by the card
+  assert.equal(wallet(ray), 100000 * UM - 8333 * UM);
+  const d = ok(await correct(admin, r, '16:30'));
+  assert.deepEqual([d.reservation.status, d.reservation.end_time, d.reservation.duration_min], ['terminee', '16:30', 90]);
+  assert.deepEqual([d.reservation.included_minutes, d.reservation.paid_minutes, d.reservation.due_amount], [90, 0, 0]);
+  assert.equal(wallet(ray), 100000 * UM);
+  assert.equal(consumed(r.id, subOf(ray)), 90);
+  assert.equal(server.club.credit(server.club.get('SELECT * FROM subscriptions WHERE id = ?', subOf(ray)), today).available, 30);
+  const line = d.charges.find((c) => c.label.startsWith('Dépassement'));
+  assert.equal(line.status, 'remboursee');
+  const audit = d.history.find((h) => h.action === 'reservation.corriger_depart');
+  assert.deepEqual([audit.details.depart, audit.details.minutes_annulees, audit.details.minutes], ['16:30', 50, 0]);
+});
+
+test('correction du départ : le reste à encaisser est annulé', async () => {
+  const sam = await enroll('Sam', 5000);
+  const r = await book(sam, 120);
+  await runAndFinish(r, 20 * MIN); // 5 000 on the card, 3 333 left to collect
+  const d = ok(await correct(admin, r, '17:00'));
+  assert.equal(wallet(sam), 5000 * UM);
+  assert.equal(d.reservation.due_amount, 0);
+  assert.equal(d.charges.find((c) => c.label.endsWith('reste à encaisser')).status, 'annulee');
+});
+
+test('correction du départ : le dépassement réel reste compté jusqu’à l’heure donnée', async () => {
+  const tom = await enroll('Tom', 100000);
+  const r = await book(tom, 120); // 15:00-17:00, no credit left
+  await runAndFinish(r, 3 * 60 * MIN); // pressed at 20:00: 3 hours billed
+  const d = ok(await correct(admin, r, '17:20'));
+  assert.deepEqual([d.reservation.end_time, d.reservation.paid_minutes], ['17:20', 20]);
+  assert.equal(wallet(tom), 100000 * UM - 8333 * UM);
+});
+
+test('correction du départ : réservée à un administrateur, une seule fois, et seulement après un dépassement', async () => {
+  const uma = await enroll('Uma', 100000);
+  const r = await book(uma, 120);
+  await runAndFinish(r, 30 * MIN);
+  assert.equal((await correct(manager, r, '17:00')).status, 403);
+  ok(await correct(admin, r, '17:00'));
+  refused(await correct(admin, r, '17:00'), 'AUCUN_DEPASSEMENT');
+  const vic = await enroll('Vic', 100000);
+  const onTime = await book(vic, 60, { start_time: '18:00' });
+  await runAndFinish(onTime, -5 * MIN);
+  refused(await correct(admin, onTime, '18:55'), 'AUCUN_DEPASSEMENT');
 });
