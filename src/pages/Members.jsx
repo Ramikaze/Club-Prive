@@ -126,7 +126,7 @@ function MemberSearch({ initialQ, setQuery }) {
         <>
           <PageHead
             title="Membres"
-            lead={`${items.length} membre(s)${statut === 'desactives' ? ' désactivé(s)' : ''}${q ? ' trouvé(s)' : ''}`}
+            lead={`${items.length} ${items.length > 1 ? 'membres' : 'membre'}${statut === 'desactives' ? (items.length > 1 ? ' désactivés' : ' désactivé') : ''}${q ? (items.length > 1 ? ' trouvés' : ' trouvé') : ''}`}
             actions={<button type="button" className="btn btn-primary" onClick={() => openMemberDialog(null, (m) => navigate(`/membres/${m.id}`))}><Icon name="plus" /> Nouveau membre</button>}
             tour="members"
           />

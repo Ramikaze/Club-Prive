@@ -365,10 +365,12 @@ export default function Products() {
                     <td data-label="Prix" className="num">{money(p.price)}</td>
                     <td data-label="Stock"><StockChip p={p} /> <span className="subtle">seuil {p.low_stock_threshold}</span></td>
                     <td className="actions">
-                      <button type="button" className="btn btn-sm" onClick={() => stockDialog(p, 'entree', reload)}>Entrée</button>{' '}
-                      <button type="button" className="btn btn-sm btn-ghost" onClick={() => stockDialog(p, 'ajustement', reload)}>Ajuster</button>{' '}
-                      <button type="button" className="btn btn-sm btn-ghost" onClick={() => historyDialog(p)}>Historique</button>{' '}
-                      {admin && <button type="button" className="btn btn-sm btn-ghost" onClick={() => productDialog(p, reload)}><Icon name="edit" /><span className="sr-only">Modifier {p.name}</span></button>}
+                      <div className="product-actions">
+                        <button type="button" className="btn btn-sm" onClick={() => stockDialog(p, 'entree', reload)}>Entrée</button>
+                        <button type="button" className="btn btn-sm btn-ghost" onClick={() => stockDialog(p, 'ajustement', reload)}>Ajuster</button>
+                        <button type="button" className="btn btn-sm btn-ghost" onClick={() => historyDialog(p)}>Historique</button>
+                        {admin && <button type="button" className="btn btn-sm btn-ghost" onClick={() => productDialog(p, reload)}><Icon name="edit" /><span className="sr-only">Modifier {p.name}</span></button>}
+                      </div>
                     </td>
                   </tr>
                 ))}</tbody>

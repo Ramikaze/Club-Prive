@@ -60,7 +60,7 @@ export default function Lounge() {
       </>} />
 
     <section className="lounge-overview" aria-label="Situation des caves">
-      <div className="lounge-intro"><Icon name="humidor" /><div><span className="eyebrow">L’art de recevoir</span><h2>Chaque détail compte.</h2><p>Relevés manuels · actualisé à {parts(d.now).time}</p></div></div>
+      <div className="lounge-intro"><Icon name="humidor" /><div><h2>Chaque détail compte.</h2><p>Relevés manuels · actualisé à {parts(d.now).time}</p></div></div>
       <dl className="lounge-stats">
         <div><dt>Caves suivies</dt><dd>{d.summary.humidors}</dd></div>
         <div><dt>Caves hors seuils</dt><dd>{d.summary.alerts}<span>/ {d.summary.humidors}</span></dd></div>

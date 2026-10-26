@@ -430,6 +430,12 @@ table.table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
 .table tr.is-muted td .strike { text-decoration: line-through; }
 .table tfoot td { font-weight: 650; border-top: 2px solid var(--border); border-bottom: 0; }
 .table .actions { text-align: right; white-space: nowrap; }
+/* The catalogue's row actions: two by two on a narrow table, so the product's name keeps its room; one line when wide. */
+.product-actions { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+@media (max-width: 1280px) {
+  .product-actions { display: inline-grid; grid-template-columns: repeat(2, auto); }
+  .table:has(.product-actions) th, .table:has(.product-actions) td { padding-left: 6px; padding-right: 6px; }
+}
 
 @media (max-width: 699px) {
   table.table.stack-sm thead { display: none; }
