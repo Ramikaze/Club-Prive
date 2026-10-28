@@ -50,7 +50,7 @@ const WIPE_ORDER = [
   'idempotency_keys', 'wallet_movements', 'payment_allocations', 'refunds', 'stock_movements', 'credit_movements', 'charges',
   'ticket_events', 'payments',
   'reservation_attendees', 'reservations', 'cards', 'subscriptions', 'members', 'product_photos', 'products',
-  'ledger_entries', 'closed_periods', 'audit_log',
+  'ledger_entries', 'closed_periods', 'day_closings', 'audit_log',
 ];
 
 // The highest price the catalogue import takes, in whole francs: a typing slip, such as a price counted in

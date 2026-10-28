@@ -123,7 +123,9 @@ export function createApi({ db, env = {}, demo = false }) {
   add('POST', '/api/login', {
     public: true,
     prepare: async (ctx) => {
-      const key = `${ctx.ip}|${String(ctx.body.login ?? '').toLowerCase()}`;
+      // The key reads the identifier as the account lookup does (trimmed, any case), so spaces or capitals
+      // give no fresh tries; it stops one character past the longest identifier (40), so a huge value is not kept.
+      const key = `${ctx.ip}|${String(ctx.body.login ?? '').trim().toLowerCase().slice(0, 41)}`;
       checkThrottle(key);
       const user = club.userByLogin(ctx.body.login);
       dummyHash ??= hashPassword('mot-de-passe-factice-pour-egaliser-le-temps');

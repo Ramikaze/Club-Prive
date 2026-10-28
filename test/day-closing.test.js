@@ -78,3 +78,14 @@ test('seul un administrateur rouvre la journée, avec un motif', async () => {
 test('une journée future ne peut pas être fermée', async () => {
   refused(await admin.post('/api/day-closing', { day: '2999-01-01', counts: {} }), 400);
 });
+
+// The demo reset empties the same tables as this wipe (WIPE_ORDER).
+test('l’effacement des données rouvre aussi les journées fermées', async () => {
+  const state = ok(await admin.get(`/api/day-closing?day=${today}`));
+  const counts = Object.fromEntries(state.accounts.filter((a) => a.to_count).map((a) => [a.method, a.expected]));
+  assert.ok(ok(await admin.post('/api/day-closing', { day: today, checked: [], unchecked_reason: 'Test', counts })).closed);
+  ok(await admin.post('/api/admin/reset', { confirm: 'EFFACER' }));
+  assert.equal(ok(await admin.get(`/api/day-closing?day=${today}`)).closed, null);
+  const cat = await expenseCategory();
+  ok(await admin.post('/api/ledger/entries', { kind: 'depense', category_id: cat.id, amount: 1000 * UM, method: 'Espèces' }));
+});
