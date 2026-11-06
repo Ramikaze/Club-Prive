@@ -7,7 +7,7 @@ import { api, newKey } from '../lib/api.js';
 import MemberCard3D from '../components/ui/MemberCard3D.jsx';
 import SessionTimer, { isRunning } from '../components/ui/SessionTimer.jsx';
 import EndingSoonNotice from '../components/ui/EndingSoonNotice.jsx';
-import { money, fmtDuration, dayLabel, dateTime, dayMonth, paymentPurpose, paymentMethodText } from '../lib/format.js';
+import { money, fmtDuration, dayLabel, dateTime, dayMonth, paidForLabel, paymentMethodText } from '../lib/format.js';
 import { useLoad } from '../lib/hooks.js';
 import { useIsBoss } from '../store/useStore.js';
 import PurchaseHistory from '../components/members/PurchaseHistory.jsx';
@@ -256,7 +256,7 @@ function ClientDetail({ m, reload }) {
             <dt>Client depuis</dt><dd>{dateTime(m.created_at)}</dd>
           </dl>
         </section>
-        <PurchaseHistory memberId={m.id} />
+        <PurchaseHistory memberId={m.id} file={m} />
       </div>
     </>
   );
@@ -390,22 +390,27 @@ function MemberDetail({ m, reload }) {
         <section className="card">
           <div className="card-head"><h2>Paiements</h2></div>
           {m.payments.length ? (
-            <div className="list">{m.payments.map((p) => (
-              <div className={`list-item list-item-wrap ${p.cancelled_at ? 'is-cancelled' : ''}`} key={p.id}>
-                <div className="grow"><div className="title">{money(p.amount)} — {paymentMethodText(p)}</div>
-                  <div className="meta">{dateTime(p.paid_at)}
-                    {paymentPurpose(p) ? ` · ${paymentPurpose(p)}` : null}
-                    {p.reservation_id ? <> · <Link to={`/reservations/${p.reservation_id}`}>réservation n° {p.reservation_id}</Link></> : (paymentPurpose(p) ? null : ' · abonnement')}
-                    {p.cancelled_at ? ` · annulé le ${dateTime(p.cancelled_at)} : ${p.cancel_reason}` : null}</div></div>
-                {p.cancelled_at ? <span className="chip">annulé</span> : <span className="chip chip-ok">n° {p.id}</span>}
-                {isAdmin && p.kind === 'repas' && !p.cancelled_at
-                  ? <button type="button" className="btn btn-sm btn-ghost" onClick={() => openCancelMealDialog(p, reload)}>Annuler le repas</button> : null}
-                <Link className="btn btn-sm" to={`/caisse/ticket/${p.id}`}>Ticket</Link></div>
-            ))}</div>
+            <div className="list">{m.payments.map((p) => {
+              // A recharge or meal is cancelled on the payment; a Boutique sale on the sale.
+              const cancelledAt = p.cancelled_at ?? p.shop_cancelled_at;
+              const reason = p.cancelled_at ? p.cancel_reason : p.shop_cancel_reason;
+              return (
+                <div className={`list-item list-item-wrap ${cancelledAt ? 'is-cancelled' : ''}`} key={p.id}>
+                  <div className="grow"><div className="title">{money(p.amount)} — {paymentMethodText(p)}</div>
+                    <div className="meta">{dateTime(p.paid_at)}
+                      {paidForLabel(p) ? ` · ${paidForLabel(p)}` : null}
+                      {p.reservation_id ? <> · <Link to={`/reservations/${p.reservation_id}`}>réservation n° {p.reservation_id}</Link></> : (paidForLabel(p) ? null : ' · abonnement')}
+                      {cancelledAt ? ` · annulé le ${dateTime(cancelledAt)} : ${reason}` : null}</div></div>
+                  {cancelledAt ? <span className="chip">annulé</span> : <span className="chip chip-ok">n° {p.id}</span>}
+                  {isAdmin && p.kind === 'repas' && !p.cancelled_at
+                    ? <button type="button" className="btn btn-sm btn-ghost" onClick={() => openCancelMealDialog(p, reload)}>Annuler le repas</button> : null}
+                  <Link className="btn btn-sm" to={`/caisse/ticket/${p.id}`}>Ticket</Link></div>
+              );
+            })}</div>
           ) : <Empty icon="wallet">Aucun paiement.</Empty>}
         </section>
 
-        <PurchaseHistory memberId={m.id} />
+        <PurchaseHistory memberId={m.id} file={m} />
       </div>
     </>
   );

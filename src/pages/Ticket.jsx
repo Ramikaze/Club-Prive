@@ -24,8 +24,9 @@ import { ARMED, setRollLength, useRollPage } from '../lib/rollPrint.js';
 const KIND_LABEL = { impression: 'Impression demandée', whatsapp: 'WhatsApp' };
 
 // Every receipt sends the member the same short message (what was paid and when, the card's part, the new balance,
-// the ticket's number), unless it was cancelled: that one goes out as the full ticket, which says so.
-const isMemberMessage = (ticket) => !ticket.cancelled_at;
+// the ticket's number), unless it was cancelled (a recharge, a meal or a whole Boutique sale): that one goes out as
+// the full ticket, which says so.
+const isMemberMessage = (ticket) => ticket.status !== 'annule';
 const MESSAGE_TITLE = { recharge: 'Reçu d’approvisionnement par WhatsApp', repas: 'Message du repas par WhatsApp', encaissement: 'Ticket par WhatsApp' };
 const MESSAGE_BUTTON = { recharge: 'Envoyer le reçu par WhatsApp', repas: 'Envoyer le message du repas par WhatsApp', encaissement: 'Envoyer par WhatsApp' };
 // What a receipt's lines were for, in the member's words.
@@ -64,7 +65,7 @@ function whatsAppText(ticket, copyNo) {
     cardAmount: ticket.card_amount,
     balance: ticket.wallet_balance_after,
     timeAvailable: ticket.wallet_balance_after === null ? null : ticket.time_available,
-    cancelledAt: ticket.cancelled_at,
+    cancelledAt: ticket.cancelled_at ?? ticket.shop_cancelled_at,
     verifyUrl: verifiable ? ticketVerifyUrl(window.location.origin, ticket.id, ticket.ticket_code) : null,
     footer: ticket.footer,
     money,
@@ -134,6 +135,8 @@ function TicketPage({ data, reload }) {
 
   // A day client has no phone and no file: no WhatsApp, no link to a member's page (the server refuses it too).
   const dayClient = ticket.buyer_kind === 'journalier';
+  // A Boutique sale to a regular client: his file and his number are a client's.
+  const who = ticket.buyer_kind === 'client' ? 'client' : 'membre';
   const digits = waDigits(ticket.member_phone);
 
   // Records the way out, runs it, and keeps one at a time (a double click must not use up two copies).
@@ -206,14 +209,15 @@ function TicketPage({ data, reload }) {
                 <button type="button" className="btn" onClick={sendWhatsApp} disabled={busy !== null} aria-busy={busy === 'whatsapp'}>
                   <Icon name="message" /> {isMemberMessage(ticket) ? MESSAGE_BUTTON[ticket.kind] : 'Envoyer par WhatsApp'}</button>
               )}
+              {ticket.shop_sale_id && <Link className="btn" to="/boutique"><Icon name="left" /> Retour à la Boutique</Link>}
               <Link className="btn" to="/caisse"><Icon name="left" /> Retour à la caisse</Link>
-              {!dayClient && <Link className="btn" to={`/membres/${ticket.member_id}`}><Icon name="users" /> Fiche du membre</Link>}
+              {!dayClient && <Link className="btn" to={`/membres/${ticket.member_id}`}><Icon name="users" /> Fiche du {who}</Link>}
             </>
           )}
         />
         {!ticket.demo && !dayClient && !digits && (
           <Notice kind="warn">
-            Numéro WhatsApp du membre inutilisable : corrigez-le sur sa <Link to={`/membres/${ticket.member_id}`}>fiche</Link>.
+            Numéro WhatsApp du {who} inutilisable : corrigez-le sur sa <Link to={`/membres/${ticket.member_id}`}>fiche</Link>.
           </Notice>
         )}
         {last && (

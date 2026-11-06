@@ -102,13 +102,19 @@ export const subStateLabel = (summary) => {
 
 // ---------------------------------------------------------------- payments in the lists
 
-// What a payment was for when its lines do not say it: a Boutique sale (« boutique cigares »), a recharge of the
-// card or an outside meal (its label); null for a plain payment, whose lines say it.
+// What a payment that has no line was for: a recharge of the card or an outside meal (its label); null for a
+// plain payment, whose lines say it. A Boutique sale has lines: the Caisse names its products.
 export function paymentPurpose(p) {
-  if (p.shop_sale_id) return SHOP[p.shop_account]?.purpose ?? 'boutique';
   if (p.kind === 'recharge') return RECHARGE_LINE_LABEL;
   if (p.kind === 'repas') return `Repas extérieur : ${p.label ?? ''}`;
   return null;
+}
+
+// What a payment was for in the member's « Paiements »: « boutique cigares » or « boutique champagne » for a
+// Boutique sale (as its ticket says « Payé pour »), else as paymentPurpose.
+export function paidForLabel(p) {
+  if (p.shop_sale_id) return SHOP[p.shop_account]?.purpose ?? 'boutique';
+  return paymentPurpose(p);
 }
 
 // How a payment was paid: the card's part apart from the rest when the card paid only part of it.

@@ -86,6 +86,10 @@ export default function TicketSheet({ ticket, copyNo }) {
       {ticket.cancelled_at && (
         <div className="ts-refunds"><p>Annulé le {dateTime(ticket.cancelled_at)}</p></div>
       )}
+      {/* A Boutique sale is cancelled as a whole on the sale, its payment row stays as it was. */}
+      {ticket.shop_cancelled_at && (
+        <div className="ts-refunds"><p>Vente annulée le {dateTime(ticket.shop_cancelled_at)}</p></div>
+      )}
 
       {ticket.refunds.length > 0 && (
         <div className="ts-refunds">

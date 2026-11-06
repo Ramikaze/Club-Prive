@@ -20,8 +20,12 @@ const shopTag = (account) => <span className="chip" key="tag">Boutique {RAYON_LA
 const BUYER_TYPE = { client: 'client régulier', membre: 'membre' };
 const buyerOf = (kind, id, name) => <>{memberLink(id, name, kind)}{BUYER_TYPE[kind] && <span className="subtle"> ({BUYER_TYPE[kind]})</span>}</>;
 
-// What a sale paid for: its lines' labels, each once.
-const saleTitle = (p) => paymentPurpose(p) ?? ([...new Set((p.allocations ?? []).map((a) => a.label))].join(', ') || 'Encaissement');
+// What a sale paid for: its lines' labels, each once. A Boutique sale names its products with their quantities.
+const saleTitle = (p) => {
+  const lines = p.allocations ?? [];
+  if (p.shop_sale_id && lines.length) return lines.map((a) => `${a.quantity > 1 ? `${a.quantity}× ` : ''}${a.label}`).join(', ');
+  return paymentPurpose(p) ?? ([...new Set(lines.map((a) => a.label))].join(', ') || 'Encaissement');
+};
 
 // Every recette of the period on the account shown, newest first: the payments (sales, card recharges, outside
 // meals), the refunds (money given back) and the other receipts typed in the ledger.

@@ -37,7 +37,8 @@ export function OpenNotes({ groups, onDone, allPeriods = false }) {
 const FIGURES = [['billed', 'Facturé (dû)'], ['collected', 'Encaissé'], ['refunded', 'Remboursé'], ['net', 'Net encaissé'],
   ['outstanding', 'Reste à payer']];
 
-// A figure and, under it, its two parts: the sessions' money and the Boutique's (shown once the Boutique has any).
+// A figure and, under it, its two parts: the sessions' money and the Boutique's (on the Alcool and Cigares cards
+// and the total, as « dont Boutique » under the receipts: the Réservations account never sells at the Boutique).
 function Figure({ a, k, label, split }) {
   return (
     <>
@@ -48,7 +49,7 @@ function Figure({ a, k, label, split }) {
 }
 
 function AccountCard({ a, total = false }) {
-  const split = FIGURES.some(([k]) => a.boutique?.[k]);
+  const split = Boolean(a.boutique) && a.account !== 'reservations';
   return (
     <div className={`account-card ${total ? 'total' : ''}`}>
       <h3>{total ? 'Total' : <><i className={`dot dot-${a.account}`} /> {a.label}</>}</h3>

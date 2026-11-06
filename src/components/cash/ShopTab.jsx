@@ -10,7 +10,7 @@ import { Loaded, PageHead } from '../ui/ui.jsx';
 import PeriodPicker, { usePeriod } from '../ui/PeriodPicker.jsx';
 import CashTabs from './CashTabs.jsx';
 import { CashRow, metaLine } from './CashRow.jsx';
-import { api, qs } from '../../lib/api.js';
+import { api, newKey, qs } from '../../lib/api.js';
 import { dateTime, dayLabel, money, paymentMethodText } from '../../lib/format.js';
 import { useLoad } from '../../lib/hooks.js';
 import { useMe } from '../../store/useStore.js';
@@ -32,6 +32,8 @@ function Buyer({ sale }) {
 }
 
 function cancelSale(sale, onDone) {
+  // One key for the dialog: a retry after a lost answer is the same cancellation, not a « déjà annulée » error.
+  const key = newKey();
   return actionDialog({
     title: 'Annuler cette vente',
     message: `Vente ${sale.ticket_number ?? ''} de ${money(sale.amount)}. Toute la vente est annulée : les produits reviennent en stock, l’argent est rendu par le moyen utilisé (la part payée par carte revient sur la carte du membre). La vente reste visible, barrée, avec le motif.`,
@@ -39,7 +41,7 @@ function cancelSale(sale, onDone) {
     confirmLabel: 'Annuler la vente',
     danger: true,
     run: async ({ reason }) => {
-      await api.post(`/api/shop/sales/${sale.id}/cancel`, { reason });
+      await api.post(`/api/shop/sales/${sale.id}/cancel`, { reason }, key);
       toast('Vente annulée.');
       onDone();
     },
@@ -78,20 +80,33 @@ function CancellationRow({ c }) {
 }
 
 function Column({ col, canCancel, onDone }) {
-  const methods = [...col.by_method.filter((x) => x.method !== CARD_METHOD), ...col.by_method.filter((x) => x.method === CARD_METHOD)];
+  // The member's card apart: that money came into the till when the card was topped up.
+  const methods = col.by_method.filter((x) => x.method !== CARD_METHOD);
+  const card = col.by_method.find((x) => x.method === CARD_METHOD);
+  // Listed sales whose cancellation falls in the period too: they are struck through and not counted.
+  const cancelledHere = col.sales.length - col.count;
   return (
     <section className="card cash-block" aria-labelledby={`boutique-${col.account}`}>
       <div className="card-head">
         <h2 id={`boutique-${col.account}`}><Icon name="shop" /> Boutique {RAYON_LABEL[col.account]}</h2>
         <span className="cash-block-total">{money(col.total)}</span>
       </div>
-      <p className="subtle cash-note">{col.count} vente{col.count > 1 ? 's' : ''} sur la période</p>
+      <p className="subtle cash-note">
+        {col.count} vente{col.count > 1 ? 's' : ''} sur la période
+        {cancelledHere > 0 && ` (sans compter ${cancelledHere} vente${cancelledHere > 1 ? 's' : ''} annulée${cancelledHere > 1 ? 's' : ''})`}
+      </p>
       <h3 className="sub-section-title cash-list-title">Par type d’acheteur</h3>
       <dl className="calc">{BUYERS.map(([k, label]) => <div key={k}><dt>{label}</dt><dd>{money(col.by_buyer[k] ?? 0)}</dd></div>)}</dl>
       <h3 className="sub-section-title cash-list-title">Par moyen de paiement</h3>
-      {methods.length ? (
+      {methods.length > 0 && (
         <dl className="calc">{methods.map((x) => <div key={x.method}><dt>{x.method}</dt><dd>{money(x.total)}</dd></div>)}</dl>
-      ) : <p className="subtle">Aucune vente sur la période.</p>}
+      )}
+      {card && (
+        <dl className="calc calc-apart">
+          <div><dt><Icon name="card" /> {CARD_METHOD} <span className="subtle">(non compté en caisse)</span></dt><dd>{money(card.total)}</dd></div>
+        </dl>
+      )}
+      {!methods.length && !card && <p className="subtle">Aucune vente sur la période.</p>}
       <h3 className="sub-section-title cash-list-title">Ventes <span className="subtle">({col.sales.length})</span></h3>
       {col.sales.length ? (
         <div className="list">{col.sales.map((s) => <SaleRow key={s.id} sale={s} canCancel={canCancel} onDone={onDone} />)}</div>
