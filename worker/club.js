@@ -140,7 +140,8 @@ const CHARGE_SELECT = `
 // A product with the version of its photo (the date of the photo, null without one). One join serves a whole
 // list, and only the date is read: the picture itself is never loaded with the products.
 const PRODUCT_SELECT = `
-  SELECT p.*, ph.updated_at AS photo_version
+  SELECT p.*, ph.updated_at AS photo_version,
+    EXISTS (SELECT 1 FROM charges c WHERE c.product_id = p.id) AS sold
   FROM products p
   LEFT JOIN product_photos ph ON ph.product_id = p.id`;
 
@@ -3061,6 +3062,8 @@ export class Club {
       id: p.id, category: p.category, name: p.name, reference: p.reference, description: p.description, price: p.price,
       stock_qty: p.stock_qty, low_stock_threshold: p.low_stock_threshold, active: !!p.active, is_demo: !!p.is_demo,
       low: p.stock_qty <= p.low_stock_threshold, out: p.stock_qty === 0, photo_version: p.photo_version ?? null,
+      // At least one charge (any status, session or Boutique): the category no longer changes.
+      sold: !!p.sold,
     };
   }
 
@@ -3120,14 +3123,18 @@ export class Club {
       && this.get('SELECT 1 AS x FROM products WHERE reference = ? AND id <> ?', f.reference, p.id)) {
       throw conflict('REFERENCE_PRISE', 'Cette référence existe déjà.');
     }
+    // The Champagne / Autres boissons split follows the current category: past figures must not move.
+    if (f.category !== p.category && this.get('SELECT 1 AS x FROM charges WHERE product_id = ? LIMIT 1', p.id)) {
+      throw conflict('CATEGORIE_VENDUE', 'Ce produit a déjà été vendu : sa catégorie ne change plus. Créez un nouveau produit et désactivez celui-ci.');
+    }
     this.run(
       `UPDATE products SET category = ?, name = ?, reference = ?, description = ?, price = ?, low_stock_threshold = ?, active = ?,
          updated_at = ?, updated_by = ? WHERE id = ?`,
       f.category, f.name, f.reference, f.description, f.price, f.threshold, f.active ? 1 : 0, this.nowIso(), actor.id, p.id,
     );
     this.audit(actor, 'produit.modifier', 'product', p.id, {
-      avant: { name: p.name, reference: p.reference, price: p.price, low_stock_threshold: p.low_stock_threshold, active: !!p.active },
-      apres: { name: f.name, reference: f.reference, price: f.price, low_stock_threshold: f.threshold, active: f.active },
+      avant: { category: p.category, name: p.name, reference: p.reference, price: p.price, low_stock_threshold: p.low_stock_threshold, active: !!p.active },
+      apres: { category: f.category, name: f.name, reference: f.reference, price: f.price, low_stock_threshold: f.threshold, active: f.active },
     });
     return this.productById(p.id);
   }
