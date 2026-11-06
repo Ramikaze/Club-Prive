@@ -1,12 +1,12 @@
 // The sale panel of one tab: title and account, buyer, lines, total, payment, « Encaisser » and the ticket line.
 // The card of a member pays first and what it cannot pay is asked for by another method, as in the payment dialog.
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from '../ui/Icon.jsx';
 import { FormError, Notice } from '../ui/ui.jsx';
 import { toast } from '../ui/toast.jsx';
 import BuyerPicker from './BuyerPicker.jsx';
-import { api, newKey } from '../../lib/api.js';
+import { api } from '../../lib/api.js';
 import { money } from '../../lib/format.js';
 import { useLoad, useSubmit } from '../../lib/hooks.js';
 import { useSettings } from '../../store/useStore.js';
@@ -23,8 +23,6 @@ export default function SalePanel({ account, products, cart, setCart }) {
   const { lines, buyer } = cart;
   const [picked, setPicked] = useState(null); // null until chosen: the card when it holds money
   const [restMethod, setRestMethod] = useState(methods[0] ?? '');
-  // One key per distinct request: a retry of the same sale is applied once, a changed cart is a new sale.
-  const attempt = useRef({ sig: '', key: '' });
 
   const rows = products.filter((p) => lines[p.id] > 0).map((p) => ({ p, qty: lines[p.id] }));
   const total = rows.reduce((s, r) => s + r.p.price * r.qty, 0);
@@ -57,9 +55,8 @@ export default function SalePanel({ account, products, cart, setCart }) {
         lines: rows.map((r) => ({ product_id: r.p.id, quantity: r.qty })),
         ...(byCard ? { card: true, method: rest > 0 ? restMethod : undefined } : { method }),
       };
-      const sig = JSON.stringify(body);
-      if (attempt.current.sig !== sig) attempt.current = { sig, key: newKey() };
-      const res = await api.post('/api/shop/sales', body, attempt.current.key);
+      // The cart's own key, kept across edits and failed attempts: the server stores it only after a successful sale.
+      const res = await api.post('/api/shop/sales', body, cart.key);
       toast(`Vente enregistrée : ${money(res.payment.amount)}.`);
       navigate(`/caisse/ticket/${res.payment.id}`);
     });

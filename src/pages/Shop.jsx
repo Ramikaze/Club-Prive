@@ -5,21 +5,22 @@ import SmartSearch from '../components/ui/SmartSearch.jsx';
 import { Empty, Loaded, Notice, PageHead, ProductPhoto, Segmented } from '../components/ui/ui.jsx';
 import ShopProductCard from '../components/shop/ShopProductCard.jsx';
 import SalePanel from '../components/shop/SalePanel.jsx';
-import { api } from '../lib/api.js';
+import { api, newKey } from '../lib/api.js';
 import { money } from '../lib/format.js';
 import { useLoad } from '../lib/hooks.js';
 import { useMe, useStore } from '../store/useStore.js';
 import { searchable, smartFilter } from '../../shared/search.js';
 import { SHOP, RAYONS, canSellIn, ownsAccount } from '../../shared/roles.js';
 
-const emptyCart = () => ({ lines: {}, buyer: { kind: 'journalier', person: null } });
+// The key is created with the cart and kept for its whole life: a retry after a lost answer never records the sale twice.
+const emptyCart = () => ({ key: newKey(), lines: {}, buyer: { kind: 'journalier', person: null } });
 
 export default function Shop() {
   const me = useMe();
   const demo = useStore((s) => s.demo);
   const [account, setAccount] = useState(() => RAYONS.find((a) => canSellIn(me, a)) ?? 'cigares');
   const [search, setSearch] = useState('');
-  const [carts, setCarts] = useState({ cigares: emptyCart(), alcool: emptyCart() });
+  const [carts, setCarts] = useState(() => ({ cigares: emptyCart(), alcool: emptyCart() }));
   const state = useLoad(() => api.get('/api/products'), []);
 
   const shop = SHOP[account];
