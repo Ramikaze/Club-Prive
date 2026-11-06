@@ -1,7 +1,7 @@
 // Regular-client dialogs: the record (same identity fields and rules as a member, no plan), the conversion into a
 // member, and deactivation. Each dialog keeps one idempotency key for its whole life.
 import { useState } from 'react';
-import { api, newKey } from '../lib/api.js';
+import { api, newKey, qs } from '../lib/api.js';
 import { Modal, openDialog, actionDialog } from '../components/ui/Modal.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import { FormError } from '../components/ui/ui.jsx';
@@ -54,15 +54,22 @@ export function openClientDialog(client, onDone) {
   openDialog(ClientDialog, { client, onDone });
 }
 
-// « Passer en membre »: the count of purchases comes from the list row, or is fetched when the file opens the dialog.
+// « Passer en membre »: the count of purchases is the list's own (non-cancelled sales). Opened from the file, the
+// client's row is read from the list route, so both places show the same number. One lookup at a time.
+let converting = false;
 export async function openConvertClientDialog(client, onDone) {
+  if (converting) return;
   let count = client.purchases_count;
   if (count == null) {
+    converting = true;
     try {
-      count = (await api.get(`/api/members/${client.id}/purchases`)).lines.length;
+      const rows = await api.get(`/api/clients${qs({ q: client.member_no })}`);
+      count = rows.find((r) => r.id === client.id)?.purchases_count ?? 0;
     } catch (err) {
       toast(err.message, 'error');
       return;
+    } finally {
+      converting = false;
     }
   }
   const key = newKey();
