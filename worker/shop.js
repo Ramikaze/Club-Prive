@@ -1,6 +1,9 @@
 // The boutique: regular clients (registered buyers who are not members) and the hidden walk-in client. All
 // writes run inside the API transaction, including audit and idempotency.
-import { conflict } from './errors.js';
+import { conflict, invalid, forbidden, notFound } from './errors.js';
+import { toId, flag, text } from './validate.js';
+import { SHOP, canSellIn } from '../shared/roles.js';
+import { formatTicketNumber } from '../shared/ticket.js';
 
 export const shopMethods = {
   // The one hidden row every walk-in sale is booked on, created on first use. It has no card and no file: it is
@@ -56,5 +59,102 @@ export const shopMethods = {
       ancien_numero: m.member_no, nouveau_numero: memberNo, nom: `${m.first_name} ${m.last_name}`,
     });
     return this.memberDetail(m.id);
+  },
+
+  // One counter sale: the sale row, one charge per product, the stock out, then the payment (the card first, for
+  // members). Runs in the request's transaction, so any refusal below leaves nothing behind.
+  createShopSale(actor, input) {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw invalid('Vente invalide.');
+    const account = input.account;
+    if (!Object.hasOwn(SHOP, account)) throw invalid('Rayon inconnu.');
+    if (!canSellIn(actor, account)) throw forbidden('Vous ne vendez que les produits de votre rayon.');
+
+    if (!Array.isArray(input.lines) || input.lines.length < 1 || input.lines.length > 30) {
+      throw invalid('Une vente compte de 1 à 30 produits.');
+    }
+    // A product listed twice is one line.
+    const wanted = new Map();
+    for (const l of input.lines) {
+      if (!l || typeof l !== 'object') throw invalid('Ligne de vente invalide.');
+      const id = toId(l.product_id, 'Produit');
+      const qty = typeof l.quantity === 'string' ? Number(l.quantity) : l.quantity;
+      if (!Number.isInteger(qty) || qty < 1 || qty > 99) throw invalid('Quantité : un nombre entier de 1 à 99.');
+      const total = (wanted.get(id) ?? 0) + qty;
+      if (total > 99) throw invalid('Quantité : 99 au maximum par produit.');
+      wanted.set(id, total);
+    }
+    const products = [...wanted].map(([id, quantity]) => {
+      const p = this.get('SELECT * FROM products WHERE id = ?', id);
+      if (!p) throw notFound('Produit');
+      if (!p.active) throw conflict('PRODUIT_INACTIF', `Le produit « ${p.name} » est inactif.`);
+      if (p.category !== SHOP[account].category) throw invalid(`« ${p.name} » ne se vend pas dans ce rayon.`, 'RAYON');
+      return { p, quantity };
+    });
+
+    const buyer = input.buyer;
+    if (!buyer || typeof buyer !== 'object' || !['journalier', 'client', 'membre'].includes(buyer.kind)) {
+      throw invalid('Acheteur invalide.');
+    }
+    const card = flag(input.card);
+    if (card && buyer.kind !== 'membre') throw invalid('Seul un membre paie avec sa carte.');
+    const method = text(input.method, 'Moyen de paiement', { max: 40 });
+    this.assertOpen(this.bizToday(), 'Cette vente');
+
+    let memberId;
+    if (buyer.kind === 'journalier') {
+      memberId = this.walkInMemberId();
+    } else {
+      const m = this.fileRow(toId(buyer.member_id, 'Acheteur'));
+      if (m.kind !== buyer.kind) throw invalid(buyer.kind === 'client' ? 'Cet acheteur n’est pas un client régulier.' : 'Cet acheteur n’est pas un membre.');
+      this.assertMemberActive(m, 'une vente');
+      memberId = m.id;
+    }
+
+    const saleId = this.insert(
+      'INSERT INTO shop_sales (account, member_id, buyer_kind, created_at, created_by) VALUES (?, ?, ?, ?, ?)',
+      account, memberId, buyer.kind, this.nowIso(), actor.id,
+    );
+    const chargeIds = [];
+    for (const { p, quantity } of products) {
+      const chargeId = this.insertCharge(actor, {
+        account, kind: 'produit', member_id: memberId, product_id: p.id, label: p.name, quantity, unit_price: p.price,
+        shop_sale_id: saleId,
+      });
+      this.moveStock(actor, p.id, -quantity, 'vente', { chargeId, reason: `Boutique n° ${saleId}` });
+      chargeIds.push(chargeId);
+    }
+    const { payment } = this.recordPayment(actor, { charge_ids: chargeIds, card, method, shop_sale_id: saleId });
+    this.audit(actor, 'boutique.vente', 'shop_sale', saleId, {
+      rayon: account, acheteur: buyer.kind, montant: payment.amount, carte: payment.card_amount,
+    });
+    return { sale: this.shopSaleDTO(saleId), payment };
+  },
+
+  // A day client is shown without any number or personal data; the hidden row's name is never printed.
+  shopSaleDTO(id) {
+    const s = this.get(
+      `SELECT s.*, m.first_name, m.last_name, m.member_no, u.name AS created_by_name, cu.name AS cancelled_by_name
+       FROM shop_sales s JOIN members m ON m.id = s.member_id
+       LEFT JOIN users u ON u.id = s.created_by LEFT JOIN users cu ON cu.id = s.cancelled_by WHERE s.id = ?`, id,
+    );
+    if (!s) throw notFound('Vente');
+    const lines = this.all(
+      'SELECT id, product_id, label, quantity, unit_price, amount, status FROM charges WHERE shop_sale_id = ? ORDER BY id', id,
+    ).map((c) => ({
+      charge_id: c.id, product_id: c.product_id, label: c.label, quantity: c.quantity, unit_price: c.unit_price,
+      amount: c.amount, status: c.status,
+    }));
+    const pay = this.get('SELECT id, method, card_amount FROM payments WHERE shop_sale_id = ?', id);
+    const walkIn = s.buyer_kind === 'journalier';
+    return {
+      id: s.id, account: s.account, buyer_kind: s.buyer_kind, member_id: s.member_id,
+      member_name: walkIn ? 'Client journalier' : `${s.first_name} ${s.last_name}`,
+      member_no: walkIn ? '' : s.member_no,
+      payment_id: pay?.id ?? null, ticket_number: pay ? formatTicketNumber(pay.id) : null,
+      amount: lines.reduce((n, l) => n + l.amount, 0), card_amount: pay?.card_amount ?? 0, method: pay?.method ?? null,
+      created_at: s.created_at, created_by_name: s.created_by_name ?? null,
+      cancelled_at: s.cancelled_at, cancel_reason: s.cancel_reason, cancelled_by_name: s.cancelled_by_name ?? null,
+      lines,
+    };
   },
 };

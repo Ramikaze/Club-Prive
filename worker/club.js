@@ -128,7 +128,7 @@ const CHARGE_SELECT = `
   SELECT c.*, u.name AS created_by_name, cu.name AS cancelled_by_name,
     pa.payment_id, p.paid_at, p.method AS payment_method,
     rf.id AS refund_id, rf.created_at AS refunded_at, rf.reason AS refund_reason,
-    m.first_name, m.last_name, m.member_no
+    m.first_name, m.last_name, m.member_no, m.kind AS buyer_kind
   FROM charges c
   JOIN members m ON m.id = c.member_id
   LEFT JOIN users u ON u.id = c.created_by
@@ -2603,11 +2603,11 @@ export class Club {
   insertCharge(actor, c) {
     return this.insert(
       `INSERT INTO charges (account, kind, member_id, reservation_id, subscription_id, product_id, label, quantity,
-         unit_price, amount, status, tariff_validated, created_at, created_by, deposit)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'due', ?, ?, ?, ?)`,
+         unit_price, amount, status, tariff_validated, created_at, created_by, deposit, shop_sale_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'due', ?, ?, ?, ?, ?)`,
       c.account, c.kind, c.member_id, c.reservation_id ?? null, c.subscription_id ?? null, c.product_id ?? null,
       c.label, c.quantity, c.unit_price, c.quantity * c.unit_price, c.tariff_validated ?? 1, this.nowIso(), actor.id,
-      c.deposit ? 1 : 0,
+      c.deposit ? 1 : 0, c.shop_sale_id ?? null,
     );
   }
 
@@ -2738,7 +2738,7 @@ export class Club {
       member_no: p.member_no, reservation_id: p.reservation_id, amount: p.amount, method: p.method, reference: p.reference,
       paid_at: p.paid_at, ticket_code: p.ticket_code ?? null, created_by_name: p.created_by_name ?? null, allocations, by_account: byAccount,
       kind: p.kind ?? 'encaissement', card_amount: p.card_amount ?? 0, label: p.label ?? null,
-      cancelled_at: p.cancelled_at ?? null, cancel_reason: p.cancel_reason ?? null,
+      cancelled_at: p.cancelled_at ?? null, cancel_reason: p.cancel_reason ?? null, shop_sale_id: p.shop_sale_id ?? null,
     };
   }
 
@@ -2776,9 +2776,10 @@ export class Club {
     const reservationIds = new Set(charges.map((c) => c.reservation_id));
     const reservationId = reservationIds.size === 1 ? [...reservationIds][0] : null;
     const paymentId = this.insert(
-      `INSERT INTO payments (member_id, reservation_id, amount, method, reference, paid_at, created_by, ticket_code, card_amount)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO payments (member_id, reservation_id, amount, method, reference, paid_at, created_by, ticket_code, card_amount, shop_sale_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       memberId, reservationId, total, method, reference, this.nowIso(), actor.id, this.freshTicketCode(), cardAmount,
+      input.shop_sale_id ?? null,
     );
     for (const c of charges) {
       this.run('INSERT INTO payment_allocations (payment_id, charge_id, account, amount) VALUES (?, ?, ?, ?)', paymentId, c.id, c.account, c.amount);
@@ -3468,8 +3469,8 @@ export class Club {
           `Prix unitaire ${cur}`, `Montant ${cur}`, 'Statut', 'Tarif validé', 'Saisi par'];
         rows = this.all(`${CHARGE_SELECT} WHERE c.created_at >= ? AND c.created_at < ? ${account ? 'AND c.account = ?' : ''} ORDER BY c.created_at`,
           ...(account ? [a, b, account] : [a, b]))
-          .map((c) => [when(c.created_at), c.id, ACCOUNT_LABELS[c.account], CHARGE_KIND[c.kind], c.member_no, `${c.first_name} ${c.last_name}`,
-            c.reservation_id ?? '', c.label, c.quantity, money(c.unit_price), money(c.amount), CHARGE_STATUS[c.status],
+          .map((c) => [when(c.created_at), c.id, ACCOUNT_LABELS[c.account], CHARGE_KIND[c.kind], c.buyer_kind === 'journalier' ? '' : c.member_no,
+            c.buyer_kind === 'journalier' ? 'Client journalier' : `${c.first_name} ${c.last_name}`, c.reservation_id ?? '', c.label, c.quantity, money(c.unit_price), money(c.amount), CHARGE_STATUS[c.status],
             c.tariff_validated ? 'oui' : 'non', c.created_by_name ?? '']);
         break;
       }
@@ -3477,13 +3478,14 @@ export class Club {
         header = ['Date', 'N° encaissement', 'N° membre', 'Membre', 'Moyen', 'Référence', 'Sous-compte', 'N° ligne', 'Libellé',
           `Montant ${cur}`, 'Saisi par'];
         rows = this.all(
-          `SELECT p.id, p.paid_at, p.method, p.reference, pa.account, pa.amount, pa.charge_id, c.label, m.member_no, m.first_name, m.last_name,
+          `SELECT p.id, p.paid_at, p.method, p.reference, pa.account, pa.amount, pa.charge_id, c.label, m.member_no, m.first_name, m.last_name, m.kind AS buyer_kind,
              u.name AS created_by_name
            FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id JOIN charges c ON c.id = pa.charge_id
            JOIN members m ON m.id = p.member_id LEFT JOIN users u ON u.id = p.created_by
            WHERE p.paid_at >= ? AND p.paid_at < ? ${account ? 'AND pa.account = ?' : ''} ORDER BY p.paid_at, pa.id`,
           ...(account ? [a, b, account] : [a, b]),
-        ).map((r) => [when(r.paid_at), r.id, r.member_no, `${r.first_name} ${r.last_name}`, r.method, r.reference ?? '',
+        ).map((r) => [when(r.paid_at), r.id, r.buyer_kind === 'journalier' ? '' : r.member_no,
+          r.buyer_kind === 'journalier' ? 'Client journalier' : `${r.first_name} ${r.last_name}`, r.method, r.reference ?? '',
           ACCOUNT_LABELS[r.account], r.charge_id, r.label, money(r.amount), r.created_by_name ?? '']);
         break;
       }
