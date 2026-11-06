@@ -85,6 +85,11 @@ const STEPS = [
     features: ['Notes ouvertes encaissées ligne par ligne, en totalité', 'Remboursement tracé avec son motif', 'Détails par sous-compte en bas de page'],
   },
   {
+    boss: true, route: '/caisse', targets: ['#caisse-categories', '[data-tour="cash"]'], icon: 'list', title: 'Par catégorie',
+    body: 'Trois colonnes : Réservation séance, Boisson (Champagne et Autres boissons) et Cigare. En haut, l’argent encaissé ; dessous, tout ce qui a été facturé, payé ou non.',
+    features: ['« à encaisser » : facturé, pas encore payé', 'Une ligne annulée ou remboursée reste visible, barrée', 'Les ventes Boutique sont marquées « Boutique »'],
+  },
+  {
     route: '/caisse', targets: ['[data-tour="cash"] .actions .btn-primary', '[data-tour="cash"]'], icon: 'receipt', title: 'Nouvelle dépense',
     body: '« Nouvelle dépense » : catégorie, montant, caisse ou compte utilisé, et le sous-compte concerné pour suivre sa marge.',
     features: ['L’administrateur et les associés saisissent aussi entrées diverses et transferts', 'Annulation avec motif, jamais de suppression'],

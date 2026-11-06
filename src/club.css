@@ -1086,6 +1086,20 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .cash-columns { container-type: inline-size; }
 .cash-columns-inner { display: grid; gap: 16px; align-items: start; }
 @container (min-width: 860px) { .cash-columns-inner { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* « Par catégorie »: three columns (Boisson twice as wide, its two halves side by side) once the block is wide
+   enough, one under the other below. */
+.cat-columns { container-type: inline-size; }
+.cat-columns-inner, .cat-parts { display: grid; gap: 20px; align-items: start; }
+.cat-col { min-width: 0; }
+.cat-col-head, .cat-part-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+.cat-col-head h3, .cat-part-head h4 { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+.cat-col-head h3 svg, .cat-part-head h4 svg { width: 18px; height: 18px; color: var(--text-3); }
+.cat-part-head { margin-top: 10px; }
+.cat-part > .list { margin-top: 4px; }
+@container (min-width: 960px) {
+  .cat-columns-inner { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr); }
+  .cat-col-boisson .cat-parts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .cash-block .card-head h2, .cash-balance-card .card-head h2 { display: inline-flex; align-items: center; gap: 8px; }
 .cash-block .card-head h2 svg, .cash-balance-card .card-head h2 svg { width: 20px; height: 20px; color: var(--text-3); }
 .cash-balance-card .segmented { flex-wrap: wrap; max-width: 100%; }
