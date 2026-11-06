@@ -134,3 +134,26 @@ test('recettes, dépenses et soldes racontent la même histoire : l’argent re�
   assert.equal(figures(withFund, '').till.opening, 100000 * UM);
   assert.equal(figures(withFund, '').till.in, all.receipts.total);
 });
+
+test('recettes : la Boutique est comptée et montrée à part', async () => {
+  const before = figures(await pageData(), '');
+  const cig = ok(await admin.post('/api/products', { category: 'cigare', name: 'Cigare Boutique', reference: 'CB-1', price: 5000 * UM, initial_stock: 20 })).id;
+  const btl = ok(await admin.post('/api/products', { category: 'bouteille', name: 'Bouteille Boutique', reference: 'BB-1', price: 20000 * UM, initial_stock: 20 })).id;
+  const cash = 'Espèces';
+  // A Boutique sale of 10 000 in cash, a séance of 7 000 in cash.
+  ok(await manager.post('/api/shop/sales', { account: 'cigares', buyer: { kind: 'journalier' }, lines: [{ product_id: cig, quantity: 2 }], method: cash }));
+  const gus = await newMember('Gus');
+  await pay({ charge_ids: [line(gus.id, 'reservations', 7000, 'Séance')], method: cash });
+  // A Boutique sale of 20 000 cancelled the same day: its money comes back out, so it counts 0.
+  const gone = ok(await manager.post('/api/shop/sales', { account: 'alcool', buyer: { kind: 'journalier' }, lines: [{ product_id: btl, quantity: 1 }], method: cash }));
+  ok(await admin.post(`/api/shop/sales/${gone.sale.id}/cancel`, { reason: 'Erreur de caisse' }));
+
+  const data = await pageData();
+  assertOneStory(data);
+  const after = figures(data, '');
+  assert.equal(after.receipts.boutique, 10000 * UM);
+  assert.equal(after.receipts.boutique - before.receipts.boutique, 10000 * UM);
+  assert.equal(after.receipts.total - before.receipts.total, 17000 * UM); // Boutique and séance together
+  assert.equal(figures(data, cash).receipts.boutique, 10000 * UM);
+  assert.equal(figures(data, 'MTN MoMo').receipts.boutique, 0);
+});

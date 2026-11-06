@@ -34,16 +34,26 @@ export function OpenNotes({ groups, onDone, allPeriods = false }) {
   );
 }
 
+const FIGURES = [['billed', 'Facturé (dû)'], ['collected', 'Encaissé'], ['refunded', 'Remboursé'], ['net', 'Net encaissé'],
+  ['outstanding', 'Reste à payer']];
+
+// A figure and, under it, its two parts: the sessions' money and the Boutique's (shown once the Boutique has any).
+function Figure({ a, k, label, split }) {
+  return (
+    <>
+      <div className="calc-line"><span>{label}</span><span>{money(a[k])}</span></div>
+      {split && <div className="calc-line calc-sub"><span>Séances {money(a.seances[k])}</span><span>Boutique {money(a.boutique[k])}</span></div>}
+    </>
+  );
+}
+
 function AccountCard({ a, total = false }) {
+  const split = FIGURES.some(([k]) => a.boutique?.[k]);
   return (
     <div className={`account-card ${total ? 'total' : ''}`}>
       <h3>{total ? 'Total' : <><i className={`dot dot-${a.account}`} /> {a.label}</>}</h3>
       <div className="big">{money(a.net)}</div>
-      <div className="calc-line"><span>Facturé (dû)</span><span>{money(a.billed)}</span></div>
-      <div className="calc-line"><span>Encaissé</span><span>{money(a.collected)}</span></div>
-      <div className="calc-line"><span>Remboursé</span><span>{money(a.refunded)}</span></div>
-      <div className="calc-line"><span>Net encaissé</span><span>{money(a.net)}</span></div>
-      <div className="calc-line"><span>Reste à payer</span><span>{money(a.outstanding)}</span></div>
+      {FIGURES.map(([k, label]) => <Figure key={k} a={a} k={k} label={label} split={split} />)}
       {a.cancelled ? <div className="calc-line"><span>Annulé</span><span>{money(a.cancelled)}</span></div> : null}
     </div>
   );

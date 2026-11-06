@@ -9,6 +9,7 @@ import { openDialog } from '../components/ui/Modal.jsx';
 import { Loaded, Notice, PageHead } from '../components/ui/ui.jsx';
 import PeriodPicker, { usePeriod } from '../components/ui/PeriodPicker.jsx';
 import EntryDialog, { MANAGER_CAP_TEXT } from '../components/cash/EntryDialog.jsx';
+import CashTabs from '../components/cash/CashTabs.jsx';
 import CashBalance from '../components/cash/CashBalance.jsx';
 import CountDialog from '../components/cash/CountDialog.jsx';
 import ReceiptsBlock from '../components/cash/ReceiptsBlock.jsx';
@@ -110,6 +111,7 @@ function AdminCash() {
           </>
         )}
       />
+      <CashTabs />
       <div className="toolbar">
         <PeriodPicker period={period} />
         <label className="cash-account"><span className="subtle">Caisse ou compte</span>
@@ -124,7 +126,7 @@ function AdminCash() {
           <CashBalance t={d.treasury} method={method} entries={d.entries} journal={d.journal} openingBalances={settings.opening_balances} onCount={count} />
           <div className="cash-columns">
             <div className="cash-columns-inner">
-              <ReceiptsBlock journal={d.journal} entries={d.entries} method={method} oneDay={oneDay} isAdmin onChange={state.reload} />
+              <ReceiptsBlock journal={d.journal} entries={d.entries} method={method} oneDay={oneDay} isAdmin onChange={state.reload} shopSplit />
               <ExpensesBlock entries={d.entries} method={method} oneDay={oneDay} isAdmin onChange={state.reload} />
             </div>
           </div>

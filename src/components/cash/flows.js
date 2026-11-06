@@ -44,6 +44,7 @@ export function receiptSummary(journal, entries, { method = '', to, dayOf }) {
   let meals = 0;
   let recharges = 0;
   let card = 0;
+  let boutique = 0;
   for (const p of journal.payments) {
     if (!onAccount(method, p.method)) continue;
     if (p.kind === 'recharge') recharges += paymentAdds(p, to, dayOf);
@@ -52,18 +53,23 @@ export function receiptSummary(journal, entries, { method = '', to, dayOf }) {
       meals += cashOf(p);
       card += p.card_amount ?? 0;
     } else {
-      for (const [k, v] of Object.entries(saleCashByAccount(p))) by[k] += v;
+      for (const [k, v] of Object.entries(saleCashByAccount(p))) {
+        by[k] += v;
+        if (p.shop_sale_id) boutique += v;
+      }
       card += p.card_amount ?? 0;
     }
   }
   const refunds = journal.refunds.filter((r) => onAccount(method, r.method)).reduce((s, r) => s + cashOf(r), 0);
+  // A Boutique sale's money is part of the account lines above; shown apart, less what its cancellation gave back.
+  boutique -= journal.refunds.filter((r) => r.shop_sale_id && onAccount(method, r.method)).reduce((s, r) => s + cashOf(r), 0);
   const other = entries.filter((e) => e.kind === 'recette' && e.status === 'active' && onAccount(method, e.method))
     .reduce((s, e) => s + e.amount, 0);
   const lines = [
     ['Réservations', by.reservations, 'reservations'], ['Alcool', by.alcool, 'alcool'], ['Cigares', by.cigares, 'cigares'],
     ['Repas extérieurs', meals], ['Approvisionnements cartes', recharges], ['Entrées diverses', other],
   ];
-  return { lines, refunds, card, total: lines.reduce((s, [, v]) => s + v, 0) - refunds };
+  return { lines, refunds, card, boutique, total: lines.reduce((s, [, v]) => s + v, 0) - refunds };
 }
 
 // The expenses of the period on the account shown (active ones only).

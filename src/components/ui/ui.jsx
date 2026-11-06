@@ -159,8 +159,9 @@ export function RouteTabs({ items, label }) {
   const { pathname } = useLocation();
   return (
     <nav className="section-tabs no-print" aria-label={label}>
-      {items.map(([path, text, icon]) => {
-        const active = pathname === path || pathname.startsWith(`${path}/`);
+      {items.map(([path, text, icon, exact]) => {
+        // An exact tab (its path is the prefix of a sibling's) lights up on its own path only.
+        const active = pathname === path || (!exact && pathname.startsWith(`${path}/`));
         return (
           <Link key={path} to={path} className={`section-tab ${active ? 'active' : ''}`} aria-current={active ? 'page' : undefined}>
             {icon && <Icon name={icon} />}

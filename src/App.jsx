@@ -21,6 +21,7 @@ import Products from './pages/Products.jsx';
 import Shop from './pages/Shop.jsx';
 import Lounge, { HumidorPage } from './pages/Lounge.jsx';
 import Cash from './pages/Cash.jsx';
+import ShopTab from './components/cash/ShopTab.jsx';
 import Ticket from './pages/Ticket.jsx';
 import TicketHistory from './pages/TicketHistory.jsx';
 import Treasury from './pages/Treasury.jsx';
@@ -183,7 +184,7 @@ export default function App() {
             <Route path="tresorerie" element={<BossOnly><Treasury /></BossOnly>} />
             <Route path="grand-livre" element={<BossOnly><Ledger /></BossOnly>} />
             <Route path="cloture" element={<BossOnly><Closing /></BossOnly>} />
-            <Route path="caisse/boutique" element={<BossOnly><Empty icon="shop">Vente au comptoir : bientôt disponible.</Empty></BossOnly>} />
+            <Route path="caisse/boutique" element={<BossOnly><ShopTab /></BossOnly>} />
             <Route path="journal" element={<BossOnly><AuditJournal /></BossOnly>} />
             <Route path="boutique" element={<Shop />} />
             <Route path="clients" element={<ClientsList />} />
