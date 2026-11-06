@@ -9,7 +9,7 @@ import SessionTimer, { isRunning } from '../components/ui/SessionTimer.jsx';
 import EndingSoonNotice from '../components/ui/EndingSoonNotice.jsx';
 import { money, fmtDuration, dayLabel, dateTime, dayMonth, paymentPurpose, paymentMethodText } from '../lib/format.js';
 import { useLoad } from '../lib/hooks.js';
-import { useIsAdmin } from '../store/useStore.js';
+import { useIsBoss } from '../store/useStore.js';
 import {
   openBookingDialog, openMemberDialog, openSubscriptionDialog, openCardDialog, openAdjustCreditDialog, openPaymentDialog,
   openDeactivateMemberDialog, openReactivateMemberDialog, memberRoomEligibility, openRechargeDialog, openOutsideMealDialog,
@@ -93,7 +93,7 @@ const MOVE_LABEL = {
 };
 
 function WalletMovements({ m, reload }) {
-  const isAdmin = useIsAdmin();
+  const isAdmin = useIsBoss();
   const moves = m.wallet.movements;
   const payments = new Map(m.payments.map((p) => [p.id, p]));
   const cancelled = new Set(moves.filter((w) => w.kind === 'annulation_recharge').map((w) => w.payment_id));
@@ -127,7 +127,7 @@ function WalletMovements({ m, reload }) {
 // The « Carte » tile: the card itself (turned over for its QR code), the two credits under it, then the actions.
 function CardTile({ m, current, summary, reload, book }) {
   const navigate = useNavigate();
-  const isAdmin = useIsAdmin();
+  const isAdmin = useIsBoss();
   const shown = m.cards.find((c) => c.status === 'active') ?? m.cards[0] ?? null;
   const older = m.cards.filter((c) => c !== shown);
   const activeCard = shown?.status === 'active' ? shown : null;
@@ -218,7 +218,7 @@ function CardTile({ m, current, summary, reload, book }) {
 
 function MemberDetail({ m, reload }) {
   const navigate = useNavigate();
-  const isAdmin = useIsAdmin();
+  const isAdmin = useIsBoss();
   const summary = m.subscription;
   const current = m.subscriptions.find((s) => s.id === summary.id && ['active', 'expire_bientot'].includes(summary.state));
   // The booking member may pay the room with his card when his plan has no time left, or when he has none.

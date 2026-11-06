@@ -7,7 +7,7 @@ import { toast } from '../ui/toast.jsx';
 import { api, newKey } from '../../lib/api.js';
 import { ACCOUNT_LABEL, bizToday, dayLabel, parseMoney } from '../../lib/format.js';
 import { useSubmit } from '../../lib/hooks.js';
-import { useIsAdmin, useStore } from '../../store/useStore.js';
+import { useIsBoss, useStore } from '../../store/useStore.js';
 
 const TITLES = { depense: 'Nouvelle dépense', recette: 'Entrée diverse', transfert: 'Transfert entre comptes' };
 const DONE = { depense: 'Dépense enregistrée.', recette: 'Entrée enregistrée.', transfert: 'Transfert enregistré.' };
@@ -19,7 +19,7 @@ export const MANAGER_CAP_TEXT = 'Le gérant enregistre des dépenses de 5 000 FC
 export default function EntryDialog({ close, kind, categories, onDone }) {
   const methods = useStore((s) => s.settings.payment_methods);
   const currency = useStore((s) => s.settings.currency.label);
-  const isAdmin = useIsAdmin();
+  const isAdmin = useIsBoss();
   const today = bizToday();
   const [key] = useState(newKey);
   const options = categories.filter((c) => c.kind === kind && c.active);

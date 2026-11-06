@@ -1,16 +1,16 @@
-// « Compter la caisse » (administrators, from « Soldes »). With no cash fund yet, it asks what each till and account
+// « Compter la caisse » (club management, from « Soldes »; the cash fund form is the administrator's alone). With no cash fund yet, it asks what each till and account
 // holds today and records that as the fund (POST /api/treasury/fund: the opening balances dated today). Once a fund
 // exists, it compares what was counted on one account with the balance the books expect and records the gap
 // (POST /api/treasury/count): a surplus as an other receipt, a shortage as an expense, both « Écart de caisse ». The
 // server computes the expected balance itself; the one shown here is only a preview.
 import { useState } from 'react';
 import { Modal } from '../ui/Modal.jsx';
-import { FormError, Loaded } from '../ui/ui.jsx';
+import { FormError, Loaded, Notice } from '../ui/ui.jsx';
 import { toast } from '../ui/toast.jsx';
 import { api, newKey, qs } from '../../lib/api.js';
 import { bizToday, money, parseMoney } from '../../lib/format.js';
 import { useLoad, useSubmit } from '../../lib/hooks.js';
-import { useStore } from '../../store/useStore.js';
+import { useIsAdmin, useStore } from '../../store/useStore.js';
 import { CARD_METHOD } from '../../../shared/rules.js';
 
 const CASH = 'Espèces';
@@ -28,6 +28,7 @@ export default function CountDialog({ close, method, onDone }) {
   const settings = useStore((s) => s.settings);
   const ob = settings.opening_balances ?? { date: null, amounts: {} };
   const hasFund = !!ob.date || Object.keys(ob.amounts ?? {}).length > 0;
+  const isAdmin = useIsAdmin();
   const today = bizToday();
   // Today's balances: what the books expect, and whether anything moved before today.
   const state = useLoad(() => api.get(`/api/treasury${qs({ from: today, to: today })}`), [today]);
@@ -35,9 +36,21 @@ export default function CountDialog({ close, method, onDone }) {
     <Modal title={hasFund ? 'Compter la caisse' : 'Fond de caisse de départ'} onClose={close}>
       <Loaded state={state}>{(t) => (hasFund
         ? <CountForm close={close} t={t} methods={tills(settings.payment_methods)} initial={method} currency={settings.currency.label} onDone={onDone} />
-        : <FundForm close={close} t={t} methods={tills(settings.payment_methods)} currency={settings.currency.label} onDone={onDone} />
+        : isAdmin
+          ? <FundForm close={close} t={t} methods={tills(settings.payment_methods)} currency={settings.currency.label} onDone={onDone} />
+          : <NoFund close={close} />
       )}</Loaded>
     </Modal>
+  );
+}
+
+// An associé cannot enter the fund (POST /api/treasury/fund is the administrator's alone).
+function NoFund({ close }) {
+  return (
+    <div className="stack">
+      <Notice kind="info">Le fond de caisse de départ n’est pas encore saisi. Demandez à l’administrateur de le saisir.</Notice>
+      <div className="modal-actions"><button type="button" className="btn" onClick={close}>Fermer</button></div>
+    </div>
   );
 }
 

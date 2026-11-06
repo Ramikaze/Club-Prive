@@ -77,7 +77,7 @@ export const relLabel = (rel) => `${pad2(Math.floor(rel / 60) % 24)}:${pad2(rel 
 
 // ---------------------------------------------------------------- labels
 
-export const ROLE_LABEL = { admin: 'Propriétaire / administrateur', gerant: 'Gérant' };
+export { ROLE_LABEL } from '../../shared/roles.js';
 
 export const STATUS = {
   humidor: { conforme: ['Dans les seuils', 'ok'], alerte: ['Hors seuils', 'danger'], a_controler: ['À contrôler', 'warn'] },

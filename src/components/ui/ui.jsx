@@ -6,6 +6,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import Icon from './Icon.jsx';
 import { STATUS, ACCOUNT_LABEL } from '../../lib/format.js';
 import { photoUrl } from '../../lib/photo.js';
+import { useIsAdmin } from '../../store/useStore.js';
 
 export function Chip({ group, value }) {
   const [label, kind] = STATUS[group]?.[value] ?? [value, 'neutral'];
@@ -184,14 +185,17 @@ export function StocksTabs() {
 }
 
 export function AdminTabs() {
+  const isAdmin = useIsAdmin();
   return (
     <RouteTabs
       label="Rubriques Administration"
       items={[
-        ['/parametres', 'Paramètres du club', 'settings'],
+        // The application's own settings belong to the administrator; the other rubriques to the associés too.
+        ...(isAdmin ? [['/parametres', 'Paramètres du club', 'settings']] : []),
         ['/tresorerie', 'Trésorerie & Bilans', 'bank'],
         ['/grand-livre', 'Grand livre', 'book'],
         ['/cloture', 'Clôture mensuelle', 'lock'],
+        ['/journal', 'Journal des opérations', 'journal'],
       ]}
     />
   );

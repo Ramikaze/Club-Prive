@@ -3,6 +3,7 @@
 import { create } from 'zustand';
 import { clearSpace } from '../lib/space.js';
 import { clearActionToasts } from '../components/ui/toast.jsx';
+import { isBoss } from '../../shared/roles.js';
 
 export const useStore = create((set) => ({
   status: 'boot', // boot | login | ready | offline
@@ -44,6 +45,10 @@ export const useStore = create((set) => ({
 
 export const isAdminNow = () => useStore.getState().me?.role === 'admin';
 export const useIsAdmin = () => useStore((s) => s.me?.role === 'admin');
+// Club management: the administrator and the associés. useIsAdmin stays for the application's own settings.
+export const isBossNow = () => isBoss(useStore.getState().me);
+export const useIsBoss = () => useStore((s) => isBoss(s.me));
+export const useMe = () => useStore((s) => s.me);
 export const useSettings = () => useStore((s) => s.settings);
 export const useRooms = () => useStore((s) => s.rooms);
 
