@@ -11,7 +11,8 @@ export default function AuditTable({ audit }) {
         const label = ACTION_LABELS[a.action] ?? a.action;
         let operation = label;
         if (a.entity === 'reservation' && a.entity_id) operation = <Link to={`/reservations/${a.entity_id}`}>{label}</Link>;
-        else if (a.entity === 'member' && a.entity_id) operation = <Link to={`/membres/${a.entity_id}`}>{label}</Link>;
+        // The day client's hidden row has no file to open.
+        else if (a.entity === 'member' && a.entity_id && a.member_kind !== 'journalier') operation = <Link to={`/membres/${a.entity_id}`}>{label}</Link>;
         return (
           <tr key={a.id}>
             <td data-label="Date" className="nowrap">{dateTime(a.at)}</td>
