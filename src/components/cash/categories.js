@@ -17,7 +17,7 @@ export function categoryColumns(sum, billed) {
     {
       key: 'boisson', title: 'Boisson', icon: 'bottle', net: alcool.net,
       parts: [
-        part('champagne', CATEGORY_PLURAL.bouteille, alcool.champagne.net, billed),
+        { ...part('champagne', CATEGORY_PLURAL.bouteille, alcool.champagne.net, billed), icon: 'bottle' },
         { ...part('autres_boissons', CATEGORY_PLURAL.boisson, alcool.autres_boissons.net, billed), icon: 'drink' },
       ],
     },

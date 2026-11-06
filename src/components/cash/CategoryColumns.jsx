@@ -5,7 +5,6 @@ import Icon from '../ui/Icon.jsx';
 import { CashRow, metaLine } from './CashRow.jsx';
 import { categoryColumns, lineTexts } from './categories.js';
 import { dateTime, money } from '../../lib/format.js';
-import { formatTicketNumber } from '../../../shared/ticket.js';
 
 // The origin, with the member's name linked to his file when the line has a member (a day client has none).
 function Origin({ line, text }) {
@@ -16,7 +15,7 @@ function Origin({ line, text }) {
 function BilledLine({ line }) {
   const { title, origin } = lineTexts(line);
   const gone = line.status === 'annulee' || line.status === 'remboursee';
-  const ticket = line.payment_id && <Link to={`/caisse/ticket/${line.payment_id}`} aria-label={`Ticket ${line.ticket_number}`}>{line.ticket_number ?? formatTicketNumber(line.payment_id)}</Link>;
+  const ticket = line.payment_id && <Link to={`/caisse/ticket/${line.payment_id}`} aria-label={`Ticket ${line.ticket_number}`}>{line.ticket_number}</Link>;
   const chip = line.status === 'due' ? <span className="chip chip-warn" key="due">à encaisser</span>
     : gone ? <span className="chip" key="gone">{line.status === 'annulee' ? 'annulée' : 'remboursée'}</span> : null;
   return (
@@ -51,6 +50,7 @@ export default function CategoryColumns({ sum, billed, method }) {
       <div className="card-head">
         <h2><Icon name="list" /> Par catégorie {method && <span className="subtle">toutes caisses et comptes</span>}</h2>
       </div>
+      {!billed ? <p className="subtle">Les lignes facturées n’ont pas pu être chargées. Rechargez la page.</p> : (
       <div className="cat-columns">
         <div className="cat-columns-inner">
           {categoryColumns(sum, billed).map((c) => (
@@ -64,6 +64,7 @@ export default function CategoryColumns({ sum, billed, method }) {
           ))}
         </div>
       </div>
+      )}
       <p className="subtle cash-note">La recette compte l’argent à la date où il est encaissé (ou rendu) ; la liste montre ce qui a été facturé à la date de facturation, payé ou non.</p>
     </section>
   );

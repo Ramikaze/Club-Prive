@@ -22,7 +22,7 @@ after(() => server.destroy());
 const refused = (r, status) => assert.equal(r.status, status, JSON.stringify(r.data));
 const newUser = (body) => admin.post('/api/users', { password: 'v18-some-password', name: 'Compte', ...body });
 
-test('la base passe en version 18 sans toucher aux comptes existants', () => {
+test('la base passe à la dernière version sans toucher aux comptes existants', () => {
   assert.equal(server.db.get("SELECT value FROM meta WHERE key = 'schema_version'").value, String(MIGRATIONS.length));
   assert.equal(server.club.get("SELECT role, rayon FROM users WHERE login = 'admin'").role, 'admin');
   assert.equal(server.club.get('SELECT kind FROM members LIMIT 1')?.kind ?? 'membre', 'membre');

@@ -14,7 +14,6 @@ import { writeWorkbook } from '../utils/exportExcel.js';
 import { searchable, smartFilter } from '../../shared/search.js';
 import { CATEGORIES, CATEGORY_LABEL, CATEGORY_PLURAL, accountOfCategory, canSellIn, ownsAccount } from '../../shared/roles.js';
 
-
 // A boss works only on the products of his rayon (the administrator owns both).
 const ownsProduct = (me, p) => ownsAccount(me, accountOfCategory(p.category));
 

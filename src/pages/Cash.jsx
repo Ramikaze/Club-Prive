@@ -1,7 +1,8 @@
 // The cash desk (/caisse), one page: « Soldes » (administrators), then « Recettes » and « Dépenses » side by side,
 // each with its summary, its detailed list and its total, and under them what is left to collect, the transfers
-// and the folded details. The manager sees the day only, without the balances (treasury is the
-// administrators'), and records the day's expenses within his cap.
+// and the folded details. « Par catégorie » (three columns) sits between the balances and the receipts. The
+// manager sees the day only, without the balances (treasury is the administrators'), and records the day's
+// expenses within his cap.
 import { useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
@@ -74,7 +75,8 @@ function AdminCash() {
   const state = useLoad(async () => {
     const [sum, billed, journal, open, ledger, categories, treasury] = await Promise.all([
       api.get(`/api/finance/summary${qs({ from, to })}`),
-      api.get(`/api/finance/billed${qs({ from, to })}`),
+      // A failure of the billed lines must not take the whole page down: the block says so instead.
+      api.get(`/api/finance/billed${qs({ from, to })}`).catch(() => null),
       api.get(`/api/finance/journal${qs({ from, to })}`),
       api.get('/api/finance/open'),
       api.get(`/api/ledger/entries${qs({ from, to })}`),

@@ -166,11 +166,21 @@ test('une autre boisson se facture en séance, à l’unité entière, au compte
 });
 
 test('l’export des stocks dit Champagne et Autre boisson', async () => {
-  const BTL = ok(await admin.post('/api/products', { category: 'bouteille', name: 'Bouteille test', reference: 'BTL', price: 50000 * UM, initial_stock: 3 })).id;
-  assert.ok(BTL);
+  ok(await admin.post('/api/products', { category: 'bouteille', name: 'Bouteille test', reference: 'BTL', price: 50000 * UM, initial_stock: 3 }));
+  ok(await admin.post('/api/products', drink({ reference: 'DRK-X', initial_stock: 3 })));
   const exported = ok(await admin.get(`/api/export/stock?from=${bundle.biz_today}&format=json`));
-  const text = JSON.stringify(exported);
-  assert.ok(text.includes('"Champagne"'), text);
-  assert.ok(text.includes('"Autre boisson"'), text);
-  assert.ok(!text.includes(`"Bouteille"`), text);
+  // Each product's row carries its own label (found by reference), not just any cell of the file.
+  const rows = exported.rows ?? exported.sheets?.[0]?.rows;
+  const col = (ref) => rows.find((r) => r.includes(ref));
+  assert.equal(col('BTL')[3], 'Champagne');
+  assert.equal(col('DRK-X')[3], 'Autre boisson');
+  assert.ok(!JSON.stringify(exported).includes('"Bouteille"'));
+});
+
+test('les listes de produits vont cigares, champagne, puis autres boissons', async () => {
+  ok(await admin.post('/api/products', { category: 'cigare', name: 'Cigare ordre', reference: 'CIG-O', price: 5000 * UM, initial_stock: 5 }));
+  const order = ok(await admin.get('/api/products')).map((p) => p.category);
+  const rank = { cigare: 0, bouteille: 1, boisson: 2 };
+  assert.deepEqual(order, [...order].sort((x, y) => rank[x] - rank[y]));
+  assert.ok(new Set(order).size === 3, order.join());
 });

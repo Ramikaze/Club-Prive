@@ -140,6 +140,9 @@ const CHARGE_SELECT = `
 
 // A product with the version of its photo (the date of the photo, null without one). One join serves a whole
 // list, and only the date is read: the picture itself is never loaded with the products.
+// Lists run cigars, then champagne, then the other drinks (the order of the filters), not alphabetical on the stored value.
+const PRODUCT_ORDER = "CASE p.category WHEN 'cigare' THEN 0 WHEN 'bouteille' THEN 1 ELSE 2 END";
+
 const PRODUCT_SELECT = `
   SELECT p.*, ph.updated_at AS photo_version,
     EXISTS (SELECT 1 FROM charges c WHERE c.product_id = p.id) AS sold
@@ -2671,7 +2674,8 @@ export class Club {
       throw invalid({
         bouteille: 'Les bouteilles se vendent uniquement entières : indiquez un nombre entier (1 à 99).',
         boisson: 'Les autres boissons se vendent à l’unité entière : indiquez un nombre entier (1 à 99).',
-      }[p.category] ?? 'Les cigares se vendent à l’unité : indiquez un nombre entier (1 à 99).');
+        cigare: 'Les cigares se vendent à l’unité : indiquez un nombre entier (1 à 99).',
+      }[p.category]);
     }
     if (p.stock_qty < qty) throw conflict('STOCK_INSUFFISANT', `Stock insuffisant pour « ${p.name} » : ${p.stock_qty} disponible(s).`);
     // Paid on the spot (`pay_now`: a method, or the card with `card: true` or the card's method), or left on the
@@ -3075,8 +3079,8 @@ export class Club {
 
   listProducts({ includeInactive = false } = {}) {
     const rows = includeInactive
-      ? this.all(`${PRODUCT_SELECT} ORDER BY p.category, p.name`)
-      : this.all(`${PRODUCT_SELECT} WHERE p.active = 1 ORDER BY p.category, p.name`);
+      ? this.all(`${PRODUCT_SELECT} ORDER BY ${PRODUCT_ORDER}, p.name`)
+      : this.all(`${PRODUCT_SELECT} WHERE p.active = 1 ORDER BY ${PRODUCT_ORDER}, p.name`);
     return rows.map((p) => this.productDTO(p));
   }
 
@@ -3385,6 +3389,10 @@ export class Club {
       cash_today: this.financeSummary(today, today),
       lounge: this.loungeOverview(),
     };
+    // The Champagne / Autres boissons split is the administrators' Caisse view: the manager's day keeps his old figures.
+    if (!isBoss(actor)) {
+      result.cash_today = { ...result.cash_today, accounts: result.cash_today.accounts.map(({ champagne, autres_boissons, ...rest }) => rest) };
+    }
     if (isBoss(actor)) {
       result.revenue = {
         week: this.financeSummary(addDays(today, -6), today),

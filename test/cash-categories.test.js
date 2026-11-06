@@ -46,6 +46,13 @@ test('trois colonnes ; Boisson = Champagne + Autres boissons ; la somme = le tot
   const cols = categoryColumns(sum, b);
   assert.deepEqual(cols.map((c) => c.title), ['Réservation séance', 'Boisson', 'Cigare']);
   assert.deepEqual(cols[1].parts.map((p) => p.title), ['Champagne', 'Autres boissons']);
+  // Each column is pinned to its own account, not just to the sum.
+  const acc = (k) => sum.accounts.find((a) => a.account === k);
+  assert.equal(cols[0].net, acc('reservations').net);
+  assert.equal(cols[1].net, acc('alcool').net);
+  assert.equal(cols[2].net, acc('cigares').net);
+  assert.equal(cols[1].parts[0].net, acc('alcool').champagne.net);
+  assert.equal(cols[1].parts[1].net, acc('alcool').autres_boissons.net);
   assert.equal(cols[1].net, cols[1].parts[0].net + cols[1].parts[1].net);
   assert.equal(cols.reduce((s, c) => s + c.net, 0), sum.total.net);
   assert.deepEqual(cols[1].parts[1].lines, b.columns.autres_boissons.lines);
@@ -59,4 +66,11 @@ test('textes d’une ligne facturée', () => {
   assert.equal(lineTexts({ ...base, kind: 'produit', shop_sale_id: 3, reservation_id: null, member_name: 'Client journalier' }).origin, 'Boutique · Client journalier');
   assert.equal(lineTexts({ ...base, kind: 'temps_supplementaire', label: 'Temps supplémentaire (1 h)' }).origin, 'Séance n° 12 · Salon · Jean TEST');
   assert.equal(lineTexts({ ...base, kind: 'produit', reservation_id: null }).origin, 'Jean TEST');
+});
+
+test('le tableau de bord du gérant ne porte pas la répartition Champagne / Autres boissons', async () => {
+  const alcool = (d) => d.cash_today.accounts.find((a) => a.account === 'alcool');
+  assert.equal(alcool(ok(await ger.get('/api/dashboard'))).champagne, undefined);
+  assert.equal(alcool(ok(await ger.get('/api/dashboard'))).autres_boissons, undefined);
+  assert.ok(alcool(ok(await admin.get('/api/dashboard'))).champagne);
 });
