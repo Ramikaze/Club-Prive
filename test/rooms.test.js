@@ -343,6 +343,9 @@ test('démonstration : une séance est déjà en cours au chargement, avec ses c
   Date.now = () => loadedAt;
   try {
     seedDemo(server.club, { actor: author });
+    const demoCategory = Object.fromEntries(server.club.all('SELECT name, category FROM products WHERE is_demo = 1').map((p) => [p.name, p.category]));
+    for (const name of ['Whisky 12 ans (démo)', 'Cognac VSOP (démo)', 'Rhum ambré (démo)']) assert.equal(demoCategory[name], 'boisson', name);
+    assert.equal(demoCategory['Champagne brut (démo)'], 'bouteille');
     const live = ok(await manager.get('/api/dashboard')).rooms_status.filter((rm) => rm.current?.status === 'en_cours');
     assert.equal(live.length, 1, JSON.stringify(live.map((rm) => rm.name)));
     const session = live[0].current;

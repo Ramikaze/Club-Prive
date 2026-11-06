@@ -95,7 +95,7 @@ function LiveRoom({ rm, bizDay, onReload }) {
           <EndingSoonNotice reservation={r} onExtended={onReload} />
           <div className="live-room-actions">
             <button type="button" className="btn btn-sm btn-primary" onClick={() => openConsumptionDialog(r, onReload)}>
-              <Icon name="plus" /> Bouteille / Cigare
+              <Icon name="plus" /> Boisson / Cigare
             </button>
           </div>
         </>
@@ -269,7 +269,7 @@ export default function Dashboard() {
                     {d.stock_alerts.length > 0 && (
                       <Link className="list-item" to="/produits">
                         <div className="grow">
-                          <div className="title">Cigares & bouteilles à réapprovisionner</div>
+                          <div className="title">Produits à réapprovisionner</div>
                           <div className="meta">{d.stock_alerts.slice(0, 3).map((p) => p.name).join(', ')}{d.stock_alerts.length > 3 ? '…' : ''}</div>
                         </div>
                         <span className="chip chip-danger">{count(d.stock_alerts.length, 'produit', 'produits')}</span><Go />
@@ -300,7 +300,7 @@ export default function Dashboard() {
                       <div className="list-item">
                         <div className="grow">
                           <div className="title">Aucune alerte en cours</div>
-                          <div className="meta">Salles, stocks de cigares et bouteilles, caves et abonnements sont à jour.</div>
+                          <div className="meta">Salles, stocks des produits, caves et abonnements sont à jour.</div>
                         </div>
                         <span className="chip chip-ok"><Icon name="check" /> Parfait</span>
                       </div>

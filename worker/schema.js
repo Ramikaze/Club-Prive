@@ -708,7 +708,41 @@ const V18 = [
   'CREATE INDEX payments_shop_sale ON payments(shop_sale_id)',
 ];
 
-export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18];
+// A third product category, « boisson » (other drinks): the CHECK on `products.category` cannot be altered, so the
+// table is rebuilt as in V15 and V18. The rows wait in a plain copy while it is dropped and created again (never
+// renamed: a rename would repoint the foreign keys of the tables that cite a product at the copy), the deferred
+// foreign keys let those tables hold orphans for that moment, and the products copied back with the same ids make
+// them whole. Nothing moves: ids, stock, photos and every charge, movement or sale that cites a product stay as they
+// were. The index lets a product's charges be found without scanning the table.
+const V19 = [
+  'PRAGMA defer_foreign_keys = ON',
+  'CREATE TABLE products_v18 AS SELECT * FROM products',
+  'DROP TABLE products',
+  `CREATE TABLE products (
+    id INTEGER PRIMARY KEY,
+    category TEXT NOT NULL CHECK (category IN ('cigare', 'bouteille', 'boisson')),
+    name TEXT NOT NULL,
+    reference TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    description TEXT,
+    price INTEGER NOT NULL CHECK (price >= 0),
+    stock_qty INTEGER NOT NULL DEFAULT 0 CHECK (stock_qty >= 0),
+    low_stock_threshold INTEGER NOT NULL DEFAULT 3 CHECK (low_stock_threshold >= 0),
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    is_demo INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    updated_at TEXT,
+    updated_by INTEGER REFERENCES users(id)
+  )`,
+  `INSERT INTO products (id, category, name, reference, description, price, stock_qty, low_stock_threshold, active, is_demo,
+     created_at, created_by, updated_at, updated_by)
+   SELECT id, category, name, reference, description, price, stock_qty, low_stock_threshold, active, is_demo,
+     created_at, created_by, updated_at, updated_by FROM products_v18`,
+  'DROP TABLE products_v18',
+  'CREATE INDEX charges_product ON charges(product_id)',
+];
+
+export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19];
 
 export function migrate(db) {
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');

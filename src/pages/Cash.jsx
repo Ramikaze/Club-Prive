@@ -1,7 +1,8 @@
 // The cash desk (/caisse), one page: « Soldes » (administrators), then « Recettes » and « Dépenses » side by side,
 // each with its summary, its detailed list and its total, and under them what is left to collect, the transfers
-// and the folded details. The manager sees the day only, without the balances (treasury is the
-// administrators'), and records the day's expenses within his cap.
+// and the folded details. « Par catégorie » (three columns) sits between the balances and the receipts. The
+// manager sees the day only, without the balances (treasury is the administrators'), and records the day's
+// expenses within his cap.
 import { useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
@@ -14,6 +15,7 @@ import CashBalance from '../components/cash/CashBalance.jsx';
 import CountDialog from '../components/cash/CountDialog.jsx';
 import ReceiptsBlock from '../components/cash/ReceiptsBlock.jsx';
 import ExpensesBlock, { TransfersBlock } from '../components/cash/ExpensesBlock.jsx';
+import CategoryColumns from '../components/cash/CategoryColumns.jsx';
 import { Details, OpenNotes } from '../components/cash/CashDetails.jsx';
 import { DayClosingBar } from '../components/cash/CloseDay.jsx';
 import { api, qs } from '../lib/api.js';
@@ -71,15 +73,17 @@ function AdminCash() {
   const period = useCashPeriod();
   const { from, to } = period;
   const state = useLoad(async () => {
-    const [sum, journal, open, ledger, categories, treasury] = await Promise.all([
+    const [sum, billed, journal, open, ledger, categories, treasury] = await Promise.all([
       api.get(`/api/finance/summary${qs({ from, to })}`),
+      // A failure of the billed lines must not take the whole page down: the block says so instead.
+      api.get(`/api/finance/billed${qs({ from, to })}`).catch(() => null),
       api.get(`/api/finance/journal${qs({ from, to })}`),
       api.get('/api/finance/open'),
       api.get(`/api/ledger/entries${qs({ from, to })}`),
       api.get('/api/ledger/categories'),
       api.get(`/api/treasury${qs({ from, to })}`),
     ]);
-    return { sum, journal, open, entries: ledger.entries, categories, treasury };
+    return { sum, billed, journal, open, entries: ledger.entries, categories, treasury };
   }, [from, to]);
   useScrollToBlock(period.params.get('type'), !!state.data);
 
@@ -124,6 +128,7 @@ function AdminCash() {
         <div className="cash-page">
           <DayClosingBar isAdmin onChange={state.reload} />
           <CashBalance t={d.treasury} method={method} entries={d.entries} journal={d.journal} openingBalances={settings.opening_balances} onCount={count} />
+          <CategoryColumns sum={d.sum} billed={d.billed} method={method} />
           <div className="cash-columns">
             <div className="cash-columns-inner">
               <ReceiptsBlock journal={d.journal} entries={d.entries} method={method} oneDay={oneDay} isAdmin onChange={state.reload} shopSplit />

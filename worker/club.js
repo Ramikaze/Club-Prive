@@ -9,6 +9,7 @@ import { text, int, toId, flag, frDate } from './validate.js';
 import { ledgerMethods, DEFAULT_CATEGORIES, OUTSIDE_MEAL_CATEGORY, CASH_GAP_CATEGORY } from './ledger.js';
 import { loungeMethods } from './lounge.js';
 import { shopMethods, buyerShown } from './shop.js';
+import { billedMethods, DRINK_PART_SQL } from './billed.js';
 import {
   newTicketCode, formatTicketNumber, normalizeTicketCode, memberInitials, paymentLines, TICKET_CODE_LENGTH,
 } from '../shared/ticket.js';
@@ -23,7 +24,7 @@ import {
   formatFirstName, formatLastName, CASH_METHOD, DEFAULT_CLOSE,
 } from '../shared/rules.js';
 import { waDigits } from '../shared/whatsapp.js';
-import { ROLES, RAYONS, isBoss, ownsAccount, accountOfCategory } from '../shared/roles.js';
+import { ROLES, RAYONS, CATEGORIES, CATEGORY_LABEL, isBoss, ownsAccount, accountOfCategory } from '../shared/roles.js';
 
 // A session has one member, its holder; whoever comes with the holder is a guest, not a member.
 const oneMemberOnly = () => invalid(
@@ -139,8 +140,12 @@ const CHARGE_SELECT = `
 
 // A product with the version of its photo (the date of the photo, null without one). One join serves a whole
 // list, and only the date is read: the picture itself is never loaded with the products.
+// Lists run cigars, then champagne, then the other drinks (the order of the filters), not alphabetical on the stored value.
+const PRODUCT_ORDER = "CASE p.category WHEN 'cigare' THEN 0 WHEN 'bouteille' THEN 1 ELSE 2 END";
+
 const PRODUCT_SELECT = `
-  SELECT p.*, ph.updated_at AS photo_version
+  SELECT p.*, ph.updated_at AS photo_version,
+    EXISTS (SELECT 1 FROM charges c WHERE c.product_id = p.id) AS sold
   FROM products p
   LEFT JOIN product_photos ph ON ph.product_id = p.id`;
 
@@ -2666,9 +2671,11 @@ export class Club {
     if (!p.active) throw conflict('PRODUIT_INACTIF', `Le produit « ${p.name} » est inactif.`);
     const qty = typeof input.quantity === 'string' ? Number(input.quantity) : input.quantity;
     if (!Number.isInteger(qty) || qty < 1 || qty > 99) {
-      throw invalid(p.category === 'bouteille'
-        ? 'Les bouteilles se vendent uniquement entières : indiquez un nombre entier (1 à 99).'
-        : 'Les cigares se vendent à l’unité : indiquez un nombre entier (1 à 99).');
+      throw invalid({
+        bouteille: 'Les bouteilles se vendent uniquement entières : indiquez un nombre entier (1 à 99).',
+        boisson: 'Les autres boissons se vendent à l’unité entière : indiquez un nombre entier (1 à 99).',
+        cigare: 'Les cigares se vendent à l’unité : indiquez un nombre entier (1 à 99).',
+      }[p.category]);
     }
     if (p.stock_qty < qty) throw conflict('STOCK_INSUFFISANT', `Stock insuffisant pour « ${p.name} » : ${p.stock_qty} disponible(s).`);
     // Paid on the spot (`pay_now`: a method, or the card with `card: true` or the card's method), or left on the
@@ -2677,7 +2684,7 @@ export class Club {
     if (payNow !== null && (typeof payNow !== 'object' || Array.isArray(payNow))) throw invalid('Paiement immédiat invalide.');
     // Everything served in a session is charged to its holder, the only member there (a consumer sent by an
     // older screen is ignored).
-    const account = p.category === 'cigare' ? 'cigares' : 'alcool';
+    const account = accountOfCategory(p.category);
     const chargeId = this.insertCharge(actor, {
       account, kind: 'produit', member_id: r.member_id, reservation_id: r.id, product_id: p.id,
       label: p.name, quantity: qty, unit_price: p.price,
@@ -3060,6 +3067,8 @@ export class Club {
       id: p.id, category: p.category, name: p.name, reference: p.reference, description: p.description, price: p.price,
       stock_qty: p.stock_qty, low_stock_threshold: p.low_stock_threshold, active: !!p.active, is_demo: !!p.is_demo,
       low: p.stock_qty <= p.low_stock_threshold, out: p.stock_qty === 0, photo_version: p.photo_version ?? null,
+      // At least one charge (any status, session or Boutique): the category no longer changes.
+      sold: !!p.sold,
     };
   }
 
@@ -3070,15 +3079,15 @@ export class Club {
 
   listProducts({ includeInactive = false } = {}) {
     const rows = includeInactive
-      ? this.all(`${PRODUCT_SELECT} ORDER BY p.category, p.name`)
-      : this.all(`${PRODUCT_SELECT} WHERE p.active = 1 ORDER BY p.category, p.name`);
+      ? this.all(`${PRODUCT_SELECT} ORDER BY ${PRODUCT_ORDER}, p.name`)
+      : this.all(`${PRODUCT_SELECT} WHERE p.active = 1 ORDER BY ${PRODUCT_ORDER}, p.name`);
     return rows.map((p) => this.productDTO(p));
   }
 
   productFields(input, current = {}) {
     const pick = (k) => (input[k] !== undefined ? input[k] : current[k]);
     const category = pick('category');
-    if (!['cigare', 'bouteille'].includes(category)) throw invalid('Catégorie invalide (cigare ou bouteille).');
+    if (!CATEGORIES.includes(category)) throw invalid('Catégorie invalide (cigare, champagne ou autre boisson).');
     const name = text(pick('name'), 'Nom du produit', { required: true, max: 80 });
     const reference = text(pick('reference'), 'Référence', { required: true, max: 40 });
     const description = text(pick('description'), 'Description', { max: 300 });
@@ -3119,14 +3128,18 @@ export class Club {
       && this.get('SELECT 1 AS x FROM products WHERE reference = ? AND id <> ?', f.reference, p.id)) {
       throw conflict('REFERENCE_PRISE', 'Cette référence existe déjà.');
     }
+    // The Champagne / Autres boissons split follows the current category: past figures must not move.
+    if (f.category !== p.category && this.get('SELECT 1 AS x FROM charges WHERE product_id = ? LIMIT 1', p.id)) {
+      throw conflict('CATEGORIE_VENDUE', 'Ce produit a déjà été vendu : sa catégorie ne change plus. Créez un nouveau produit et désactivez celui-ci.');
+    }
     this.run(
       `UPDATE products SET category = ?, name = ?, reference = ?, description = ?, price = ?, low_stock_threshold = ?, active = ?,
          updated_at = ?, updated_by = ? WHERE id = ?`,
       f.category, f.name, f.reference, f.description, f.price, f.threshold, f.active ? 1 : 0, this.nowIso(), actor.id, p.id,
     );
     this.audit(actor, 'produit.modifier', 'product', p.id, {
-      avant: { name: p.name, reference: p.reference, price: p.price, low_stock_threshold: p.low_stock_threshold, active: !!p.active },
-      apres: { name: f.name, reference: f.reference, price: f.price, low_stock_threshold: f.threshold, active: f.active },
+      avant: { category: p.category, name: p.name, reference: p.reference, price: p.price, low_stock_threshold: p.low_stock_threshold, active: !!p.active },
+      apres: { category: f.category, name: f.name, reference: f.reference, price: f.price, low_stock_threshold: f.threshold, active: f.active },
     });
     return this.productById(p.id);
   }
@@ -3376,6 +3389,10 @@ export class Club {
       cash_today: this.financeSummary(today, today),
       lounge: this.loungeOverview(),
     };
+    // The Champagne / Autres boissons split is the administrators' Caisse view: the manager's day keeps his old figures.
+    if (!isBoss(actor)) {
+      result.cash_today = { ...result.cash_today, accounts: result.cash_today.accounts.map(({ champagne, autres_boissons, ...rest }) => rest) };
+    }
     if (isBoss(actor)) {
       result.revenue = {
         week: this.financeSummary(addDays(today, -6), today),
@@ -3394,12 +3411,27 @@ export class Club {
     const empty = (key, label) => ({ account: key, label, ...zero(), seances: zero(), boutique: zero() });
     const acc = Object.fromEntries(ACCOUNTS.map((k) => [k, empty(k, ACCOUNT_LABELS[k])]));
     const part = (x, shop) => (shop ? x.boutique : x.seances);
+    // The Alcool account is also split in two halves, Champagne and Autres boissons (DRINK_PART_SQL decides), each
+    // computed by the same queries, so the two halves always add up to the account. Other accounts have no halves.
+    acc.alcool.champagne = zero();
+    acc.alcool.autres_boissons = zero();
+    const half = (r) => (r.account === 'alcool' ? acc.alcool[r.drink] : null);
     for (const r of this.all(
-      `SELECT account, status, shop_sale_id IS NOT NULL AS shop, SUM(amount) AS total, COUNT(*) AS n FROM charges
-       WHERE created_at >= ? AND created_at < ? GROUP BY account, status, shop`, a, b,
+      `SELECT c.account, c.status, c.shop_sale_id IS NOT NULL AS shop, ${DRINK_PART_SQL} AS drink, SUM(c.amount) AS total, COUNT(*) AS n
+       FROM charges c LEFT JOIN products pr ON pr.id = c.product_id
+       WHERE c.created_at >= ? AND c.created_at < ? GROUP BY c.account, c.status, shop, drink`, a, b,
     )) {
       const x = acc[r.account];
       const y = part(x, r.shop);
+      const h = half(r);
+      if (h) {
+        if (r.status === 'annulee') h.cancelled += r.total;
+        else {
+          h.billed += r.total;
+          h.lines += r.n;
+        }
+        if (r.status === 'due') h.outstanding += r.total;
+      }
       if (r.status === 'annulee') {
         x.cancelled += r.total;
         y.cancelled += r.total;
@@ -3415,21 +3447,29 @@ export class Club {
       }
     }
     for (const r of this.all(
-      `SELECT pa.account, p.shop_sale_id IS NOT NULL AS shop, SUM(pa.amount) AS total FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
-       WHERE p.paid_at >= ? AND p.paid_at < ? GROUP BY pa.account, shop`, a, b,
+      `SELECT pa.account, p.shop_sale_id IS NOT NULL AS shop, ${DRINK_PART_SQL} AS drink, SUM(pa.amount) AS total
+       FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
+       LEFT JOIN charges c ON c.id = pa.charge_id LEFT JOIN products pr ON pr.id = c.product_id
+       WHERE p.paid_at >= ? AND p.paid_at < ? GROUP BY pa.account, shop, drink`, a, b,
     )) {
       acc[r.account].collected += r.total;
+      const h = half(r);
+      if (h) h.collected += r.total;
       part(acc[r.account], r.shop).collected += r.total;
     }
     for (const r of this.all(
-      `SELECT rf.account, c.shop_sale_id IS NOT NULL AS shop, SUM(rf.amount) AS total FROM refunds rf JOIN charges c ON c.id = rf.charge_id
-       WHERE rf.created_at >= ? AND rf.created_at < ? GROUP BY rf.account, shop`, a, b,
+      `SELECT rf.account, c.shop_sale_id IS NOT NULL AS shop, ${DRINK_PART_SQL} AS drink, SUM(rf.amount) AS total
+       FROM refunds rf JOIN charges c ON c.id = rf.charge_id LEFT JOIN products pr ON pr.id = c.product_id
+       WHERE rf.created_at >= ? AND rf.created_at < ? GROUP BY rf.account, shop, drink`, a, b,
     )) {
       acc[r.account].refunded += r.total;
+      const h = half(r);
+      if (h) h.refunded += r.total;
       part(acc[r.account], r.shop).refunded += r.total;
     }
     const accounts = ACCOUNTS.map((k) => {
       for (const y of [acc[k], acc[k].seances, acc[k].boutique]) y.net = y.collected - y.refunded;
+      if (k === 'alcool') for (const y of [acc.alcool.champagne, acc.alcool.autres_boissons]) y.net = y.collected - y.refunded;
       return acc[k];
     });
     const total = empty('total', 'Total');
@@ -3577,7 +3617,7 @@ export class Club {
           `SELECT sm.*, p.name, p.reference, p.category, u.name AS created_by_name FROM stock_movements sm
            JOIN products p ON p.id = sm.product_id LEFT JOIN users u ON u.id = sm.created_by
            WHERE sm.created_at >= ? AND sm.created_at < ? ORDER BY sm.id`, a, b,
-        ).map((m) => [when(m.created_at), m.name, m.reference, m.category === 'cigare' ? 'Cigare' : 'Bouteille', STOCK_KIND[m.kind],
+        ).map((m) => [when(m.created_at), m.name, m.reference, CATEGORY_LABEL[m.category], STOCK_KIND[m.kind],
           m.quantity, m.stock_after, m.charge_id ?? '', m.reason ?? '', m.created_by_name ?? '']);
         break;
       }
@@ -3770,3 +3810,4 @@ export class Club {
 Object.assign(Club.prototype, ledgerMethods);
 Object.assign(Club.prototype, loungeMethods);
 Object.assign(Club.prototype, shopMethods);
+Object.assign(Club.prototype, billedMethods);

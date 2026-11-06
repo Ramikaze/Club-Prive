@@ -78,10 +78,10 @@ function fill(club, { actor, catalogue }) {
   const robusto = product('cigare', 'Robusto (démo)', 'CIG-DEMO-01', 10000, 30, 6);
   const corona = product('cigare', 'Corona (démo)', 'CIG-DEMO-02', 8000, 20, 6);
   product('cigare', 'Churchill (démo)', 'CIG-DEMO-03', 15000, 3, 3);
-  const whisky = product('bouteille', 'Whisky 12 ans (démo)', 'BOU-DEMO-01', 40000, 10, 3);
+  const whisky = product('boisson', 'Whisky 12 ans (démo)', 'BOU-DEMO-01', 40000, 10, 3);
   const champagne = product('bouteille', 'Champagne brut (démo)', 'BOU-DEMO-02', 60000, 6, 2);
-  product('bouteille', 'Cognac VSOP (démo)', 'BOU-DEMO-03', 55000, 2, 2);
-  product('bouteille', 'Rhum ambré (démo)', 'BOU-DEMO-04', 35000, 0, 1);
+  product('boisson', 'Cognac VSOP (démo)', 'BOU-DEMO-03', 55000, 2, 2);
+  product('boisson', 'Rhum ambré (démo)', 'BOU-DEMO-04', 35000, 0, 1);
   club.at = realNow - 30 * DAY;
   club.stockOperation(manager, whisky, { kind: 'entree', quantity: 4, reason: 'Livraison fournisseur (démo)' });
 

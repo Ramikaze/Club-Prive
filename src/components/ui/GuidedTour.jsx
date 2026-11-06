@@ -26,7 +26,7 @@ const STEPS = [
   },
   {
     route: '/', targets: ['[data-tour="live-rooms"]', '[data-tour="dashboard"]'], icon: 'rooms', title: 'Les salles en direct',
-    body: 'Pour chaque salle : le titulaire, le nombre de personnes, l’horaire et le temps déjà passé en salle. Ajoutez une bouteille ou un cigare sans quitter l’accueil.',
+    body: 'Pour chaque salle : le titulaire, le nombre de personnes, l’horaire et le temps déjà passé en salle. Ajoutez une boisson ou un cigare sans quitter l’accueil.',
   },
   {
     route: '/salles', targets: ['.rooms-grid'], icon: 'rooms', title: 'Salles & salons',
@@ -46,7 +46,7 @@ const STEPS = [
   {
     route: '/salles', targets: ['.room-card .conso', '.room-card.is-occupied', '.rooms-grid'], icon: 'receipt', title: 'Consommations de la séance',
     body: 'Tout ce qui est servi dans la salle, invités compris, est au nom du titulaire : Cigares et Alcool dans des parties séparées avec leur sous-total, puis le total de la séance en bas.',
-    features: ['« Facturer bouteille / cigare » : touchez le produit (+1)', 'Règlement « À la note » (payé à la fin) ou « Payer maintenant », en espèces par exemple, avec son ticket', '« Libérer la salle » termine la séance et consomme le crédit du titulaire'],
+    features: ['« Facturer boisson / cigare » : touchez le produit (+1)', 'Règlement « À la note » (payé à la fin) ou « Payer maintenant », en espèces par exemple, avec son ticket', '« Libérer la salle » termine la séance et consomme le crédit du titulaire'],
   },
   {
     route: '/agenda', targets: ['[data-tour="agenda-views"]', '[data-tour="agenda"]'], icon: 'calendar', title: 'Vues de l’agenda',
@@ -72,8 +72,8 @@ const STEPS = [
   },
   {
     route: '/produits', targets: ['[data-tour="products"]'], icon: 'box', title: 'Catalogue & stocks',
-    body: 'Cigares et bouteilles (vendues entières uniquement) avec leur stock. Entrées et ajustements avec motif ; chaque mouvement reste dans l’historique du produit.',
-    features: ['Alerte quand un stock passe sous son seuil', 'Onglet Cave pour la conservation'],
+    body: 'Cigares, champagne et autres boissons (vendus entiers uniquement) avec leur stock. Entrées et ajustements avec motif ; chaque mouvement reste dans l’historique du produit.',
+    features: ['Filtres Tous, Cigares, Champagne, Autres boissons', 'Alerte quand un stock passe sous son seuil', 'Onglet Cave pour la conservation'],
   },
   {
     route: '/lounge', targets: ['.humidor-card', '[data-tour="lounge"]'], icon: 'humidor', title: 'Cave à cigares',
@@ -83,6 +83,11 @@ const STEPS = [
     route: '/caisse', targets: ['#caisse-recettes', '[data-tour="cash"]'], icon: 'wallet', title: 'Caisse',
     body: 'Une seule page : les soldes, puis les recettes et les dépenses de la période, chacune détaillée avec son total. Les recettes sont ventilées exactement entre Réservations, Alcool et Cigares.',
     features: ['Notes ouvertes encaissées ligne par ligne, en totalité', 'Remboursement tracé avec son motif', 'Détails par sous-compte en bas de page'],
+  },
+  {
+    boss: true, route: '/caisse', targets: ['#caisse-categories', '[data-tour="cash"]'], icon: 'list', title: 'Par catégorie',
+    body: 'Trois colonnes : Réservation séance, Boisson (Champagne et Autres boissons) et Cigare. En haut, l’argent encaissé ; dessous, tout ce qui a été facturé, payé ou non.',
+    features: ['« à encaisser » : facturé, pas encore payé', 'Une ligne annulée ou remboursée reste visible, barrée', 'Les ventes Boutique sont marquées « Boutique »'],
   },
   {
     route: '/caisse', targets: ['[data-tour="cash"] .actions .btn-primary', '[data-tour="cash"]'], icon: 'receipt', title: 'Nouvelle dépense',
