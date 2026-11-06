@@ -8,6 +8,7 @@ import { searchable, smartFilter } from '../shared/search.js';
 import { text, int, toId, flag, frDate } from './validate.js';
 import { ledgerMethods, DEFAULT_CATEGORIES, OUTSIDE_MEAL_CATEGORY, CASH_GAP_CATEGORY } from './ledger.js';
 import { loungeMethods } from './lounge.js';
+import { shopMethods } from './shop.js';
 import {
   newTicketCode, formatTicketNumber, normalizeTicketCode, memberInitials, paymentLines, TICKET_CODE_LENGTH,
 } from '../shared/ticket.js';
@@ -660,6 +661,30 @@ export class Club {
     return m;
   }
 
+  // The file of a member or regular client. The hidden walk-in row has none: it is read by sales, payments and
+  // tickets through memberRow, never opened or edited.
+  fileRow(id) {
+    const m = this.memberRow(id);
+    if (m.kind === 'journalier') throw notFound('Membre');
+    return m;
+  }
+
+  // The next number with this prefix ('M' members, 'C' regular clients): one more than the highest in use, so the
+  // two sequences are independent and existing numbers never move.
+  nextMemberNo(prefix) {
+    const { n } = this.get(
+      'SELECT COALESCE(MAX(CAST(SUBSTR(member_no, 3) AS INTEGER)), 0) AS n FROM members WHERE member_no LIKE ?', `${prefix}-%`,
+    );
+    return `${prefix}-${String(n + 1).padStart(4, '0')}`;
+  }
+
+  // Plans, cards, recharges, meals and bookings are for members: a regular client must be made a member first.
+  assertIsMember(m, what) {
+    if (m.kind !== 'membre') {
+      throw conflict('PAS_MEMBRE', `${m.first_name} ${m.last_name} est un client régulier : passez-le en membre avant ${what}.`);
+    }
+  }
+
   memberFields(input, current = {}) {
     const pick = (k) => (input[k] !== undefined ? input[k] : current[k]);
     const first = formatFirstName(text(pick('first_name'), 'Prénom', { required: true, max: 60 }));
@@ -674,8 +699,7 @@ export class Club {
 
   createMember(actor, input, { demo = false } = {}) {
     const f = this.memberFields(input);
-    const { n } = this.get('SELECT COALESCE(MAX(id), 0) + 1 AS n FROM members');
-    const memberNo = `M-${String(n).padStart(4, '0')}`;
+    const memberNo = this.nextMemberNo('M');
     const id = this.insert(
       `INSERT INTO members (member_no, first_name, last_name, phone, email, notes, is_demo, created_at, created_by)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -687,7 +711,7 @@ export class Club {
   }
 
   updateMember(actor, memberId, input) {
-    const m = this.memberRow(memberId);
+    const m = this.fileRow(memberId);
     const f = this.memberFields(input, m);
     this.run(
       'UPDATE members SET first_name = ?, last_name = ?, phone = ?, email = ?, notes = ?, updated_at = ?, updated_by = ? WHERE id = ?',
@@ -709,7 +733,7 @@ export class Club {
   }
 
   deactivateMember(actor, memberId, input) {
-    const m = this.memberRow(memberId);
+    const m = this.fileRow(memberId);
     if (m.active === 0) throw conflict('DEJA_DESACTIVE', 'Ce membre est déjà désactivé.');
     const reason = text(input.reason, 'Motif de la désactivation', { required: true, min: 3, max: 300 });
     const { n } = this.get(
@@ -730,7 +754,7 @@ export class Club {
   }
 
   reactivateMember(actor, memberId) {
-    const m = this.memberRow(memberId);
+    const m = this.fileRow(memberId);
     if (m.active !== 0) throw conflict('DEJA_ACTIF', 'Ce membre est déjà actif.');
     this.run(
       'UPDATE members SET active = 1, deactivated_at = NULL, deactivated_by = NULL, deactivation_reason = NULL, updated_at = ?, updated_by = ? WHERE id = ?',
@@ -871,33 +895,43 @@ export class Club {
       id: m.id, member_no: m.member_no, first_name: m.first_name, last_name: m.last_name,
       name: `${m.first_name} ${m.last_name}`, phone: m.phone, email: m.email, notes: m.notes,
       is_demo: !!m.is_demo, created_at: m.created_at,
+      kind: m.kind, former_client_no: m.former_client_no ?? null, became_member_at: m.became_member_at ?? null,
       card_code: this.activeCardCode(m.id),
       active: m.active !== 0, deactivated_at: m.deactivated_at ?? null, deactivation_reason: m.deactivation_reason ?? null,
     };
   }
 
-  // statut: 'actifs' (default), 'desactives' or 'tous'.
-  listMembers(q, statut = 'actifs') {
-    const keep = statut === 'tous' ? () => true : statut === 'desactives' ? (m) => m.active === 0 : (m) => m.active !== 0;
+  // The rows of one kind ('membre' or 'client') matching the search, in name order. The walk-in row is never
+  // returned: no list asks for its kind.
+  searchMemberRows(q, kind) {
     let raw = typeof q === 'string' ? q.trim() : '';
     const qrCardMatch = raw.match(/[?&]card=([A-Z0-9-]{4,40})/i);
     if (qrCardMatch) raw = qrCardMatch[1];
     const query = raw.slice(0, 60);
-    let rows;
     if (searchable(query)) {
       // Forgiving search (shared/search.js) on the name both ways round, the phone (also as bare digits), the member
       // number and the card codes.
       const all = this.all(
         `SELECT m.*, (SELECT GROUP_CONCAT(c.code, ' ') FROM cards c WHERE c.member_id = m.id) AS card_codes
-         FROM members m ORDER BY m.last_name, m.first_name`,
+         FROM members m WHERE m.kind = ? ORDER BY m.last_name, m.first_name`, kind,
       );
-      rows = smartFilter(all, query, (m) => [
+      return smartFilter(all, query, (m) => [
         `${m.first_name} ${m.last_name}`, `${m.last_name} ${m.first_name}`, m.member_no, m.phone,
         String(m.phone ?? '').replace(/\D/g, ''), m.card_codes,
       ]).slice(0, 200);
-    } else {
-      rows = this.all('SELECT * FROM members ORDER BY last_name, first_name LIMIT 500');
     }
+    return this.all('SELECT * FROM members WHERE kind = ? ORDER BY last_name, first_name LIMIT 500', kind);
+  }
+
+  // statut: 'actifs' (default), 'desactives' or 'tous'.
+  keepByStatus(statut) {
+    return statut === 'tous' ? () => true : statut === 'desactives' ? (m) => m.active === 0 : (m) => m.active !== 0;
+  }
+
+  listMembers(q, statut = 'actifs') {
+    const keep = this.keepByStatus(statut);
+    const rows = this.searchMemberRows(q, 'membre');
+    const inRoom = new Set(this.all("SELECT DISTINCT member_id FROM reservations WHERE status = 'en_cours'").map((r) => r.member_id));
     const today = this.bizToday();
     return rows.filter(keep).map((m) => {
       const base = this.memberBase(m);
@@ -911,12 +945,13 @@ export class Club {
         subscription,
         cards_deactivated: cardsDeactivated,
         can_enter_room: canEnterRoom,
+        in_room: inRoom.has(m.id),
       };
     });
   }
 
   memberDetail(memberId) {
-    const m = this.memberRow(memberId);
+    const m = this.fileRow(memberId);
     const today = this.bizToday();
     const subscriptions = this.all(
       `SELECT s.*, u.name AS created_by_name FROM subscriptions s LEFT JOIN users u ON u.id = s.created_by
@@ -957,7 +992,7 @@ export class Club {
   // card's movements carry the running balance over the member's whole history, so the first one of the period
   // starts from what came before it.
   memberStatement(memberId, from, to) {
-    const m = this.memberRow(memberId);
+    const m = this.fileRow(memberId);
     const today = this.bizToday();
     const end = to ?? today;
     const start = from ?? `${String(end).slice(0, 8)}01`;
@@ -1114,6 +1149,7 @@ export class Club {
 
   activateSubscription(actor, memberId, input) {
     const m = this.memberRow(memberId);
+    this.assertIsMember(m, 'd’activer une formule');
     this.assertMemberActive(m, 'd’activer une formule');
     const plan = this.get('SELECT * FROM plans WHERE id = ?', toId(input.plan_id, 'Formule'));
     if (!plan || !plan.active) throw invalid('Formule invalide ou inactive.');
@@ -1233,7 +1269,7 @@ export class Club {
   renewalCandidates(today = this.bizToday()) {
     return this.all(
       `SELECT DISTINCT m.id FROM members m JOIN subscriptions s ON s.member_id = m.id
-       WHERE m.active = 1 AND s.status = 'active' AND s.end_date < ? AND s.end_date >= ? ORDER BY m.id`,
+       WHERE m.active = 1 AND m.kind = 'membre' AND s.status = 'active' AND s.end_date < ? AND s.end_date >= ? ORDER BY m.id`,
       today, addDays(today, -RENEWAL_GRACE_DAYS),
     ).map((m) => m.id);
   }
@@ -1349,6 +1385,7 @@ export class Club {
 
   issueCard(actor, memberId, input) {
     const m = this.memberRow(memberId);
+    this.assertIsMember(m, 'd’émettre une carte');
     this.assertMemberActive(m, 'd’émettre une carte');
     const kind = input.kind;
     if (!['physique', 'virtuelle'].includes(kind)) throw invalid('Type de carte invalide.');
@@ -1456,6 +1493,7 @@ export class Club {
   rechargeWallet(actor, memberId, input) {
     const s = this.settings();
     const m = this.memberRow(memberId);
+    this.assertIsMember(m, 'd’approvisionner sa carte');
     this.assertMemberActive(m, 'd’approvisionner sa carte');
     const amount = int(input.amount, 'Montant de l’approvisionnement', { min: 1, max: 1e13 });
     const method = text(input.method, 'Moyen de paiement', { required: true, max: 40 });
@@ -1482,6 +1520,7 @@ export class Club {
   recordOutsideMeal(actor, memberId, input, { demo = false } = {}) {
     const s = this.settings();
     const m = this.memberRow(memberId);
+    this.assertIsMember(m, 'de commander un repas');
     this.assertMemberActive(m, 'de commander un repas');
     const amount = int(input.amount, 'Montant du repas', { min: 1, max: 1e13 });
     const label = text(input.label, 'Restaurant ou plat', { required: true, max: 100 });
@@ -1609,6 +1648,7 @@ export class Club {
   verifyMemberRoomAccess(memberId, bizDay, { requireRemainingCredit = true, allowWithoutSubscription = false } = {}) {
     const member = this.memberRow(memberId);
     const who = `${member.first_name} ${member.last_name}`;
+    this.assertIsMember(member, 'toute réservation ou entrée en salle');
     this.assertMemberActive(member, 'toute réservation ou entrée en salle');
     if (this.hasDeactivatedCardsOnly(member.id)) {
       throw conflict('CARTE_DESACTIVEE', `La carte de membre de ${who} est désactivée : émettez une carte active avant l'accès en salle.`);
@@ -3289,7 +3329,7 @@ export class Club {
     ).map((x) => ({ ...x, member_name: `${x.first_name} ${x.last_name}`, days_since: daysBetween(x.end_date, today) }));
     const renewalAlerts = this.all(
       `SELECT DISTINCT m.* FROM members m JOIN subscriptions s ON s.member_id = m.id
-       WHERE m.active = 1 AND s.status = 'active' AND s.end_date >= ? AND s.end_date <= ? ORDER BY m.last_name, m.first_name`,
+       WHERE m.active = 1 AND m.kind = 'membre' AND s.status = 'active' AND s.end_date >= ? AND s.end_date <= ? ORDER BY m.last_name, m.first_name`,
       addDays(today, -RENEWAL_GRACE_DAYS), addDays(today, RENEWAL_WARNING_DAYS),
     ).flatMap((m) => {
       const status = this.renewalStatus(m.id, today);
@@ -3671,3 +3711,4 @@ export class Club {
 
 Object.assign(Club.prototype, ledgerMethods);
 Object.assign(Club.prototype, loungeMethods);
+Object.assign(Club.prototype, shopMethods);

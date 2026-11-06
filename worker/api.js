@@ -256,6 +256,9 @@ export function createApi({ db, env = {}, demo = false }) {
   // Members, subscriptions, cards
   add('GET', '/api/members', {}, (ctx) => club.listMembers(ctx.query.q, ctx.query.statut));
   add('POST', '/api/members', {}, (ctx) => club.createMember(ctx.user, ctx.body));
+  add('GET', '/api/clients', {}, (ctx) => club.listClients(ctx.query.q, ctx.query.statut));
+  add('POST', '/api/clients', {}, (ctx) => club.createClient(ctx.user, ctx.body));
+  add('POST', '/api/clients/:id/convert', {}, (ctx) => club.convertClient(ctx.user, ctx.params.id));
   add('GET', '/api/members/:id', {}, (ctx) => club.memberDetail(ctx.params.id));
   add('GET', '/api/members/:id/statement', {}, (ctx) => club.memberStatement(ctx.params.id, ctx.query.from, ctx.query.to));
   add('PUT', '/api/members/:id', {}, (ctx) => club.updateMember(ctx.user, ctx.params.id, ctx.body));
