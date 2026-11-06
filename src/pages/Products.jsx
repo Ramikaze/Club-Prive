@@ -12,9 +12,8 @@ import { preparePhoto } from '../lib/photo.js';
 import { useIsBoss, useMe, useSettings, useStore } from '../store/useStore.js';
 import { writeWorkbook } from '../utils/exportExcel.js';
 import { searchable, smartFilter } from '../../shared/search.js';
-import { accountOfCategory, canSellIn, ownsAccount } from '../../shared/roles.js';
+import { CATEGORIES, CATEGORY_LABEL, CATEGORY_PLURAL, accountOfCategory, canSellIn, ownsAccount } from '../../shared/roles.js';
 
-const CATEGORY = { cigare: 'Cigare', bouteille: 'Bouteille' };
 
 // A boss works only on the products of his rayon (the administrator owns both).
 const ownsProduct = (me, p) => ownsAccount(me, accountOfCategory(p.category));
@@ -29,7 +28,7 @@ function exportCatalogue(products, currency) {
   return writeWorkbook([{
     sheet: 'Catalogue',
     header: ['Référence', 'Produit', 'Catégorie', 'Description', `Prix (${currency})`, 'Stock', 'Seuil d’alerte', 'État'],
-    rows: products.map((p) => [p.reference, p.name, CATEGORY[p.category], p.description ?? '', p.price / 100, p.stock_qty,
+    rows: products.map((p) => [p.reference, p.name, CATEGORY_LABEL[p.category], p.description ?? '', p.price / 100, p.stock_qty,
       p.low_stock_threshold, p.active ? 'Actif' : 'Inactif']),
   }], 'catalogue.xlsx');
 }
@@ -74,7 +73,9 @@ function ProductDialog({ close, product, onDone }) {
   const settings = useSettings();
   const me = useMe();
   // An associé creates and edits products in his own rayon only.
-  const categories = Object.entries(CATEGORY).filter(([k]) => ownsAccount(me, accountOfCategory(k)));
+  const categories = CATEGORIES.filter((k) => ownsAccount(me, accountOfCategory(k)));
+  // A sold product keeps its category (the server refuses a change).
+  const locked = Boolean(product?.sold);
   const { busy, error, submit } = useSubmit();
   const threshold = product?.low_stock_threshold ?? settings.low_stock_default;
 
@@ -85,7 +86,7 @@ function ProductDialog({ close, product, onDone }) {
       const price = parseMoney(v.price);
       if (price == null) throw new Error('Prix invalide (exemple : 40000 ou 40000,50).');
       const body = {
-        category: v.category, reference: v.reference, name: v.name, description: v.description, price,
+        category: locked ? product.category : v.category, reference: v.reference, name: v.name, description: v.description, price,
         low_stock_threshold: Number(v.low_stock_threshold),
       };
       if (editing) {
@@ -105,10 +106,11 @@ function ProductDialog({ close, product, onDone }) {
     <Modal title={editing ? 'Modifier le produit' : 'Nouveau produit'} size="wide" onClose={close}>
       <form className="form-grid" onSubmit={onSubmit} noValidate>
         <div className="form-row">
-          <label className="field"><span>Catégorie</span><select name="category" defaultValue={product?.category ?? categories[0]?.[0] ?? 'cigare'}>
-            {categories.map(([k, label]) => <option key={k} value={k}>{label}</option>)}</select></label>
+          <label className="field"><span>Catégorie</span><select name="category" defaultValue={product?.category ?? categories[0] ?? 'cigare'} disabled={locked}>
+            {categories.map((k) => <option key={k} value={k}>{CATEGORY_LABEL[k]}</option>)}</select></label>
           <label className="field"><span>Référence</span><input name="reference" required maxLength={40} defaultValue={product?.reference ?? ''} /></label>
         </div>
+        {locked && <p className="subtle">Ce produit a déjà été vendu : sa catégorie ne change plus. Pour changer de catégorie, créez un nouveau produit et désactivez celui-ci.</p>}
         <label className="field"><span>Nom</span><input name="name" required maxLength={80} defaultValue={product?.name ?? ''} /></label>
         <label className="field"><span>Description (facultatif)</span><input name="description" maxLength={300} defaultValue={product?.description ?? ''} /></label>
         <div className="form-row">
@@ -255,7 +257,7 @@ function ProductSheet({ close, product, onDone }) {
           <div className="product-sheet-info">
             <div>
               <h3 className="product-sheet-name">{p.name}</h3>
-              <p className="subtle"><span className="mono">{p.reference}</span> · {CATEGORY[p.category]} <DemoChip on={p.is_demo} /> {!p.active && <span className="chip">inactif</span>}</p>
+              <p className="subtle"><span className="mono">{p.reference}</span> · {CATEGORY_LABEL[p.category]} <DemoChip on={p.is_demo} /> {!p.active && <span className="chip">inactif</span>}</p>
             </div>
             {p.description && <p>{p.description}</p>}
             <dl className="kv">
@@ -294,7 +296,7 @@ export default function Products() {
   const excel = useBusy();
   const [searchParams, setSearchParams] = useSearchParams();
   const catParam = searchParams.get('cat');
-  const cat = ['cigare', 'bouteille'].includes(catParam) ? catParam : '';
+  const cat = CATEGORIES.includes(catParam) ? catParam : '';
   const showInactive = searchParams.get('inactifs') === '1';
   const [search, setSearch] = useState('');
   const setQuery = (q) => setSearchParams(Object.fromEntries(Object.entries(q).filter(([, v]) => v !== undefined && v !== null && v !== '')));
@@ -310,14 +312,14 @@ export default function Products() {
       const inCategory = products.filter((p) => !cat || p.category === cat);
       const searching = searchable(search);
       const list = searching
-        ? smartFilter(inCategory, search, (p) => [p.name, p.reference, CATEGORY[p.category], p.description])
+        ? smartFilter(inCategory, search, (p) => [p.name, p.reference, CATEGORY_LABEL[p.category], p.description])
         : inCategory;
       return (
         <>
           <StocksTabs />
           <PageHead
             title="Catalogue & Stocks"
-            lead="Cigares et bouteilles du club."
+            lead="Cigares, champagne et autres boissons du club."
             actions={(
               <>
                 <button type="button" className="btn" disabled={excel.busy || !list.length} aria-busy={excel.busy}
@@ -348,7 +350,7 @@ export default function Products() {
             <Segmented
               label="Catégorie"
               value={cat}
-              options={[['', 'Tous'], ['cigare', 'Cigares'], ['bouteille', 'Bouteilles']]}
+              options={[['', 'Tous'], ...CATEGORIES.map((k) => [k, CATEGORY_PLURAL[k]])]}
               onChange={(c) => setQuery({ cat: c, inactifs: showInactive ? '1' : '' })}
             />
             {boss && (
@@ -372,7 +374,7 @@ export default function Products() {
                         </div>
                       </div>
                     </td>
-                    <td data-label="Catégorie">{CATEGORY[p.category]}</td>
+                    <td data-label="Catégorie">{CATEGORY_LABEL[p.category]}</td>
                     <td data-label="Prix" className="num">{money(p.price)}</td>
                     <td data-label="Stock"><StockChip p={p} /> <span className="subtle">seuil {p.low_stock_threshold}</span></td>
                     <td className="actions">

@@ -15,12 +15,13 @@ import { useBusy, useLoad } from '../lib/hooks.js';
 import { useIsBoss, useRooms } from '../store/useStore.js';
 import { partyLabel } from '../../shared/rules.js';
 import { searchable, smartFilter } from '../../shared/search.js';
+import { CATEGORIES, CATEGORY_LABEL, CATEGORY_PLURAL } from '../../shared/roles.js';
 import {
   openExtendDialog, openCancelReservationDialog, openPaymentDialog, openRefundDialog, cancelChargeDialog, supplementText, canRefund,
   quickChangeRoom, openFinishDialog, openCorrectDepartureDialog, correctableOverrun,
 } from '../dialogs/index.js';
 
-const CAT_FILTERS = [['tous', 'Tous'], ['cigare', 'Cigares'], ['bouteille', 'Bouteilles']];
+const CAT_FILTERS = [['tous', 'Tous'], ...CATEGORIES.map((k) => [k, CATEGORY_PLURAL[k]])];
 
 function ReservationDetail({ d, products, reload }) {
   const isAdmin = useIsBoss();
@@ -43,7 +44,7 @@ function ReservationDetail({ d, products, reload }) {
   const inCategory = products.filter((p) => p.active && (catFilter === 'tous' || p.category === catFilter));
   // The search in « Ajouter en 1 clic »: name, reference, category and description (origin, strength…), typos forgiven.
   const activeProducts = searchable(search)
-    ? smartFilter(inCategory, search, (p) => [p.name, p.reference, p.category === 'cigare' ? 'Cigare' : 'Bouteille', p.description])
+    ? smartFilter(inCategory, search, (p) => [p.name, p.reference, CATEGORY_LABEL[p.category], p.description])
     : inCategory;
   const editableOccupancy = r.status === 'reservee' || r.status === 'en_cours';
 
@@ -220,7 +221,7 @@ function ReservationDetail({ d, products, reload }) {
                 onChange={setSearch}
                 suggestions={activeProducts.filter((p) => p.stock_qty > 0)}
                 onPick={(p) => { setSearch(''); onQuickAddProduct(p); }}
-                placeholder="Rechercher un cigare, une bouteille…"
+                placeholder="Rechercher un cigare, une boisson…"
                 label="Rechercher un produit à ajouter"
                 renderSuggestion={(p) => (
                   <div className="grow">
@@ -248,7 +249,7 @@ function ReservationDetail({ d, products, reload }) {
                       <span className="quick-product-price">{money(p.price)}</span>
                     </div>
                     <div className="quick-product-meta">
-                      <span>{p.category === 'cigare' ? 'Cigare' : 'Bouteille'}</span>
+                      <span>{CATEGORY_LABEL[p.category]}</span>
                       <span className={out ? 'amount-out' : ''}>{out ? 'Rupture' : `${p.stock_qty} en stock`}</span>
                       {busy && <span>Ajout…</span>}
                     </div>

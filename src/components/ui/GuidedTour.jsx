@@ -72,8 +72,8 @@ const STEPS = [
   },
   {
     route: '/produits', targets: ['[data-tour="products"]'], icon: 'box', title: 'Catalogue & stocks',
-    body: 'Cigares et bouteilles (vendues entières uniquement) avec leur stock. Entrées et ajustements avec motif ; chaque mouvement reste dans l’historique du produit.',
-    features: ['Alerte quand un stock passe sous son seuil', 'Onglet Cave pour la conservation'],
+    body: 'Cigares, champagne et autres boissons (vendus entiers uniquement) avec leur stock. Entrées et ajustements avec motif ; chaque mouvement reste dans l’historique du produit.',
+    features: ['Filtres Tous, Cigares, Champagne, Autres boissons', 'Alerte quand un stock passe sous son seuil', 'Onglet Cave pour la conservation'],
   },
   {
     route: '/lounge', targets: ['.humidor-card', '[data-tour="lounge"]'], icon: 'humidor', title: 'Cave à cigares',

@@ -1,6 +1,6 @@
 // One icon set for the whole interface (lucide), referenced by short names.
 import {
-  Home, CalendarDays, Users, Package, Wallet, SlidersHorizontal, LogOut, Plus, ChevronLeft, ChevronRight, Search,
+  GlassWater, Home, CalendarDays, Users, Package, Wallet, SlidersHorizontal, LogOut, Plus, ChevronLeft, ChevronRight, Search,
   CreditCard, TriangleAlert, Info, Check, X, Moon, Printer, Download, Clock, Menu, KeyRound, Pencil, List, Receipt,
   Landmark, BookOpen, Lock, LockOpen, FileSpreadsheet, Compass, ArrowLeftRight, Ban, Undo2, Play, CircleStop,
   RotateCcw, UserPlus, HandCoins, Thermometer, Droplets, Archive, ArrowDownToLine, ArrowUpFromLine, Trash2,
@@ -20,7 +20,7 @@ const ICONS = {
   shop: Store, journal: ScrollText,
   // Product photos: a cigar or a bottle stands in when a product has no picture (lucide has no bottle, the wine
   // glass stands for the drinks); `photo` is the button that adds one.
-  cigar: Cigarette, bottle: Wine, photo: ImagePlus,
+  cigar: Cigarette, bottle: Wine, drink: GlassWater, photo: ImagePlus,
 };
 
 export default function Icon({ name, size, ...props }) {

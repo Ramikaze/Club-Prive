@@ -8,6 +8,9 @@ import { STATUS, ACCOUNT_LABEL } from '../../lib/format.js';
 import { photoUrl } from '../../lib/photo.js';
 import { useIsAdmin } from '../../store/useStore.js';
 
+// Placeholder icon of a product without photo, by category.
+const PRODUCT_ICON = { cigare: 'cigar', bouteille: 'bottle', boisson: 'drink' };
+
 export function Chip({ group, value }) {
   const [label, kind] = STATUS[group]?.[value] ?? [value, 'neutral'];
   return <span className={`chip chip-${kind}`}>{label}</span>;
@@ -35,7 +38,7 @@ export function ProductPhoto({ product, large = false }) {
         <img src={url} alt={large ? product.name : ''} loading={large ? undefined : 'lazy'} decoding="async" onError={() => setFailed(url)} />
       ) : (
         <span className="product-photo-none">
-          <Icon name={product.category === 'bouteille' ? 'bottle' : 'cigar'} />
+          <Icon name={PRODUCT_ICON[product.category] ?? 'cigar'} />
           {large && <span>{url === null ? 'Pas encore de photo' : 'Photo indisponible'}</span>}
         </span>
       )}

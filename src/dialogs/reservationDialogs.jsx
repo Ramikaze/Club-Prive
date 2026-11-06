@@ -16,6 +16,7 @@ import { openPaymentDialog } from './moneyDialogs.jsx';
 import { daysBetween, parseHHMM } from '../../shared/time.js';
 import { minDurationFor, supplementDetail, partyLabel } from '../../shared/rules.js';
 import { waDigits, waLink } from '../../shared/whatsapp.js';
+import { CATEGORIES, CATEGORY_PLURAL } from '../../shared/roles.js';
 
 export function supplementText(paid, tariff) {
   if (!paid) return 'aucun';
@@ -720,10 +721,7 @@ export function openCancelReservationDialog(detail, onDone) {
 
 // ---------------------------------------------------------------- quick 1-click consumption & actions
 
-const PRODUCT_GROUPS = [
-  ['cigare', 'Cigares'],
-  ['bouteille', 'Bouteilles'],
-];
+const PRODUCT_GROUPS = CATEGORIES.map((k) => [k, CATEGORY_PLURAL[k]]);
 
 function ConsumptionDialog({ close, reservationId, memberName, roomName, onDone }) {
   const state = useLoad(() => Promise.all([
