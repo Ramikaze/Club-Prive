@@ -298,7 +298,7 @@ function ListView({ list, onReload }) {
                     <button type="button" className="btn btn-sm btn-primary" onClick={() => quickStartReservation(r, onReload)}>Arrivée</button>
                   )}
                   {(r.status === 'reservee' || r.status === 'en_cours') && (
-                    <button type="button" className="btn btn-sm" onClick={() => openConsumptionDialog(r, onReload)}>+ Bouteille / Cigare</button>
+                    <button type="button" className="btn btn-sm" onClick={() => openConsumptionDialog(r, onReload)}>+ Boisson / Cigare</button>
                   )}
                   {r.due_amount > 0 && r.status !== 'annulee' && (
                     <button type="button" className="btn btn-sm btn-primary" onClick={() => openQuickPayReservation(r, onReload)}>Encaisser</button>

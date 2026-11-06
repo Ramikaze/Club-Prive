@@ -176,7 +176,7 @@ function RoomCard({ room, bizDay, canManage, canDelete, onReload }) {
 
           <div className="room-card-actions">
             <button type="button" className="btn btn-sm btn-primary" onClick={() => openConsumptionDialog(r, onReload)}>
-              <Icon name="plus" /> Facturer bouteille / cigare
+              <Icon name="plus" /> Facturer boisson / cigare
             </button>
             {r.due_amount > 0 && (
               <button type="button" className="btn btn-sm" onClick={() => openQuickPayReservation(r, onReload)}>

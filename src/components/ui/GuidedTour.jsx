@@ -26,7 +26,7 @@ const STEPS = [
   },
   {
     route: '/', targets: ['[data-tour="live-rooms"]', '[data-tour="dashboard"]'], icon: 'rooms', title: 'Les salles en direct',
-    body: 'Pour chaque salle : le titulaire, le nombre de personnes, l’horaire et le temps déjà passé en salle. Ajoutez une bouteille ou un cigare sans quitter l’accueil.',
+    body: 'Pour chaque salle : le titulaire, le nombre de personnes, l’horaire et le temps déjà passé en salle. Ajoutez une boisson ou un cigare sans quitter l’accueil.',
   },
   {
     route: '/salles', targets: ['.rooms-grid'], icon: 'rooms', title: 'Salles & salons',
@@ -46,7 +46,7 @@ const STEPS = [
   {
     route: '/salles', targets: ['.room-card .conso', '.room-card.is-occupied', '.rooms-grid'], icon: 'receipt', title: 'Consommations de la séance',
     body: 'Tout ce qui est servi dans la salle, invités compris, est au nom du titulaire : Cigares et Alcool dans des parties séparées avec leur sous-total, puis le total de la séance en bas.',
-    features: ['« Facturer bouteille / cigare » : touchez le produit (+1)', 'Règlement « À la note » (payé à la fin) ou « Payer maintenant », en espèces par exemple, avec son ticket', '« Libérer la salle » termine la séance et consomme le crédit du titulaire'],
+    features: ['« Facturer boisson / cigare » : touchez le produit (+1)', 'Règlement « À la note » (payé à la fin) ou « Payer maintenant », en espèces par exemple, avec son ticket', '« Libérer la salle » termine la séance et consomme le crédit du titulaire'],
   },
   {
     route: '/agenda', targets: ['[data-tour="agenda-views"]', '[data-tour="agenda"]'], icon: 'calendar', title: 'Vues de l’agenda',

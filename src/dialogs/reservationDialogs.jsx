@@ -754,14 +754,14 @@ function ConsumptionDialog({ close, reservationId, memberName, roomName, onDone 
   };
 
   return (
-    <Modal title={`Facturer bouteilles & cigares — ${roomName ? `${roomName} · ` : ''}${memberName}`} size="wide" onClose={close}>
+    <Modal title={`Facturer boissons & cigares — ${roomName ? `${roomName} · ` : ''}${memberName}`} size="wide" onClose={close}>
       <Loaded state={state}>{([detail, products]) => {
         const due = detail.charges.filter((c) => c.status === 'due');
         const dueTotal = due.reduce((sum, c) => sum + c.amount, 0);
         const cardBalance = detail.card_balance ?? 0;
         return (
           <div className="form-grid">
-            <p className="subtle">Touchez une bouteille ou un cigare pour l’ajouter immédiatement (+1). Tout ce qui est servi est au nom du titulaire, invités compris : sur la note, ou payé tout de suite.</p>
+            <p className="subtle">Touchez un produit pour l’ajouter immédiatement (+1). Tout ce qui est servi est au nom du titulaire, invités compris : sur la note, ou payé tout de suite.</p>
             <PayNowChoice value={payWith} onChange={setPayWith} cardBalance={cardBalance} />
             {PRODUCT_GROUPS.map(([cat, label]) => {
               const items = products.filter((p) => p.category === cat);
