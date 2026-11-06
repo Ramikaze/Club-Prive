@@ -103,13 +103,15 @@ export default function SalePanel({ account, products, cart, setCart, onSold, on
 
       <fieldset className="field pay-methods">
         <legend>Moyen de paiement</legend>
-        {isMember && (
+        {/* Shown as soon as « Membre » is chosen, so staff know the card can pay; usable once a member with money is picked. */}
+        {buyer.kind === 'membre' && (
           <label className={`pay-method pay-method-card${balance > 0 ? '' : ' is-empty'}`}>
             <input type="radio" name="method" value={CARD_METHOD} checked={byCard} disabled={balance <= 0 || loadingBalance}
               onChange={() => setPicked(CARD_METHOD)} />
             <Icon name="card" />
             <span><strong>{CARD_METHOD}</strong>
-              <span className="subtle">{loadingBalance ? 'Lecture du solde…' : balance > 0 ? `${money(balance)} disponibles` : 'Aucun crédit sur la carte'}</span></span>
+              <span className="subtle">{!isMember ? 'Choisissez le membre pour voir son solde'
+                : loadingBalance ? 'Lecture du solde…' : balance > 0 ? `${money(balance)} disponibles` : 'Aucun crédit sur la carte'}</span></span>
           </label>
         )}
         {methods.map((x) => (
