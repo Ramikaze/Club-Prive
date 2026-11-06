@@ -61,7 +61,7 @@ export default function Shop() {
             />
           </div>
           {!canSell && <Notice kind="info">Consultation seule : la vente de ce rayon est réservée à son associé et au gérant.</Notice>}
-          <div className={`shop-layout${canSell ? '' : ' is-readonly'}`}>
+          <div data-tour="shop" className={`shop-layout${canSell ? '' : ' is-readonly'}`}>
             <section aria-label={shop.tab}>
               {list.length ? (
                 <ul className="shop-grid">
