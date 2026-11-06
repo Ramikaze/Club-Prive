@@ -23,7 +23,7 @@ const refused = (r, status) => assert.equal(r.status, status, JSON.stringify(r.d
 const newUser = (body) => admin.post('/api/users', { password: 'v18-some-password', name: 'Compte', ...body });
 
 test('la base passe en version 18 sans toucher aux comptes existants', () => {
-  assert.equal(server.db.get("SELECT value FROM meta WHERE key = 'schema_version'").value, '18');
+  assert.equal(server.db.get("SELECT value FROM meta WHERE key = 'schema_version'").value, String(MIGRATIONS.length));
   assert.equal(server.club.get("SELECT role, rayon FROM users WHERE login = 'admin'").role, 'admin');
   assert.equal(server.club.get('SELECT kind FROM members LIMIT 1')?.kind ?? 'membre', 'membre');
 });
@@ -118,7 +118,7 @@ test('migration sans perte : V18 garde les comptes, leurs sessions et ce qui les
 
     v17Copy(source.file, old.file);
     await old.start(); // migrates 17 -> 18
-    assert.equal(old.db.get("SELECT value FROM meta WHERE key = 'schema_version'").value, '18');
+    assert.equal(old.db.get("SELECT value FROM meta WHERE key = 'schema_version'").value, String(MIGRATIONS.length));
     assert.deepEqual(read(old.db), expected); // same ids, roles, hashes, sessions and created_by references
     assert.ok(old.db.all('SELECT rayon FROM users').every((u) => u.rayon === null));
     assert.ok(old.db.all('SELECT kind FROM members').every((m) => m.kind === 'membre'));

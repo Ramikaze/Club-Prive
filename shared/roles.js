@@ -11,7 +11,13 @@ export const SHOP = {
   alcool: { category: 'bouteille', tab: 'Champagnes', title: 'Vente de champagne', tag: 'Compte Alcool · Boutique', purpose: 'boutique champagne' },
 };
 
-// The account a product category sells into.
+// The three product categories: cigars, champagne (stored as « bouteille ») and other drinks (« boisson »).
+// Screen labels come from here only.
+export const CATEGORIES = ['cigare', 'bouteille', 'boisson'];
+export const CATEGORY_LABEL = { cigare: 'Cigare', bouteille: 'Champagne', boisson: 'Autre boisson' };
+export const CATEGORY_PLURAL = { cigare: 'Cigares', bouteille: 'Champagne', boisson: 'Autres boissons' };
+
+// The account a product category sells into: cigars into Cigares, champagne and other drinks into Alcool.
 export const accountOfCategory = (category) => (category === 'cigare' ? 'cigares' : 'alcool');
 
 // Club management: the administrator and the associés.

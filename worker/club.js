@@ -23,7 +23,7 @@ import {
   formatFirstName, formatLastName, CASH_METHOD, DEFAULT_CLOSE,
 } from '../shared/rules.js';
 import { waDigits } from '../shared/whatsapp.js';
-import { ROLES, RAYONS, isBoss, ownsAccount, accountOfCategory } from '../shared/roles.js';
+import { ROLES, RAYONS, CATEGORIES, CATEGORY_LABEL, isBoss, ownsAccount, accountOfCategory } from '../shared/roles.js';
 
 // A session has one member, its holder; whoever comes with the holder is a guest, not a member.
 const oneMemberOnly = () => invalid(
@@ -2666,9 +2666,10 @@ export class Club {
     if (!p.active) throw conflict('PRODUIT_INACTIF', `Le produit « ${p.name} » est inactif.`);
     const qty = typeof input.quantity === 'string' ? Number(input.quantity) : input.quantity;
     if (!Number.isInteger(qty) || qty < 1 || qty > 99) {
-      throw invalid(p.category === 'bouteille'
-        ? 'Les bouteilles se vendent uniquement entières : indiquez un nombre entier (1 à 99).'
-        : 'Les cigares se vendent à l’unité : indiquez un nombre entier (1 à 99).');
+      throw invalid({
+        bouteille: 'Les bouteilles se vendent uniquement entières : indiquez un nombre entier (1 à 99).',
+        boisson: 'Les autres boissons se vendent à l’unité entière : indiquez un nombre entier (1 à 99).',
+      }[p.category] ?? 'Les cigares se vendent à l’unité : indiquez un nombre entier (1 à 99).');
     }
     if (p.stock_qty < qty) throw conflict('STOCK_INSUFFISANT', `Stock insuffisant pour « ${p.name} » : ${p.stock_qty} disponible(s).`);
     // Paid on the spot (`pay_now`: a method, or the card with `card: true` or the card's method), or left on the
@@ -2677,7 +2678,7 @@ export class Club {
     if (payNow !== null && (typeof payNow !== 'object' || Array.isArray(payNow))) throw invalid('Paiement immédiat invalide.');
     // Everything served in a session is charged to its holder, the only member there (a consumer sent by an
     // older screen is ignored).
-    const account = p.category === 'cigare' ? 'cigares' : 'alcool';
+    const account = accountOfCategory(p.category);
     const chargeId = this.insertCharge(actor, {
       account, kind: 'produit', member_id: r.member_id, reservation_id: r.id, product_id: p.id,
       label: p.name, quantity: qty, unit_price: p.price,
@@ -3078,7 +3079,7 @@ export class Club {
   productFields(input, current = {}) {
     const pick = (k) => (input[k] !== undefined ? input[k] : current[k]);
     const category = pick('category');
-    if (!['cigare', 'bouteille'].includes(category)) throw invalid('Catégorie invalide (cigare ou bouteille).');
+    if (!CATEGORIES.includes(category)) throw invalid('Catégorie invalide (cigare, champagne ou autre boisson).');
     const name = text(pick('name'), 'Nom du produit', { required: true, max: 80 });
     const reference = text(pick('reference'), 'Référence', { required: true, max: 40 });
     const description = text(pick('description'), 'Description', { max: 300 });
@@ -3577,7 +3578,7 @@ export class Club {
           `SELECT sm.*, p.name, p.reference, p.category, u.name AS created_by_name FROM stock_movements sm
            JOIN products p ON p.id = sm.product_id LEFT JOIN users u ON u.id = sm.created_by
            WHERE sm.created_at >= ? AND sm.created_at < ? ORDER BY sm.id`, a, b,
-        ).map((m) => [when(m.created_at), m.name, m.reference, m.category === 'cigare' ? 'Cigare' : 'Bouteille', STOCK_KIND[m.kind],
+        ).map((m) => [when(m.created_at), m.name, m.reference, CATEGORY_LABEL[m.category], STOCK_KIND[m.kind],
           m.quantity, m.stock_after, m.charge_id ?? '', m.reason ?? '', m.created_by_name ?? '']);
         break;
       }
