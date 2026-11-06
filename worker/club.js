@@ -670,10 +670,13 @@ export class Club {
   }
 
   // The next number with this prefix ('M' members, 'C' regular clients): one more than the highest in use, so the
-  // two sequences are independent and existing numbers never move.
+  // two sequences are independent and existing numbers never move. A client made member keeps his old C- number
+  // in former_client_no: it counts too, so it is never handed out again.
   nextMemberNo(prefix) {
     const { n } = this.get(
-      'SELECT COALESCE(MAX(CAST(SUBSTR(member_no, 3) AS INTEGER)), 0) AS n FROM members WHERE member_no LIKE ?', `${prefix}-%`,
+      `SELECT COALESCE(MAX(CAST(SUBSTR(no, 3) AS INTEGER)), 0) AS n FROM (
+         SELECT member_no AS no FROM members WHERE member_no LIKE ?
+         UNION ALL SELECT former_client_no FROM members WHERE former_client_no LIKE ?)`, `${prefix}-%`, `${prefix}-%`,
     );
     return `${prefix}-${String(n + 1).padStart(4, '0')}`;
   }

@@ -89,6 +89,15 @@ test('passer en membre garde l’historique et le numéro d’origine', async ()
   assert.equal(code(await ger.post(`/api/clients/${mem.id}/convert`, {})), 'PAS_CLIENT');
 });
 
+test('le numéro d’un client passé en membre n’est jamais redonné', async () => {
+  const c = await newClient();
+  const n = Number(c.member_no.slice(2));
+  ok(await ger.post(`/api/clients/${c.id}/convert`, {}));
+  const next = await newClient();
+  assert.equal(next.member_no, `C-${String(n + 1).padStart(4, '0')}`);
+  assert.equal(server.club.get('SELECT COUNT(*) AS n FROM members WHERE member_no = ? OR former_client_no = ?', c.member_no, c.member_no).n, 1);
+});
+
 test('un client désactivé ne passe pas en membre', async () => {
   const c = await newClient();
   ok(await ger.post(`/api/members/${c.id}/deactivate`, { reason: 'Départ du pays' }));
