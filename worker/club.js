@@ -22,7 +22,7 @@ import {
   formatFirstName, formatLastName, CASH_METHOD, DEFAULT_CLOSE,
 } from '../shared/rules.js';
 import { waDigits } from '../shared/whatsapp.js';
-import { ROLES, RAYONS } from '../shared/roles.js';
+import { ROLES, RAYONS, isBoss, ownsAccount, accountOfCategory } from '../shared/roles.js';
 
 // A session has one member, its holder; whoever comes with the holder is a guest, not a member.
 const oneMemberOnly = () => invalid(
@@ -1531,7 +1531,7 @@ export class Club {
   // Only an administrator cancels an outside meal, with a reason: the courier's expense is cancelled, the card
   // part goes back on the card, and the cash share leaves the till on the day of the cancellation.
   cancelOutsideMeal(actor, paymentId, input) {
-    if (actor.role !== 'admin') throw forbidden("L'annulation d'un repas extérieur est réservée à un administrateur.");
+    if (!isBoss(actor)) throw forbidden("L'annulation d'un repas extérieur est réservée à un administrateur.");
     const p = this.get('SELECT * FROM payments WHERE id = ?', toId(paymentId, 'Encaissement'));
     if (!p) throw notFound('Encaissement');
     if (p.kind !== 'repas') throw conflict('PAS_UN_REPAS', "Cet encaissement n'est pas un repas commandé à l'extérieur.");
@@ -1567,7 +1567,7 @@ export class Club {
   // Only an administrator cancels a recharge, with a reason: the money leaves the till on the day of the
   // cancellation, and the card is debited, which is refused once the money has been spent.
   cancelRecharge(actor, paymentId, input) {
-    if (actor.role !== 'admin') throw forbidden("L'annulation d'un approvisionnement est réservée à un administrateur.");
+    if (!isBoss(actor)) throw forbidden("L'annulation d'un approvisionnement est réservée à un administrateur.");
     const p = this.get('SELECT * FROM payments WHERE id = ?', toId(paymentId, 'Encaissement'));
     if (!p) throw notFound('Encaissement');
     if (p.kind !== 'recharge') throw conflict('PAS_UNE_RECHARGE', "Cet encaissement n'est pas un approvisionnement de carte.");
@@ -2295,7 +2295,7 @@ export class Club {
   // the card, what was paid otherwise is refunded through `input.method`, what was left to collect is cancelled),
   // then the overrun up to that time, if any, is recorded again as at the exit. Only the last exit's overrun, once.
   correctDeparture(actor, id, input = {}) {
-    if (actor.role !== 'admin') throw forbidden("Seul un administrateur peut corriger l'heure de départ.");
+    if (!isBoss(actor)) throw forbidden("Seul un administrateur peut corriger l'heure de départ.");
     const r = this.reservationRow(id);
     if (r.status !== 'terminee') throw conflict('STATUT', "Seule une séance terminée peut voir son heure de départ corrigée.");
     const overrun = this.get(
@@ -2675,7 +2675,7 @@ export class Club {
         ? 'Cette ligne est déjà encaissée : un remboursement est nécessaire.'
         : `Cette ligne est déjà ${CHARGE_STATUS[c.status].toLowerCase()}.`);
     }
-    if (c.kind !== 'produit' && actor.role !== 'admin') {
+    if (c.kind !== 'produit' && !isBoss(actor)) {
       throw forbidden("Seul un administrateur peut annuler une ligne de temps supplémentaire ou d'abonnement.");
     }
     const reason = text(input.reason, "Motif d'annulation", { required: true, min: 3, max: 300 });
@@ -2764,7 +2764,7 @@ export class Club {
 
   refundCharge(actor, chargeId, input) {
     const s = this.settings();
-    if (s.refunds_admin_only && actor.role !== 'admin') throw forbidden('Les remboursements sont réservés à un administrateur.');
+    if (s.refunds_admin_only && !isBoss(actor)) throw forbidden('Les remboursements sont réservés à un administrateur.');
     const c = this.get('SELECT * FROM charges WHERE id = ?', toId(chargeId, 'Ligne'));
     if (!c) throw notFound('Ligne');
     if (c.status !== 'payee') throw conflict('STATUT_LIGNE', 'Seule une ligne encaissée peut être remboursée.');
@@ -2868,7 +2868,7 @@ export class Club {
       club_name: s.club_name,
       demo: this.demo,
     };
-    if (actor.role !== 'admin') return { ticket };
+    if (!isBoss(actor)) return { ticket };
     const events = this.all(
       `SELECT e.at, e.kind, e.copy_no, e.phone, u.name AS user_name FROM ticket_events e
        LEFT JOIN users u ON u.id = e.user_id WHERE e.payment_id = ? ORDER BY e.copy_no`, p.id,
@@ -3021,8 +3021,15 @@ export class Club {
     return { category, name, reference, description, price, threshold, active };
   }
 
+  // Product files, photos and stock belong to the rayon of an associé; the administrator owns both, and the
+  // manager keeps his own rights (checked where they apply). Sessions have no such limit.
+  assertRayon(actor, category) {
+    if (isBoss(actor) && !ownsAccount(actor, accountOfCategory(category))) throw forbidden('Vous ne gérez que les produits de votre rayon.');
+  }
+
   createProduct(actor, input, { demo = false } = {}) {
     const f = this.productFields(input);
+    this.assertRayon(actor, f.category);
     if (this.get('SELECT 1 AS x FROM products WHERE reference = ?', f.reference)) throw conflict('REFERENCE_PRISE', 'Cette référence existe déjà.');
     const initial = input.initial_stock === undefined || input.initial_stock === '' ? 0 : int(input.initial_stock, 'Stock initial', { min: 0, max: 100000 });
     const id = this.insert(
@@ -3039,6 +3046,8 @@ export class Club {
     const p = this.get('SELECT * FROM products WHERE id = ?', toId(productId, 'Produit'));
     if (!p) throw notFound('Produit');
     const f = this.productFields(input, { ...p, low_stock_threshold: p.low_stock_threshold });
+    this.assertRayon(actor, p.category);
+    this.assertRayon(actor, f.category);
     if (f.reference.toLowerCase() !== p.reference.toLowerCase()
       && this.get('SELECT 1 AS x FROM products WHERE reference = ? AND id <> ?', f.reference, p.id)) {
       throw conflict('REFERENCE_PRISE', 'Cette référence existe déjà.');
@@ -3058,6 +3067,7 @@ export class Club {
   stockOperation(actor, productId, input) {
     const p = this.get('SELECT * FROM products WHERE id = ?', toId(productId, 'Produit'));
     if (!p) throw notFound('Produit');
+    this.assertRayon(actor, p.category);
     if (input.kind === 'entree') {
       const qty = int(input.quantity, 'Quantité reçue', { min: 1, max: 100000 });
       const reason = text(input.reason, 'Remarque', { max: 200 });
@@ -3072,7 +3082,7 @@ export class Club {
       const reason = text(input.reason, "Motif de l'ajustement", { required: true, min: 3, max: 200 });
       const delta = target - p.stock_qty;
       if (delta === 0) throw invalid('La quantité constatée est identique au stock enregistré : aucun ajustement.');
-      if (delta < 0 && actor.role !== 'admin') {
+      if (delta < 0 && !isBoss(actor)) {
         throw forbidden('Le gérant peut seulement ajouter des quantités. Pour en retirer, adressez-vous à un administrateur.');
       }
       this.moveStock(actor, p.id, delta, 'ajustement', { reason });
@@ -3122,7 +3132,9 @@ export class Club {
 
   setProductPhoto(actor, productId, input) {
     const id = toId(productId, 'Produit');
-    if (!this.get('SELECT 1 AS x FROM products WHERE id = ?', id)) throw notFound('Produit');
+    const p = this.get('SELECT category FROM products WHERE id = ?', id);
+    if (!p) throw notFound('Produit');
+    this.assertRayon(actor, p.category);
     const photo = decodePhoto(input);
     const replaced = this.storePhoto(id, photo, actor.id);
     this.audit(actor, 'produit.photo', 'product', id, { mime: photo.mime, bytes: photo.bytes.length, replaced });
@@ -3132,7 +3144,9 @@ export class Club {
   // Removing a photo that is not there changes nothing, and is not written to the journal.
   removeProductPhoto(actor, productId) {
     const id = toId(productId, 'Produit');
-    if (!this.get('SELECT 1 AS x FROM products WHERE id = ?', id)) throw notFound('Produit');
+    const p = this.get('SELECT category FROM products WHERE id = ?', id);
+    if (!p) throw notFound('Produit');
+    this.assertRayon(actor, p.category);
     if (this.run('DELETE FROM product_photos WHERE product_id = ?', id).changes) this.audit(actor, 'produit.photo_retirer', 'product', id);
     return this.productById(id);
   }
@@ -3295,7 +3309,7 @@ export class Club {
       cash_today: this.financeSummary(today, today),
       lounge: this.loungeOverview(),
     };
-    if (actor.role === 'admin') {
+    if (isBoss(actor)) {
       result.revenue = {
         week: this.financeSummary(addDays(today, -6), today),
         month: this.financeSummary(`${today.slice(0, 8)}01`, today),

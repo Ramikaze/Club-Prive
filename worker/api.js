@@ -13,6 +13,7 @@ import { DEMO_ACCOUNTS } from './seed.js';
 import { AppError, forbidden, invalid, conflict, notSignedIn } from './errors.js';
 import { hashPassword, verifyPassword, sha256Hex, newToken, checkPasswordStrength, parseCookies } from './auth.js';
 import { ALWAYS_REAL } from './space.js';
+import { isBoss } from '../shared/roles.js';
 
 const MAX_BODY = 256 * 1024;
 // A photo travels in base64, a third bigger than the picture: 200 KB of picture is 273 KB of text. The routes that
@@ -108,6 +109,8 @@ export function createApi({ db, env = {}, demo = false }) {
     routes.push({ method, re, keys, opts, handler });
   };
   const ADMIN = { roles: ['admin'] };
+  // Club management: the administrator and the associés (ADMIN stays for the application itself).
+  const CLUB = { roles: ['admin', 'associe'] };
   const READONLY = { readonly: true };
   // Routes refused in the demo space: they manage accounts, which are mirrored from the real club there,
   // or wipe the data (the demo has its own reset, POST /api/demo/reset).
@@ -225,7 +228,7 @@ export function createApi({ db, env = {}, demo = false }) {
   add('PUT', '/api/users/:id', { ...ADMIN, ...ACCOUNTS }, (ctx) => club.updateUser(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/users/:id/password', { ...ADMIN, ...ACCOUNTS, prepare: (ctx) => preparePassword(ctx, 'password') },
     (ctx) => club.setUserPassword(ctx.user, ctx.params.id, ctx.passwordHash));
-  add('GET', '/api/audit', ADMIN, (ctx) => club.auditLog(ctx.query));
+  add('GET', '/api/audit', CLUB, (ctx) => club.auditLog(ctx.query));
   add('POST', '/api/admin/reset', { ...ADMIN, ...ACCOUNTS }, (ctx) => club.wipeData(ctx.user, ctx.body.confirm));
   // Catalogue import: a temporary door for a script on the owner's computer, one product per call, open only
   // while the IMPORT_TOKEN secret exists. There is no session: the code is the whole credential, so the door
@@ -260,8 +263,8 @@ export function createApi({ db, env = {}, demo = false }) {
   add('POST', '/api/members/:id/deactivate', {}, (ctx) => club.deactivateMember(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/members/:id/reactivate', {}, (ctx) => club.reactivateMember(ctx.user, ctx.params.id));
   add('POST', '/api/members/:id/subscriptions', {}, (ctx) => club.activateSubscription(ctx.user, ctx.params.id, ctx.body));
-  add('POST', '/api/subscriptions/:id/cancel', ADMIN, (ctx) => club.cancelSubscription(ctx.user, ctx.params.id, ctx.body));
-  add('POST', '/api/subscriptions/:id/adjust', ADMIN, (ctx) => club.adjustCredit(ctx.user, ctx.params.id, ctx.body));
+  add('POST', '/api/subscriptions/:id/cancel', CLUB, (ctx) => club.cancelSubscription(ctx.user, ctx.params.id, ctx.body));
+  add('POST', '/api/subscriptions/:id/adjust', CLUB, (ctx) => club.adjustCredit(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/members/:id/cards', {}, (ctx) => club.issueCard(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/cards/:id/deactivate', {}, (ctx) => club.deactivateCard(ctx.user, ctx.params.id, ctx.body));
   add('GET', '/api/cards/lookup', {}, (ctx) => club.lookupCard(ctx.query.code));
@@ -269,8 +272,8 @@ export function createApi({ db, env = {}, demo = false }) {
   // The card's CFA credit: any staff member recharges it, only an administrator cancels a recharge.
   add('POST', '/api/members/:id/wallet/recharge', {}, (ctx) => club.rechargeWallet(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/members/:id/outside-meal', {}, (ctx) => club.recordOutsideMeal(ctx.user, ctx.params.id, ctx.body));
-  add('POST', '/api/payments/:id/cancel-meal', ADMIN, (ctx) => club.cancelOutsideMeal(ctx.user, ctx.params.id, ctx.body));
-  add('POST', '/api/payments/:id/cancel-recharge', ADMIN, (ctx) => club.cancelRecharge(ctx.user, ctx.params.id, ctx.body));
+  add('POST', '/api/payments/:id/cancel-meal', CLUB, (ctx) => club.cancelOutsideMeal(ctx.user, ctx.params.id, ctx.body));
+  add('POST', '/api/payments/:id/cancel-recharge', CLUB, (ctx) => club.cancelRecharge(ctx.user, ctx.params.id, ctx.body));
 
   // Rooms
   add('GET', '/api/rooms', {}, (ctx) => club.rooms({ includeInactive: ctx.query.all === '1' }));
@@ -309,7 +312,7 @@ export function createApi({ db, env = {}, demo = false }) {
   add('POST', '/api/payments', {}, (ctx) => club.recordPayment(ctx.user, ctx.body));
   add('GET', '/api/payments/:id/ticket', {}, (ctx) => club.ticketFor(ctx.user, ctx.params.id));
   add('POST', '/api/payments/:id/ticket-events', {}, (ctx) => club.recordTicketEvent(ctx.user, ctx.params.id, ctx.body));
-  add('GET', '/api/ticket-events', ADMIN, (ctx) => club.ticketEvents(ctx.query));
+  add('GET', '/api/ticket-events', CLUB, (ctx) => club.ticketEvents(ctx.query));
   // Public check of a receipt (the QR code leads here): read-only, five wrong codes in a row lock the caller's
   // address for a minute. A success does not clear the count, so a right code cannot be used to keep guessing.
   add('GET', '/api/tickets/:id/:code', { public: true }, (ctx) => {
@@ -322,9 +325,9 @@ export function createApi({ db, env = {}, demo = false }) {
     }
     return { ticket };
   });
-  add('GET', '/api/finance/summary', ADMIN, (ctx) => club.financeSummary(ctx.query.from, ctx.query.to ?? ctx.query.from));
+  add('GET', '/api/finance/summary', CLUB, (ctx) => club.financeSummary(ctx.query.from, ctx.query.to ?? ctx.query.from));
   add('GET', '/api/finance/journal', {}, (ctx) => {
-    if (ctx.user.role !== 'admin') {
+    if (!isBoss(ctx.user)) {
       const today = club.bizToday();
       return { ...club.journal(today, today), restricted: true };
     }
@@ -333,7 +336,7 @@ export function createApi({ db, env = {}, demo = false }) {
   add('GET', '/api/finance/open', {}, () => club.openCharges());
   // The Excel export is built in the browser from this JSON, which names the file; the CSV is a download
   // answered by `respond`. In the demo space both get the DEMO_ prefix.
-  add('GET', '/api/export/:kind', ADMIN, (ctx) => {
+  add('GET', '/api/export/:kind', CLUB, (ctx) => {
     if (ctx.query.format !== 'json') return { __file: club.exportCsv(ctx.params.kind, ctx.query) };
     const sheet = club.exportJson(ctx.params.kind, ctx.query);
     return { ...sheet, filename: exportName(sheet.filename) };
@@ -345,39 +348,39 @@ export function createApi({ db, env = {}, demo = false }) {
   add('PUT', '/api/ledger/categories/:id', ADMIN, (ctx) => club.updateCategory(ctx.user, ctx.params.id, ctx.body));
   add('GET', '/api/ledger/entries', {}, (ctx) => club.listEntries(ctx.query, ctx.user));
   add('POST', '/api/ledger/entries', {}, (ctx) => club.createEntry(ctx.user, ctx.body));
-  add('POST', '/api/ledger/entries/:id/cancel', ADMIN, (ctx) => club.cancelEntry(ctx.user, ctx.params.id, ctx.body));
-  add('GET', '/api/ledger/book', ADMIN, (ctx) => club.ledgerBook(ctx.query));
-  add('GET', '/api/treasury', ADMIN, (ctx) => club.treasury(ctx.query.from, ctx.query.to ?? ctx.query.from));
+  add('POST', '/api/ledger/entries/:id/cancel', CLUB, (ctx) => club.cancelEntry(ctx.user, ctx.params.id, ctx.body));
+  add('GET', '/api/ledger/book', CLUB, (ctx) => club.ledgerBook(ctx.query));
+  add('GET', '/api/treasury', CLUB, (ctx) => club.treasury(ctx.query.from, ctx.query.to ?? ctx.query.from));
   // The cash page's « Compter la caisse »: the first cash fund (the settings change, so the bundle comes back), then counts.
   add('POST', '/api/treasury/fund', ADMIN, (ctx) => ({ treasury: club.setCashFund(ctx.user, ctx.body), bundle: club.bundle(ctx.user) }));
-  add('POST', '/api/treasury/count', ADMIN, (ctx) => club.countCash(ctx.user, ctx.body));
+  add('POST', '/api/treasury/count', CLUB, (ctx) => club.countCash(ctx.user, ctx.body));
   // The evening closing of the till: the manager or an administrator closes the day; only an administrator reopens it.
   add('GET', '/api/day-closing', {}, (ctx) => club.dayClosing(ctx.query.day));
   add('POST', '/api/day-closing', {}, (ctx) => club.closeDay(ctx.user, ctx.body));
-  add('POST', '/api/day-closing/:day/reopen', ADMIN, (ctx) => club.reopenDay(ctx.user, ctx.params.day, ctx.body));
-  add('GET', '/api/closings', ADMIN, () => club.closings());
-  add('POST', '/api/closings', ADMIN, (ctx) => club.closeMonth(ctx.user, ctx.body));
-  add('POST', '/api/closings/:month/reopen', ADMIN, (ctx) => club.reopenMonth(ctx.user, ctx.params.month, ctx.body));
+  add('POST', '/api/day-closing/:day/reopen', CLUB, (ctx) => club.reopenDay(ctx.user, ctx.params.day, ctx.body));
+  add('GET', '/api/closings', CLUB, () => club.closings());
+  add('POST', '/api/closings', CLUB, (ctx) => club.closeMonth(ctx.user, ctx.body));
+  add('POST', '/api/closings/:month/reopen', CLUB, (ctx) => club.reopenMonth(ctx.user, ctx.params.month, ctx.body));
 
   // Products & stock
   add('GET', '/api/products', {}, (ctx) => club.listProducts({ includeInactive: ctx.query.all === '1' }));
-  add('POST', '/api/products', ADMIN, (ctx) => club.createProduct(ctx.user, ctx.body));
-  add('PUT', '/api/products/:id', ADMIN, (ctx) => club.updateProduct(ctx.user, ctx.params.id, ctx.body));
+  add('POST', '/api/products', CLUB, (ctx) => club.createProduct(ctx.user, ctx.body));
+  add('PUT', '/api/products/:id', CLUB, (ctx) => club.updateProduct(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/products/:id/stock', {}, (ctx) => club.stockOperation(ctx.user, ctx.params.id, ctx.body));
   // The picture itself, for a browser's <img> (signed in, no demo header: the real club answers). The address carries
   // the photo's version (?v=) for the browser's cache and the server does not read it.
   add('GET', '/api/products/:id/photo', {}, (ctx) => ({ __image: club.productPhoto(ctx.params.id) }));
-  add('PUT', '/api/products/:id/photo', { ...ADMIN, ...PHOTOS, ...WITH_PHOTO }, (ctx) => club.setProductPhoto(ctx.user, ctx.params.id, ctx.body));
-  add('DELETE', '/api/products/:id/photo', { ...ADMIN, ...PHOTOS }, (ctx) => club.removeProductPhoto(ctx.user, ctx.params.id));
+  add('PUT', '/api/products/:id/photo', { ...CLUB, ...PHOTOS, ...WITH_PHOTO }, (ctx) => club.setProductPhoto(ctx.user, ctx.params.id, ctx.body));
+  add('DELETE', '/api/products/:id/photo', { ...CLUB, ...PHOTOS }, (ctx) => club.removeProductPhoto(ctx.user, ctx.params.id));
   add('GET', '/api/stock-movements', {}, (ctx) => club.stockMovements(ctx.query));
 
   // Lounge: conservation checks of the humidors.
   add('GET', '/api/lounge', {}, () => club.loungeOverview());
-  add('POST', '/api/humidors', ADMIN, (ctx) => club.createHumidor(ctx.user, ctx.body));
+  add('POST', '/api/humidors', CLUB, (ctx) => club.createHumidor(ctx.user, ctx.body));
   add('GET', '/api/humidors/:id', {}, (ctx) => club.humidorDetail(ctx.params.id));
-  add('PUT', '/api/humidors/:id', ADMIN, (ctx) => club.updateHumidor(ctx.user, ctx.params.id, ctx.body));
+  add('PUT', '/api/humidors/:id', CLUB, (ctx) => club.updateHumidor(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/humidors/:id/readings', {}, (ctx) => club.recordHumidorReading(ctx.user, ctx.params.id, ctx.body));
-  add('POST', '/api/humidor-readings/:id/void', ADMIN, (ctx) => club.voidHumidorReading(ctx.user, ctx.params.id, ctx.body));
+  add('POST', '/api/humidor-readings/:id/void', CLUB, (ctx) => club.voidHumidorReading(ctx.user, ctx.params.id, ctx.body));
 
   function match(method, pathname) {
     let pathMatched = false;

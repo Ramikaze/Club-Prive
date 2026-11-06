@@ -7,6 +7,7 @@ import { invalid, forbidden, notFound, conflict } from './errors.js';
 import { text, int, toId, flag } from './validate.js';
 import { addDays, addMonths, isValidDate, localParts } from '../shared/time.js';
 import { ACCOUNTS, ACCOUNT_LABELS, CARD_METHOD } from '../shared/rules.js';
+import { isBoss } from '../shared/roles.js';
 
 // The largest expense a manager may record alone, in hundredths (5 000 FCFA); above it, an administrator records it.
 export const MANAGER_EXPENSE_MAX = 5000 * 100;
@@ -151,7 +152,7 @@ export const ledgerMethods = {
 
   // The manager only sees the current business day, like the cash journal.
   listEntries(query, actor) {
-    const restricted = !!actor && actor.role !== 'admin';
+    const restricted = !!actor && !isBoss(actor);
     const from = restricted ? this.bizToday() : query.from;
     const to = restricted ? from : (query.to ?? query.from);
     this.periodBounds(from, to);
@@ -171,7 +172,7 @@ export const ledgerMethods = {
   createEntry(actor, input, { demo = false } = {}) {
     const kind = input.kind;
     if (!ENTRY_KIND[kind]) throw invalid("Type d'opération invalide.");
-    const isAdmin = actor.role === 'admin';
+    const isAdmin = isBoss(actor);
     if (!isAdmin && kind !== 'depense') {
       throw forbidden('Seul un administrateur peut enregistrer une entrée diverse ou un transfert.');
     }
