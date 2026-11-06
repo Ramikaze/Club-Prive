@@ -185,4 +185,27 @@ export const shopMethods = {
       lines,
     };
   },
+
+  // Product lines bought by a member or regular client, Boutique and session mixed, newest first. Payment details
+  // come from the payment that collected the line (lowest id if several), and stay null while the line is due.
+  // The total counts what is owed or paid, not refunded or cancelled lines.
+  purchaseHistory(memberId) {
+    const m = this.fileRow(memberId);
+    const lines = this.all(
+      `SELECT c.id, c.created_at, c.label, c.quantity, c.amount, c.account, c.reservation_id, c.shop_sale_id, c.status,
+         s.buyer_kind, p.id AS payment_id, p.method, p.card_amount
+       FROM charges c
+       LEFT JOIN shop_sales s ON s.id = c.shop_sale_id
+       LEFT JOIN payments p ON p.id = (SELECT MIN(payment_id) FROM payment_allocations WHERE charge_id = c.id)
+       WHERE c.member_id = ? AND c.kind = 'produit'
+       ORDER BY c.created_at DESC, c.id DESC LIMIT 500`, m.id,
+    ).map((c) => ({
+      charge_id: c.id, at: c.created_at, label: c.label, quantity: c.quantity, amount: c.amount, account: c.account,
+      origin: c.shop_sale_id ? 'boutique' : 'seance', reservation_id: c.reservation_id, status: c.status,
+      payment_id: c.payment_id ?? null, ticket_number: c.payment_id ? formatTicketNumber(c.payment_id) : null,
+      method: c.method ?? null, card_amount: c.payment_id ? c.card_amount : null, as_client: c.buyer_kind === 'client',
+    }));
+    const total = lines.filter((l) => l.status === 'due' || l.status === 'payee').reduce((n, l) => n + l.amount, 0);
+    return { member_id: m.id, total, lines };
+  },
 };

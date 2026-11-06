@@ -263,6 +263,7 @@ export function createApi({ db, env = {}, demo = false }) {
   add('POST', '/api/shop/sales/:id/cancel', {}, (ctx) => club.cancelShopSale(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/clients/:id/convert', {}, (ctx) => club.convertClient(ctx.user, ctx.params.id));
   add('GET', '/api/members/:id', {}, (ctx) => club.memberDetail(ctx.params.id));
+  add('GET', '/api/members/:id/purchases', {}, (ctx) => club.purchaseHistory(ctx.params.id));
   add('GET', '/api/members/:id/statement', {}, (ctx) => club.memberStatement(ctx.params.id, ctx.query.from, ctx.query.to));
   add('PUT', '/api/members/:id', {}, (ctx) => club.updateMember(ctx.user, ctx.params.id, ctx.body));
   // Members are deactivated, never deleted: their payments and transactions stay in the books.
