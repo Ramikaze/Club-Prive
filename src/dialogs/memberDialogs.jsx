@@ -12,9 +12,12 @@ import { addDays, addMonths } from '../../shared/time.js';
 import { CARD_METHOD } from '../../shared/rules.js';
 import { useNavigate } from 'react-router-dom';
 
-const planLabel = (p) => {
+// The server refuses a plan whose price is not set or not validated by an administrator (the demo space takes it):
+// the lists show such a plan with the reason, and it cannot be chosen.
+const planBlocked = (p, demo) => !demo && (p.price == null || !p.price_validated);
+const planLabel = (p, demo) => {
   const price = p.price == null ? 'prix non défini' : money(p.price);
-  return `${p.name} (${price})`;
+  return `${p.name} (${price})${planBlocked(p, demo) ? ' — à valider dans Paramètres' : ''}`;
 };
 
 const useActivePlans = () => {
@@ -29,6 +32,7 @@ function MemberDialog({ close, member, onDone }) {
   const [key] = useState(newKey);
   const [subKey] = useState(newKey);
   const plans = useActivePlans();
+  const demo = useStore((st) => st.demo);
   const { busy, error, submit } = useSubmit();
   const [v, setV] = useState(() => ({
     first_name: member?.first_name ?? '',
@@ -94,7 +98,7 @@ function MemberDialog({ close, member, onDone }) {
         {editing ? null : (
           <fieldset><legend>Formule (facultatif)</legend><div className="form-row">
             <label className="field"><span>Formule</span><select {...field('plan_id')}><option value="">— Plus tard —</option>
-              {plans.map((p) => <option key={p.id} value={p.id}>{planLabel(p)}</option>)}</select></label>
+              {plans.map((p) => <option key={p.id} value={p.id} disabled={planBlocked(p, demo)}>{planLabel(p, demo)}</option>)}</select></label>
             <label className="field"><span>Début de validité</span><input type="date" {...field('start_date')} /></label>
           </div>
           {planPrice > 0 ? (
@@ -128,7 +132,11 @@ function SubscriptionDialog({ close, member, onDone }) {
   const { busy, error, submit } = useSubmit();
   const sub = member.subscription;
   const renewing = sub && sub.state !== 'aucun';
-  const [planId, setPlanId] = useState(() => (plans[0] ? String(plans[0].id) : ''));
+  const demo = useStore((st) => st.demo);
+  const [planId, setPlanId] = useState(() => {
+    const first = plans.find((x) => !planBlocked(x, demo)) ?? plans[0];
+    return first ? String(first.id) : '';
+  });
   const [startDate, setStartDate] = useState(() => (sub && ['active', 'expire_bientot', 'a_venir'].includes(sub.state) ? addDays(sub.end_date, 1) : bizToday()));
   // The summary keeps the last complete choice while the date field is being edited.
   const [shown, setShown] = useState({ planId, startDate });
@@ -195,7 +203,7 @@ function SubscriptionDialog({ close, member, onDone }) {
         <div className="form-row">
           <label className="field"><span>Formule</span>
             <select name="plan_id" value={planId} onChange={(e) => change(e.target.value, startDate)}>
-              {plans.map((x) => <option key={x.id} value={x.id}>{planLabel(x)}</option>)}</select></label>
+              {plans.map((x) => <option key={x.id} value={x.id} disabled={planBlocked(x, demo)}>{planLabel(x, demo)}</option>)}</select></label>
           <label className="field"><span>Début de validité</span>
             <input type="date" name="start_date" value={startDate} onChange={(e) => change(planId, e.target.value)} required /></label>
         </div>

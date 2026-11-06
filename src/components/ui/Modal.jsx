@@ -50,7 +50,7 @@ export function Modal({ title, size = '', onClose, children }) {
     const previous = document.activeElement;
     const el = backdrop.current;
     open.push(el);
-    const first = body.current?.querySelector('[autofocus], input:not([type="hidden"]):not([disabled]), select, textarea, button[type="submit"]');
+    const first = body.current?.querySelector('[autofocus], [data-autofocus], input:not([type="hidden"]):not([disabled]), select, textarea, button[type="submit"]');
     // With no field to start in, the body of the window takes the focus (Escape and Tab work from there). It must not
     // scroll a tall window, a phone's sheet for one, down under its own header.
     if (first) first.focus?.();
@@ -131,7 +131,8 @@ function ActionDialog({ close, title, message, body, confirmLabel = 'Confirmer',
         )}
         <FormError error={error} />
         <div className="modal-actions">
-          <button type="button" className="btn" onClick={close}>Retour</button>
+          {/* A dangerous confirmation with nothing to type starts on « Retour »: Enter alone must not delete. */}
+          <button type="button" className="btn" onClick={close} data-autofocus={danger && !reasonLabel ? '' : undefined}>Retour</button>
           <button type="submit" className={`btn ${danger ? 'btn-danger' : 'btn-primary'}`} disabled={busy} aria-busy={busy}>{confirmLabel}</button>
         </div>
       </form>

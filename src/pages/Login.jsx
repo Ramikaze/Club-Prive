@@ -127,19 +127,20 @@ export default function Login() {
       useStore.setState({ entering: true });
     }, prefersReducedMotion() ? 150 : LEAVE_MS);
   };
-  // Filmed cigar smoke in a seamless loop (Pexels « A Smoke in a Dark Room », free licence), muted;
-  // under reduced motion only its still frame shows.
+  // Filmed cigar smoke in a seamless loop (Pexels « A Smoke in a Dark Room », free licence), muted. Nothing is
+  // downloaded before it plays (preload="none"); under reduced motion or the browser's data saver only its still
+  // frame shows.
   useEffect(() => {
     const video = smoke.current;
     video.muted = true;
-    if (!prefersReducedMotion()) video.play().catch(() => {});
+    if (!prefersReducedMotion() && !navigator.connection?.saveData) video.play().catch(() => {});
   }, []);
   useEffect(() => {
     api.get('/api/setup').then(setSetup).catch(() => setSetup({ needed: false }));
   }, []);
   return (
     <div className={`login-page${leaving ? ' is-leaving' : ''}`}>
-      <video ref={smoke} className="login-smoke" src="/login-smoke.mp4" poster="/login-smoke.jpg" muted loop playsInline preload="auto" aria-hidden="true" />
+      <video ref={smoke} className="login-smoke" src="/login-smoke.mp4" poster="/login-smoke.jpg" muted loop playsInline preload="none" aria-hidden="true" />
       <div className="login-stack">
         <BrandLogo className="login-logo" />
         {!setup && <div className="login-card"><Skeleton /></div>}
