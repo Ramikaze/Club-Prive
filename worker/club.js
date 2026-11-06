@@ -9,6 +9,7 @@ import { text, int, toId, flag, frDate } from './validate.js';
 import { ledgerMethods, DEFAULT_CATEGORIES, OUTSIDE_MEAL_CATEGORY, CASH_GAP_CATEGORY } from './ledger.js';
 import { loungeMethods } from './lounge.js';
 import { shopMethods, buyerShown } from './shop.js';
+import { billedMethods, DRINK_PART_SQL } from './billed.js';
 import {
   newTicketCode, formatTicketNumber, normalizeTicketCode, memberInitials, paymentLines, TICKET_CODE_LENGTH,
 } from '../shared/ticket.js';
@@ -3402,12 +3403,27 @@ export class Club {
     const empty = (key, label) => ({ account: key, label, ...zero(), seances: zero(), boutique: zero() });
     const acc = Object.fromEntries(ACCOUNTS.map((k) => [k, empty(k, ACCOUNT_LABELS[k])]));
     const part = (x, shop) => (shop ? x.boutique : x.seances);
+    // The Alcool account is also split in two halves, Champagne and Autres boissons (DRINK_PART_SQL decides), each
+    // computed by the same queries, so the two halves always add up to the account. Other accounts have no halves.
+    acc.alcool.champagne = zero();
+    acc.alcool.autres_boissons = zero();
+    const half = (r) => (r.account === 'alcool' ? acc.alcool[r.drink] : null);
     for (const r of this.all(
-      `SELECT account, status, shop_sale_id IS NOT NULL AS shop, SUM(amount) AS total, COUNT(*) AS n FROM charges
-       WHERE created_at >= ? AND created_at < ? GROUP BY account, status, shop`, a, b,
+      `SELECT c.account, c.status, c.shop_sale_id IS NOT NULL AS shop, ${DRINK_PART_SQL} AS drink, SUM(c.amount) AS total, COUNT(*) AS n
+       FROM charges c LEFT JOIN products pr ON pr.id = c.product_id
+       WHERE c.created_at >= ? AND c.created_at < ? GROUP BY c.account, c.status, shop, drink`, a, b,
     )) {
       const x = acc[r.account];
       const y = part(x, r.shop);
+      const h = half(r);
+      if (h) {
+        if (r.status === 'annulee') h.cancelled += r.total;
+        else {
+          h.billed += r.total;
+          h.lines += r.n;
+        }
+        if (r.status === 'due') h.outstanding += r.total;
+      }
       if (r.status === 'annulee') {
         x.cancelled += r.total;
         y.cancelled += r.total;
@@ -3423,21 +3439,29 @@ export class Club {
       }
     }
     for (const r of this.all(
-      `SELECT pa.account, p.shop_sale_id IS NOT NULL AS shop, SUM(pa.amount) AS total FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
-       WHERE p.paid_at >= ? AND p.paid_at < ? GROUP BY pa.account, shop`, a, b,
+      `SELECT pa.account, p.shop_sale_id IS NOT NULL AS shop, ${DRINK_PART_SQL} AS drink, SUM(pa.amount) AS total
+       FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
+       LEFT JOIN charges c ON c.id = pa.charge_id LEFT JOIN products pr ON pr.id = c.product_id
+       WHERE p.paid_at >= ? AND p.paid_at < ? GROUP BY pa.account, shop, drink`, a, b,
     )) {
       acc[r.account].collected += r.total;
+      const h = half(r);
+      if (h) h.collected += r.total;
       part(acc[r.account], r.shop).collected += r.total;
     }
     for (const r of this.all(
-      `SELECT rf.account, c.shop_sale_id IS NOT NULL AS shop, SUM(rf.amount) AS total FROM refunds rf JOIN charges c ON c.id = rf.charge_id
-       WHERE rf.created_at >= ? AND rf.created_at < ? GROUP BY rf.account, shop`, a, b,
+      `SELECT rf.account, c.shop_sale_id IS NOT NULL AS shop, ${DRINK_PART_SQL} AS drink, SUM(rf.amount) AS total
+       FROM refunds rf JOIN charges c ON c.id = rf.charge_id LEFT JOIN products pr ON pr.id = c.product_id
+       WHERE rf.created_at >= ? AND rf.created_at < ? GROUP BY rf.account, shop, drink`, a, b,
     )) {
       acc[r.account].refunded += r.total;
+      const h = half(r);
+      if (h) h.refunded += r.total;
       part(acc[r.account], r.shop).refunded += r.total;
     }
     const accounts = ACCOUNTS.map((k) => {
       for (const y of [acc[k], acc[k].seances, acc[k].boutique]) y.net = y.collected - y.refunded;
+      if (k === 'alcool') for (const y of [acc.alcool.champagne, acc.alcool.autres_boissons]) y.net = y.collected - y.refunded;
       return acc[k];
     });
     const total = empty('total', 'Total');
@@ -3778,3 +3802,4 @@ export class Club {
 Object.assign(Club.prototype, ledgerMethods);
 Object.assign(Club.prototype, loungeMethods);
 Object.assign(Club.prototype, shopMethods);
+Object.assign(Club.prototype, billedMethods);
