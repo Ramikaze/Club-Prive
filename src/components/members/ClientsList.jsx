@@ -18,7 +18,7 @@ function ClientsTable({ items, statut, onConvert, onReactivate }) {
     return <section className="card"><Empty icon="users">{statut === 'desactives' ? 'Aucun client désactivé.' : 'Aucun client régulier ne correspond.'}</Empty></section>;
   }
   return (
-    <section className="card"><div className="table-wrap"><table className="table stack-sm">
+    <section className="card clients-card"><div className="table-wrap"><table className="table stack-sm">
       <thead><tr><th>Client</th><th>Téléphone</th><th className="num">Achats</th><th className="num">Total</th><th>Dernier achat</th><th><span className="sr-only">Actions</span></th></tr></thead>
       <tbody>{items.map((c) => (
         <tr key={c.id}>
@@ -27,15 +27,15 @@ function ClientsTable({ items, statut, onConvert, onReactivate }) {
           <td data-label="Téléphone" className="nowrap">{c.phone}</td>
           <td data-label="Achats" className="num">{c.purchases_count}</td>
           <td data-label="Total" className="num">{money(c.purchases_total)}</td>
-          <td data-label="Dernier achat" className="nowrap">{c.last_purchase_at ? dateTime(c.last_purchase_at) : '—'}</td>
-          <td className="actions">
+          <td data-label="Dernier achat" className="nowrap nowrap-date">{c.last_purchase_at ? dateTime(c.last_purchase_at) : '—'}</td>
+          <td className="actions"><span className="row-actions">
             <Link className="btn btn-sm btn-ghost" to={`/membres/${c.id}`}>Fiche</Link>
             {c.active === false ? (
               <button type="button" className="btn btn-sm" onClick={() => onReactivate(c)}><Icon name="undo" /> Réactiver</button>
             ) : (
               <button type="button" className="btn btn-sm btn-primary" onClick={() => onConvert(c)}>Passer en membre</button>
             )}
-          </td>
+          </span></td>
         </tr>
       ))}</tbody>
     </table></div></section>

@@ -1,5 +1,6 @@
-// The Boutique: counter sales of cigars and champagne. Two tabs, each with its own cart (kept when switching).
-// A user who cannot sell in the open tab sees it read-only.
+// The Boutique: counter sales of cigars and champagne. Two tabs, each with its own cart, kept when switching tabs
+// and while the ticket of the other one is printed (the carts live in the store). A user who cannot sell in the
+// open tab sees it read-only.
 import { useState } from 'react';
 import SmartSearch from '../components/ui/SmartSearch.jsx';
 import { Empty, Loaded, Notice, PageHead, ProductPhoto, Segmented } from '../components/ui/ui.jsx';
@@ -18,14 +19,23 @@ const emptyCart = () => ({ key: newKey(), lines: {}, buyer: { kind: 'journalier'
 export default function Shop() {
   const me = useMe();
   const demo = useStore((s) => s.demo);
-  const [account, setAccount] = useState(() => RAYONS.find((a) => canSellIn(me, a)) ?? 'cigares');
+  const [fresh] = useState(() => ({ cigares: emptyCart(), alcool: emptyCart() }));
+  const carts = useStore((s) => s.shopCarts) ?? fresh;
+  const setCarts = useStore((s) => s.setShopCarts);
+  // Back from a ticket, the tab whose cart still waits opens first.
+  const [account, setAccount] = useState(() => {
+    const sellable = RAYONS.filter((a) => canSellIn(me, a));
+    return sellable.find((a) => Object.keys(carts[a].lines).length) ?? sellable[0] ?? 'cigares';
+  });
   const [search, setSearch] = useState('');
-  const [carts, setCarts] = useState(() => ({ cigares: emptyCart(), alcool: emptyCart() }));
   const state = useLoad(() => api.get('/api/products'), []);
 
   const shop = SHOP[account];
   const canSell = canSellIn(me, account);
-  const setCart = (update) => setCarts((all) => ({ ...all, [account]: typeof update === 'function' ? update(all[account]) : update }));
+  const setCart = (update) => setCarts((stored) => {
+    const all = stored ?? fresh;
+    return { ...all, [account]: typeof update === 'function' ? update(all[account]) : update };
+  });
   const cart = carts[account];
 
   return (
@@ -60,7 +70,7 @@ export default function Shop() {
               )}
             />
           </div>
-          {!canSell && <Notice kind="info">Consultation seule : la vente de ce rayon est réservée à son associé et au gérant.</Notice>}
+          {!canSell && <Notice kind="info">Consultation seule : la vente de ce rayon est réservée à son associé, à l’administrateur et au gérant.</Notice>}
           <div data-tour="shop" className={`shop-layout${canSell ? '' : ' is-readonly'}`}>
             <section aria-label={shop.tab}>
               {list.length ? (
@@ -78,7 +88,12 @@ export default function Shop() {
             </section>
             {canSell && (
               <aside className="shop-side" id="shop-sale">
-                <SalePanel key={account} account={account} products={products} cart={cart} setCart={setCart} />
+                {/* A paid cart starts again empty, with a new key: the next sale can never replay this one. A refused
+                    sale (stock, closed day…) keeps the cart and its key, and the stock is read again. */}
+                <SalePanel
+                  key={account} account={account} products={products} cart={cart} setCart={setCart}
+                  onSold={() => setCart(emptyCart())} onRefused={state.reload}
+                />
               </aside>
             )}
           </div>

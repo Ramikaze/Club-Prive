@@ -1200,11 +1200,31 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 
 /* ------------------------------------------------------------------ Boutique (counter sales) */
 
+/* Two wide tables of the Boutique, kept whole on a tablet-wide card instead of scrolling sideways (the phone stacks them):
+   « Historique des achats » tightens its cells and lets the date and its chips wrap, so « Ticket » stays in view; the
+   « Clients réguliers » list puts its two row buttons one above the other, so « Passer en membre » stays whole. */
+.purchase-history, .clients-card { container-type: inline-size; }
+@media (min-width: 700px) {
+  @container (max-width: 860px) {
+    .purchase-history .table th, .purchase-history .table td { padding-left: 6px; padding-right: 6px; }
+    .purchase-history .table td.nowrap, .clients-card .table td.nowrap-date { white-space: normal; }
+    .purchase-history .table .chip { white-space: normal; border-radius: var(--radius-sm); }
+    .clients-card td.actions { white-space: normal; }
+    .clients-card .row-actions { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  }
+}
+
+/* Caisse › Boutique: the member's card apart from the money that came into the till. */
+.calc.calc-apart { margin-top: 8px; border-style: dashed; }
+.calc-apart dt { display: inline-flex; align-items: center; gap: 6px; }
+.calc-apart dt svg { width: 16px; height: 16px; flex: none; }
+
 .shop-layout { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); align-items: start; }
 .shop-layout > * { min-width: 0; }
 @media (min-width: 1100px) {
   .shop-layout:not(.is-readonly) { grid-template-columns: minmax(0, 1fr) 380px; }
-  .shop-side { position: sticky; top: 16px; }
+  /* Sticky beside the products, never taller than the window: « Encaisser » stays within reach by scrolling the panel. */
+  .shop-side { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; }
 }
 .shop-grid { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
 .shop-card {

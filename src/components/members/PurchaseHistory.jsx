@@ -1,5 +1,6 @@
 // « Historique des achats »: the products a member or regular client bought, at the shop or during a session.
-import { useState } from 'react';
+// `file` is the loaded file: each time the file reloads (after « Encaisser », a refund…), the history does too.
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AccountTag, Chip, Empty, Loaded, Segmented } from '../ui/ui.jsx';
 import { api } from '../../lib/api.js';
@@ -36,11 +37,17 @@ function Lines({ lines }) {
   );
 }
 
-export default function PurchaseHistory({ memberId }) {
+export default function PurchaseHistory({ memberId, file }) {
   const state = useLoad(() => api.get(`/api/members/${memberId}/purchases`), [memberId]);
   const [filter, setFilter] = useState('tout');
+  const shownFile = useRef(file);
+  useEffect(() => {
+    if (shownFile.current === file) return;
+    shownFile.current = file;
+    state.reload();
+  }, [file]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <section className="card span-2">
+    <section className="card span-2 purchase-history">
       <div className="card-head"><h2>Historique des achats</h2>
         <Segmented label="Origine des achats" value={filter} options={FILTERS} onChange={setFilter} /></div>
       <Loaded state={state}>{({ lines }) => {

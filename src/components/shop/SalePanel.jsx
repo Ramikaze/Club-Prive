@@ -15,7 +15,7 @@ import { SHOP } from '../../../shared/roles.js';
 
 const methodIcon = (m) => (/esp[eè]ce/i.test(m) ? 'cash' : /virement|banque/i.test(m) ? 'bank' : 'wallet');
 
-export default function SalePanel({ account, products, cart, setCart }) {
+export default function SalePanel({ account, products, cart, setCart, onSold, onRefused }) {
   const shop = SHOP[account];
   const methods = useSettings().payment_methods.filter((m) => m !== CARD_METHOD);
   const navigate = useNavigate();
@@ -56,8 +56,17 @@ export default function SalePanel({ account, products, cart, setCart }) {
         ...(byCard ? { card: true, method: rest > 0 ? restMethod : undefined } : { method }),
       };
       // The cart's own key, kept across edits and failed attempts: the server stores it only after a successful sale.
-      const res = await api.post('/api/shop/sales', body, cart.key);
+      let res;
+      try {
+        res = await api.post('/api/shop/sales', body, cart.key);
+      } catch (err) {
+        // What the refusal may come from is read again: the stock on the cards, the member's card balance.
+        onRefused?.();
+        if (memberId) wallet.reload();
+        throw err;
+      }
       toast(`Vente enregistrée : ${money(res.payment.amount)}.`);
+      onSold?.();
       navigate(`/caisse/ticket/${res.payment.id}`);
     });
   };
