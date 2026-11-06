@@ -2739,7 +2739,8 @@ export class Club {
     );
     const byAccount = Object.fromEntries(ACCOUNTS.map((k) => [k, 0]));
     for (const a of allocations) byAccount[a.account] += a.amount;
-    const shop = p.shop_sale_id ? this.get('SELECT account, buyer_kind FROM shop_sales WHERE id = ?', p.shop_sale_id) : null;
+    const shop = p.shop_sale_id
+      ? this.get('SELECT account, buyer_kind, cancelled_at, cancel_reason FROM shop_sales WHERE id = ?', p.shop_sale_id) : null;
     const walkIn = shop?.buyer_kind === 'journalier';
     const buyer = p.first_name ? buyerShown(shop?.buyer_kind, p) : null;
     return {
@@ -2749,11 +2750,13 @@ export class Club {
       paid_at: p.paid_at, ticket_code: p.ticket_code ?? null, created_by_name: p.created_by_name ?? null, allocations, by_account: byAccount,
       kind: p.kind ?? 'encaissement', card_amount: p.card_amount ?? 0, label: p.label ?? null,
       cancelled_at: p.cancelled_at ?? null, cancel_reason: p.cancel_reason ?? null, shop_sale_id: p.shop_sale_id ?? null,
+      shop_cancelled_at: shop?.cancelled_at ?? null, shop_cancel_reason: shop?.cancel_reason ?? null,
     };
   }
 
-  // V1: each selected line is collected in full; the payment is split by line, hence by sub-account.
-  recordPayment(actor, input) {
+  // V1: each selected line is collected in full; the payment is split by line, hence by sub-account. `shopSaleId`
+  // ties the payment to a Boutique sale: only createShopSale passes it, it is never read from the request.
+  recordPayment(actor, input, { shopSaleId = null } = {}) {
     const s = this.settings();
     if (!Array.isArray(input.charge_ids) || !input.charge_ids.length) throw invalid('Sélectionnez au moins une ligne à encaisser.');
     const ids = [...new Set(input.charge_ids.map((v) => toId(v, 'Ligne')))];
@@ -2789,7 +2792,7 @@ export class Club {
       `INSERT INTO payments (member_id, reservation_id, amount, method, reference, paid_at, created_by, ticket_code, card_amount, shop_sale_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       memberId, reservationId, total, method, reference, this.nowIso(), actor.id, this.freshTicketCode(), cardAmount,
-      input.shop_sale_id ?? null,
+      shopSaleId,
     );
     for (const c of charges) {
       this.run('INSERT INTO payment_allocations (payment_id, charge_id, account, amount) VALUES (?, ?, ?, ?)', paymentId, c.id, c.account, c.amount);
@@ -2987,7 +2990,7 @@ export class Club {
       lines,
       total: p.amount,
       method: p.method,
-      initials: memberInitials(p.first_name, p.last_name),
+      initials: p.member_kind === 'journalier' ? '' : memberInitials(p.first_name, p.last_name),
       status: this.ticketStatus(p),
       refunded_amount: refunded,
     };
@@ -3009,7 +3012,7 @@ export class Club {
     }
     const rows = this.all(
       `SELECT e.at, e.kind, e.copy_no, e.payment_id, p.amount, e.user_id, u.name AS user_name,
-              m.first_name, m.last_name,
+              m.first_name, m.last_name, m.kind AS member_kind,
               (SELECT COUNT(*) FROM ticket_events x WHERE x.payment_id = e.payment_id) AS copies_total
        FROM ticket_events e JOIN payments p ON p.id = e.payment_id JOIN members m ON m.id = p.member_id
        LEFT JOIN users u ON u.id = e.user_id
@@ -3018,9 +3021,11 @@ export class Club {
     return {
       events: rows.map((r) => ({
         at: r.at, kind: r.kind, copy_no: r.copy_no, payment_id: r.payment_id, number: formatTicketNumber(r.payment_id),
-        member_name: `${r.first_name} ${r.last_name}`, amount: r.amount, user_id: r.user_id, user_name: r.user_name ?? null,
+        member_name: buyerShown(r.member_kind, r).name, amount: r.amount, user_id: r.user_id, user_name: r.user_name ?? null,
         copies_total: r.copies_total,
       })),
+      // The staff, for the « Employé » filter: an associé reads this history but not the user accounts.
+      employees: this.all('SELECT id, name FROM users ORDER BY name, id'),
     };
   }
 
@@ -3475,8 +3480,10 @@ export class Club {
        WHERE p.paid_at >= ? AND p.paid_at < ? ORDER BY p.paid_at DESC`, a, b,
     ).map((p) => this.paymentDTO(p));
     const refunds = this.all(
-      `SELECT rf.*, c.label, c.member_id, c.shop_sale_id, c.reservation_id, m.first_name, m.last_name, m.kind AS buyer_kind, u.name AS created_by_name FROM refunds rf
-       JOIN charges c ON c.id = rf.charge_id JOIN members m ON m.id = c.member_id LEFT JOIN users u ON u.id = rf.created_by
+      `SELECT rf.*, c.label, c.member_id, c.shop_sale_id, c.reservation_id, m.first_name, m.last_name,
+         COALESCE(s.buyer_kind, m.kind) AS buyer_kind, u.name AS created_by_name FROM refunds rf
+       JOIN charges c ON c.id = rf.charge_id JOIN members m ON m.id = c.member_id LEFT JOIN shop_sales s ON s.id = c.shop_sale_id
+       LEFT JOIN users u ON u.id = rf.created_by
        WHERE rf.created_at >= ? AND rf.created_at < ? ORDER BY rf.created_at DESC`, a, b,
     ).map((r) => ({ ...r, member_name: buyerShown(r.buyer_kind, r).name, account_label: ACCOUNT_LABELS[r.account] }));
     return { from, to, payments, refunds };
@@ -3485,7 +3492,8 @@ export class Club {
   auditLog(query = {}) {
     const limit = Math.min(1000, Math.max(1, Number(query.limit) || 200));
     return this.all(
-      `SELECT a.*, u.name AS user_name FROM audit_log a LEFT JOIN users u ON u.id = a.user_id ORDER BY a.id DESC LIMIT ?`, limit,
+      `SELECT a.*, u.name AS user_name, m.kind AS member_kind FROM audit_log a LEFT JOIN users u ON u.id = a.user_id
+       LEFT JOIN members m ON a.entity = 'member' AND m.id = a.entity_id ORDER BY a.id DESC LIMIT ?`, limit,
     ).map((a) => ({ ...a, details: a.details ? JSON.parse(a.details) : null }));
   }
 

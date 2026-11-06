@@ -56,6 +56,7 @@ export const shopMethods = {
   convertClient(actor, id) {
     const m = this.fileRow(id);
     if (m.kind !== 'client') throw conflict('PAS_CLIENT', `${m.first_name} ${m.last_name} est déjà membre.`);
+    this.assertMemberActive(m, 'de le passer en membre');
     const memberNo = this.nextMemberNo('M');
     const now = this.nowIso();
     this.run(
@@ -132,7 +133,7 @@ export const shopMethods = {
       this.moveStock(actor, p.id, -quantity, 'vente', { chargeId, reason: `Boutique n° ${saleId}` });
       chargeIds.push(chargeId);
     }
-    const { payment } = this.recordPayment(actor, { charge_ids: chargeIds, card, method, shop_sale_id: saleId });
+    const { payment } = this.recordPayment(actor, { charge_ids: chargeIds, card, method }, { shopSaleId: saleId });
     this.audit(actor, 'boutique.vente', 'shop_sale', saleId, {
       rayon: account, acheteur: buyer.kind, montant: payment.amount, carte: payment.card_amount,
     });

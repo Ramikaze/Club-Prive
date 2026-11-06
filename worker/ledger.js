@@ -8,6 +8,7 @@ import { text, int, toId, flag } from './validate.js';
 import { addDays, addMonths, isValidDate, localParts } from '../shared/time.js';
 import { ACCOUNTS, ACCOUNT_LABELS, CARD_METHOD } from '../shared/rules.js';
 import { isBoss } from '../shared/roles.js';
+import { buyerShown } from './shop.js';
 
 // The largest expense a manager may record alone, in hundredths (5 000 FCFA); above it, an administrator records it.
 export const MANAGER_EXPENSE_MAX = 5000 * 100;
@@ -49,11 +50,11 @@ export const ledgerMethods = {
     if (this.get('SELECT 1 AS x FROM closed_periods WHERE month = ?', day.slice(0, 7))) {
       throw conflict(
         'PERIODE_CLOTUREE',
-        `${what} tombe en ${monthLabel(day.slice(0, 7))}, une période clôturée. Un administrateur doit d'abord la rouvrir.`,
+        `${what} tombe en ${monthLabel(day.slice(0, 7))}, une période clôturée. Un administrateur ou un associé doit d'abord la rouvrir.`,
       );
     }
     if (this.get('SELECT 1 AS x FROM day_closings WHERE biz_day = ?', day)) {
-      throw conflict('JOURNEE_FERMEE', `${what} tombe le ${day.split('-').reverse().join('/')}, une journée dont la caisse est fermée. Un administrateur doit d'abord la rouvrir.`);
+      throw conflict('JOURNEE_FERMEE', `${what} tombe le ${day.split('-').reverse().join('/')}, une journée dont la caisse est fermée. Un administrateur ou un associé doit d'abord la rouvrir.`);
     }
   },
 
@@ -174,19 +175,19 @@ export const ledgerMethods = {
     if (!ENTRY_KIND[kind]) throw invalid("Type d'opération invalide.");
     const isAdmin = isBoss(actor);
     if (!isAdmin && kind !== 'depense') {
-      throw forbidden('Seul un administrateur peut enregistrer une entrée diverse ou un transfert.');
+      throw forbidden('Seul un administrateur ou un associé peut enregistrer une entrée diverse ou un transfert.');
     }
     const today = this.bizToday();
     const date = input.biz_date === undefined || input.biz_date === null || input.biz_date === '' ? today : input.biz_date;
     if (!isValidDate(date)) throw invalid('Date invalide.');
     if (date > today) throw invalid('La date ne peut pas être dans le futur.');
     if (!isAdmin && date !== today) {
-      throw forbidden("Le gérant enregistre les dépenses du jour. Pour une autre date, adressez-vous à un administrateur.");
+      throw forbidden("Le gérant enregistre les dépenses du jour. Pour une autre date, adressez-vous à un administrateur ou à un associé.");
     }
     this.assertOpen(date, 'Cette opération');
     const amount = int(input.amount, 'Montant', { min: 1, max: 1e13 });
     if (!isAdmin && amount > MANAGER_EXPENSE_MAX) {
-      throw forbidden("Le gérant enregistre des dépenses de 5 000 FCFA au plus. Au-delà, adressez-vous à un administrateur.");
+      throw forbidden("Le gérant enregistre des dépenses de 5 000 FCFA au plus. Au-delà, adressez-vous à un administrateur ou à un associé.");
     }
     const method = this.treasuryAccount(input.method, kind === 'transfert' ? 'Compte de départ' : kind === 'depense' ? 'Payé depuis' : 'Reçu sur');
     let toMethod = null;
@@ -521,7 +522,7 @@ export const ledgerMethods = {
     const cardLeft = new Map();
     for (const r of this.all(
       `SELECT pa.id, pa.account, pa.amount, p.id AS payment_id, p.paid_at, p.method, p.reference, p.card_amount, c.label,
-         m.first_name, m.last_name
+         m.first_name, m.last_name, m.kind
        FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id JOIN charges c ON c.id = pa.charge_id
        JOIN members m ON m.id = p.member_id
        WHERE p.paid_at >= ? AND p.paid_at < ? ORDER BY p.paid_at, pa.id`, a, b,
@@ -532,7 +533,7 @@ export const ledgerMethods = {
       if (card === r.amount) continue;
       rows.push({
         key: `E-${r.id}`, ...when(r.paid_at), type: 'encaissement', ref: `ENC-${r.payment_id}`, label: r.label,
-        detail: `${r.first_name} ${r.last_name}`, reference: r.reference, account: r.account, method: r.method, in: r.amount - card, out: 0,
+        detail: buyerShown(r.kind, r).name, reference: r.reference, account: r.account, method: r.method, in: r.amount - card, out: 0,
       });
     }
     for (const r of this.all(
@@ -578,7 +579,7 @@ export const ledgerMethods = {
       }
     }
     for (const r of this.all(
-      `SELECT rf.*, c.label, m.first_name, m.last_name FROM refunds rf
+      `SELECT rf.*, c.label, m.first_name, m.last_name, m.kind FROM refunds rf
        JOIN charges c ON c.id = rf.charge_id JOIN members m ON m.id = c.member_id
        WHERE rf.created_at >= ? AND rf.created_at < ? ORDER BY rf.created_at, rf.id`, a, b,
     )) {
@@ -586,7 +587,7 @@ export const ledgerMethods = {
       if (r.card_amount === r.amount) continue;
       rows.push({
         key: `R-${r.id}`, ...when(r.created_at), type: 'remboursement', ref: `RMB-${r.id}`, label: `Remboursement : ${r.label}`,
-        detail: `${r.first_name} ${r.last_name} — ${r.reason}`, reference: r.reference, account: r.account, method: r.method,
+        detail: `${buyerShown(r.kind, r).name} — ${r.reason}`, reference: r.reference, account: r.account, method: r.method,
         in: 0, out: r.amount - r.card_amount,
       });
     }

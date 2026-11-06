@@ -152,6 +152,64 @@ test('annulée un autre jour : la vente reste dans sa période, l’argent sort 
   assert.equal(both.total, baseY.total + baseT.total - amount);
 });
 
+test('séances et Boutique le même jour : chaque part ne bouge qu’avec ses propres lignes', async () => {
+  const m = await newMember();
+  const actor = server.club.get("SELECT * FROM users WHERE login = 'admin'");
+  const sessionLine = () => server.club.tx(() => server.club.insertCharge(actor, {
+    account: 'alcool', kind: 'produit', member_id: m.id, product_id: BTL, label: 'Bouteille test', quantity: 1, unit_price: 20000 * UM,
+  }));
+  const s0 = await summary();
+  // Two session lines: one paid, one paid then refunded.
+  const kept = sessionLine();
+  const back = sessionLine();
+  ok(await ger.post('/api/payments', { charge_ids: [kept, back], method: 'Espèces' }));
+  ok(await admin.post(`/api/charges/${back}/refund`, { reason: 'Bouteille abîmée', method: 'Espèces' }));
+  const s1 = await summary();
+  const al0 = s0.accounts.find((x) => x.account === 'alcool');
+  const al1 = s1.accounts.find((x) => x.account === 'alcool');
+  assert.deepEqual(al1.boutique, al0.boutique);
+  assert.equal(al1.seances.billed, al0.seances.billed + 40000 * UM);
+  assert.equal(al1.seances.collected, al0.seances.collected + 40000 * UM);
+  assert.equal(al1.seances.refunded, al0.seances.refunded + 20000 * UM);
+  assert.equal(al1.seances.net, al0.seances.net + 20000 * UM);
+  // Then a Boutique sale and its cancellation: the sessions' part does not move.
+  const r = ok(await sale(ger, { account: 'alcool', buyer: { kind: 'membre', member_id: m.id }, lines: [{ product_id: BTL, quantity: 1 }], method: 'Espèces' }));
+  ok(await cha.post(`/api/shop/sales/${r.sale.id}/cancel`, { reason: 'Erreur de produit' }));
+  const s2 = await summary();
+  const al2 = s2.accounts.find((x) => x.account === 'alcool');
+  assert.deepEqual(al2.seances, al1.seances);
+  assert.equal(al2.boutique.collected, al1.boutique.collected + 20000 * UM);
+  assert.equal(al2.boutique.refunded, al1.boutique.refunded + 20000 * UM);
+  assert.equal(al2.boutique.net, al1.boutique.net);
+  for (const x of [...s2.accounts, s2.total]) {
+    for (const f of FIELDS) assert.equal(x.seances[f] + x.boutique[f], x[f], `${x.account}.${f}`);
+  }
+  // The Boutique tab knows nothing of the session lines.
+  assert.equal((await shop()).accounts.alcool.total, al2.boutique.net);
+});
+
+test('onglet Boutique : la part carte et le reste, à la vente et à l’annulation', async () => {
+  const m = await newMember();
+  ok(await ger.post(`/api/members/${m.id}/wallet/recharge`, { amount: 3000 * UM, method: 'Espèces' }));
+  const meth = (c, name) => c.by_method.find((x) => x.method === name)?.total ?? 0;
+  const base = (await shop()).accounts.cigares;
+  const r = ok(await sale(ger, { account: 'cigares', buyer: { kind: 'membre', member_id: m.id },
+    lines: [{ product_id: CIG, quantity: 2 }], card: true, method: 'MTN MoMo' }));
+  assert.equal(r.payment.card_amount, 3000 * UM);
+  const mid = (await shop()).accounts.cigares;
+  assert.equal(meth(mid, 'Carte membre'), meth(base, 'Carte membre') + 3000 * UM);
+  assert.equal(meth(mid, 'MTN MoMo'), meth(base, 'MTN MoMo') + 7000 * UM);
+  assert.equal(mid.by_buyer.membre, base.by_buyer.membre + 10000 * UM);
+  assert.equal(mid.sales.find((s) => s.id === r.sale.id).card_amount, 3000 * UM);
+  ok(await cig.post(`/api/shop/sales/${r.sale.id}/cancel`, { reason: 'Erreur de produit' }));
+  const end = (await shop()).accounts.cigares;
+  assert.equal(meth(end, 'Carte membre'), meth(base, 'Carte membre'));
+  assert.equal(meth(end, 'MTN MoMo'), meth(base, 'MTN MoMo'));
+  assert.equal(end.by_buyer.membre, base.by_buyer.membre);
+  assert.equal(end.total, base.total);
+  assert.equal(server.club.walletBalance(m.id), 3000 * UM);
+});
+
 test('le gérant n’a pas l’onglet Boutique de la caisse', async () => {
   refused(await ger.get(`/api/shop/summary?from=${today}`), 403);
   const a = ok(await cig.get(`/api/shop/summary?from=${today}`));

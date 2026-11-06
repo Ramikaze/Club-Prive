@@ -89,6 +89,18 @@ test('passer en membre garde l’historique et le numéro d’origine', async ()
   assert.equal(code(await ger.post(`/api/clients/${mem.id}/convert`, {})), 'PAS_CLIENT');
 });
 
+test('un client désactivé ne passe pas en membre', async () => {
+  const c = await newClient();
+  ok(await ger.post(`/api/members/${c.id}/deactivate`, { reason: 'Départ du pays' }));
+  const r = await ger.post(`/api/clients/${c.id}/convert`, {});
+  assert.equal(r.status, 409, JSON.stringify(r.data));
+  assert.equal(code(r), 'MEMBRE_DESACTIVE');
+  const row = server.club.get('SELECT kind, member_no, former_client_no, active FROM members WHERE id = ?', c.id);
+  assert.deepEqual({ ...row }, { kind: 'client', member_no: c.member_no, former_client_no: null, active: 0 });
+  assert.equal(server.club.get('SELECT COUNT(*) AS n FROM cards WHERE member_id = ?', c.id).n, 0);
+  assert.equal(server.club.get("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'client.passer_membre' AND entity_id = ?", c.id).n, 0);
+});
+
 test('le client journalier n’apparaît nulle part', async () => {
   const id = server.club.tx(() => server.club.walkInMemberId());
   assert.equal(server.club.tx(() => server.club.walkInMemberId()), id);

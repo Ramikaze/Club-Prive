@@ -156,6 +156,29 @@ test('export des encaissements : client journalier sans donnée personnelle', as
   assert.equal(csv.status, 200);
 });
 
+test('un encaissement ordinaire ignore shop_sale_id envoyé par l’écran', async () => {
+  const day = ok(await sale(ger, { account: 'cigares', buyer: { kind: 'journalier' }, lines: [{ product_id: CIG, quantity: 1 }], method: 'Espèces' }));
+  const m = await newMember();
+  const actor = server.club.get("SELECT * FROM users WHERE login = 'ger'");
+  const chargeId = server.club.tx(() => server.club.insertCharge(actor, {
+    account: 'reservations', kind: 'temps_supplementaire', member_id: m.id, label: 'Temps supplémentaire', quantity: 1, unit_price: 1000 * UM,
+  }));
+  const before = ok(await admin.get(`/api/finance/summary?from=${today}&to=${today}`)).accounts.find((x) => x.account === 'reservations');
+  const pay = ok(await ger.post('/api/payments', { charge_ids: [chargeId], method: 'Espèces', shop_sale_id: day.sale.id })).payment;
+  assert.equal(pay.shop_sale_id, null);
+  assert.equal(pay.shop_account, null);
+  assert.equal(pay.buyer_kind, null);
+  assert.equal(server.club.get('SELECT shop_sale_id FROM payments WHERE id = ?', pay.id).shop_sale_id, null);
+  const after = ok(await admin.get(`/api/finance/summary?from=${today}&to=${today}`)).accounts.find((x) => x.account === 'reservations');
+  assert.deepEqual(after.boutique, before.boutique);
+  assert.equal(after.seances.collected, before.seances.collected + 1000 * UM);
+  const t = ok(await ger.get(`/api/payments/${pay.id}/ticket`)).ticket;
+  assert.equal(t.client_line, `${t.member_first_name} ${t.member_last_name} (${m.member_no})`);
+  // The Boutique sale it named keeps its own payment only.
+  assert.equal(server.club.get('SELECT COUNT(*) AS n FROM payments WHERE shop_sale_id = ?', day.sale.id).n, 1);
+  restock(CIG, 1);
+});
+
 test('journée fermée : la vente est refusée', async () => {
   const lines = [{ product_id: CIG, quantity: 1 }];
   const state = ok(await ger.get(`/api/day-closing?day=${today}`));
