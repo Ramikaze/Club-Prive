@@ -1,10 +1,17 @@
 // « Par catégorie »: the Caisse in three columns (Réservation séance, Boisson with its Champagne and Autres
-// boissons halves, Cigare), each with its net at the top and, under it, what was billed in the period.
+// boissons halves, Cigare), each with its net at the top and, under it, what was billed in the period. Their sum is
+// « Recette du jour » (owner's rule, 2026-11-07: the recette is these three columns and nothing else), and one line
+// under them goes from it to « Argent encaissé », the box of « Soldes ».
 import { Link } from 'react-router-dom';
 import Icon from '../ui/Icon.jsx';
 import { CashRow, metaLine } from './CashRow.jsx';
 import { categoryColumns, lineTexts } from './categories.js';
+import { recetteToCash, tillFigures } from './flows.js';
+import { bizDayOf } from './when.js';
 import { dateTime, money } from '../../lib/format.js';
+
+// An amount that may be negative (a period with more refunded than collected), with a true minus sign.
+const amount = (v) => (v < 0 ? `−${money(-v)}` : money(v));
 
 // The origin, with the member's name linked to his file when the line has a member (a day client has none).
 function Origin({ line, text }) {
@@ -44,11 +51,35 @@ function Part({ p }) {
   );
 }
 
-export default function CategoryColumns({ sum, billed, method }) {
+// « Argent encaissé = recette du jour … + argent mis sur les cartes … − ventes payées par carte membre … = … »: the
+// terms that are not zero, each with its sign and amount, ending on the box's own figure (`cash`, all accounts).
+// Should the two ever differ, the line says so instead of showing a false equality.
+function Bridge({ bridge, cash, oneDay }) {
+  const terms = bridge.terms.filter((x) => x.amount !== 0);
+  const gap = cash - bridge.cash;
+  return (
+    <p className="subtle cash-note cat-bridge">
+      {/* Each term is kept whole on its line: a narrow screen breaks the sum between terms only. */}
+      <strong>Argent encaissé</strong> ={' '}
+      <span className="nowrap">{oneDay ? 'recette du jour' : 'recette de la période'} {amount(bridge.recette)}</span>
+      {terms.map((x) => <span key={x.key}>{' '}<span className="nowrap">{x.amount < 0 ? '−' : '+'} {x.label} {money(Math.abs(x.amount))}</span></span>)}
+      {' '}<span className="nowrap">= <strong className="num">{amount(bridge.cash)}</strong>.</span>
+      {gap !== 0 && <> Écart non expliqué de {amount(gap)} avec la case « Argent encaissé » : signalez-le.</>}
+    </p>
+  );
+}
+
+// `journal`, `entries`, `t` (the treasury) and `openingBalances`: what « Soldes » reads, for the line under the
+// columns. The columns ignore the account filter, so the line is shown on all accounts only.
+export default function CategoryColumns({ sum, billed, method, oneDay, journal, entries, t, openingBalances }) {
+  const bridge = !method && recetteToCash(sum, journal, entries, { to: t.to, dayOf: bizDayOf });
+  const cash = !method && tillFigures(t, '', { entries, journal, openingBalances, dayOf: bizDayOf }).in;
   return (
     <section id="caisse-categories" className="card cash-block">
       <div className="card-head">
         <h2><Icon name="list" /> Par catégorie {method && <span className="subtle">toutes caisses et comptes</span>}</h2>
+        {/* The three accounts are the only ones, so the total is exactly the sum of the three column heads. */}
+        <span className="cat-total"><span className="subtle">{oneDay ? 'Recette du jour' : 'Recette de la période'}</span> <strong className="cash-block-total num">{money(sum.total.net)}</strong></span>
       </div>
       {!billed ? <p className="subtle">Les lignes facturées n’ont pas pu être chargées. Rechargez la page.</p> : (
       <div className="cat-columns">
@@ -65,7 +96,9 @@ export default function CategoryColumns({ sum, billed, method }) {
         </div>
       </div>
       )}
-      <p className="subtle cash-note">La recette compte l’argent à la date où il est encaissé (ou rendu) ; la liste montre ce qui a été facturé à la date de facturation, payé ou non.</p>
+      {method ? <p className="subtle cash-note">Choisissez « Toutes » les caisses et comptes pour voir le passage de la recette à l’argent encaissé.</p>
+        : <Bridge bridge={bridge} cash={cash} oneDay={oneDay} />}
+      <p className="subtle cash-note">La recette compte chaque vente le jour où elle est payée (carte membre comprise) ou remboursée ; la liste montre ce qui a été facturé à la date de facturation, payé ou non.</p>
     </section>
   );
 }

@@ -1,8 +1,9 @@
-// The cash desk (/caisse), one page: « Soldes » (administrators), then « Recettes » and « Dépenses » side by side,
-// each with its summary, its detailed list and its total, and under them what is left to collect, the transfers
-// and the folded details. « Par catégorie » (three columns) sits between the balances and the receipts. The
-// manager sees the day only, without the balances (treasury is the administrators'), and records the day's
-// expenses within his cap.
+// The cash desk (/caisse), one page: « Soldes » (administrators), then « Argent encaissé » and « Dépenses » side by
+// side, each with its summary, its detailed list and its total, and under them what is left to collect, the
+// transfers and the folded details. « Par catégorie » (three columns, their sum the recette, with the line from it
+// to the money received) sits between the balances and the receipts. The manager sees the day only, without the
+// balances (treasury is the administrators'), and records the day's expenses within his cap: his page is unchanged
+// (« Recettes du jour »).
 import { useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
@@ -128,10 +129,17 @@ function AdminCash() {
         <div className="cash-page">
           <DayClosingBar isAdmin onChange={state.reload} />
           <CashBalance t={d.treasury} method={method} entries={d.entries} journal={d.journal} openingBalances={settings.opening_balances} onCount={count} />
-          <CategoryColumns sum={d.sum} billed={d.billed} method={method} />
+          <CategoryColumns
+            sum={d.sum} billed={d.billed} method={method} oneDay={oneDay}
+            journal={d.journal} entries={d.entries} t={d.treasury} openingBalances={settings.opening_balances}
+          />
           <div className="cash-columns">
             <div className="cash-columns-inner">
-              <ReceiptsBlock journal={d.journal} entries={d.entries} method={method} oneDay={oneDay} isAdmin onChange={state.reload} shopSplit />
+              {/* The money received, as the box of « Soldes »: the recette is « Par catégorie » (owner's rule, 2026-11-07). */}
+              <ReceiptsBlock
+                journal={d.journal} entries={d.entries} method={method} oneDay={oneDay} isAdmin onChange={state.reload} shopSplit
+                title="Argent encaissé" emptyText="Aucun argent encaissé sur la période."
+              />
               <ExpensesBlock entries={d.entries} method={method} oneDay={oneDay} isAdmin onChange={state.reload} />
             </div>
           </div>

@@ -1,7 +1,8 @@
 // « Soldes »: the till over the period on the account chosen for the page (or all of them), read left to right:
-// the cash fund it started with, the recettes, the dépenses, and what is in it at the end. Transfers are neither
-// recettes nor dépenses: on all accounts they cancel out; on one account they are shown under the figures, and
-// the closing balance includes them. « Compter la caisse » (onCount, administrators) sets the first cash fund, then
+// the cash fund it started with, the money received (« Argent encaissé », not the recette: that is « Par catégorie »,
+// owner's rule of 2026-11-07), the dépenses, and what is in it at the end. Transfers are neither recettes nor
+// dépenses: on all accounts they cancel out; on one account they are shown under the figures, and the closing
+// balance includes them. « Compter la caisse » (onCount, administrators) sets the first cash fund, then
 // records the gap between the till and the books.
 import Icon from '../ui/Icon.jsx';
 import { receiptSummary, tillFigures } from './flows.js';
@@ -28,7 +29,7 @@ export default function CashBalance({ t, method, entries, journal, openingBalanc
           <div className="hint">au {dayLabel(t.from, 'short')}</div>
         </div>
         <div className="kpi">
-          <div className="label">Recettes</div>
+          <div className="label">Argent encaissé</div>
           <div className="value amount-in">{signed(f.in)}</div>
           <div className="hint">argent reçu, remboursements déduits</div>
           <div className="hint">dont Boutique {money(shop)}</div>

@@ -132,3 +132,26 @@ chaque colonne, la recette du jour ; dessous, la liste de ce qui a été factur�
 - Dépôt public : aucun vrai nom de marque, photo ou numéro dans le code, les tests ou la démo.
 - `npm test` vert, `npm run build` réussi ; chaque changement de base passe par une nouvelle migration.
 - Le propriétaire approuve chaque mise en ligne.
+
+## Recette du jour (décision du propriétaire, 2026-11-07)
+
+1. **La recette du jour = les trois colonnes, et rien d'autre** : Réservation séance + Boisson (Champagne + Autres
+   boissons) + Cigare, en comptant les ventes payées par carte membre le jour où la carte est utilisée. C'est ce que
+   les colonnes montrent déjà. En tête du bloc « Par catégorie » : « Recette du jour » (une journée) ou « Recette de
+   la période » (plusieurs jours), égale à la somme des trois colonnes.
+2. **Ne sont pas de la recette** : l'argent mis sur une carte membre (il reste « en attente » jusqu'à ce que le membre
+   le dépense ; il devient alors recette dans la catégorie de ce qu'il achète) ; un repas extérieur (le club paie un
+   restaurant pour rendre service au client : de l'argent qui sort, pas une recette) ; les « entrées diverses »
+   (Apport des associés, Écart de caisse, Autre entrée).
+3. **La caisse ne change pas** : le « Solde en caisse » reste l'argent réel, celui qu'on compte. Pour éviter la
+   confusion, la case « Recettes » du bilan devient « Argent encaissé » (même chiffre, mêmes sous-lignes) ; le bloc
+   « Recettes » de la caisse de l'administrateur et des associés, qui montre ce même chiffre, s'appelle aussi
+   « Argent encaissé ». La caisse du gérant ne change pas (« Recettes du jour »).
+4. **Une petite ligne sous les trois colonnes explique l'écart** entre la recette et l'argent encaissé, avec les
+   montants, et tombe exactement sur le chiffre de la case « Argent encaissé » : « Argent encaissé = recette du jour
+   … + argent mis sur les cartes … − ventes payées par carte membre … + remboursements rendus sur la carte … + argent
+   reçu pour les repas extérieurs (hors carte) … + entrées diverses … = … ». Seuls les termes non nuls sont écrits. Elle se lit sur « Toutes » les
+   caisses et comptes ; avec un filtre, une phrase invite à choisir « Toutes ». Chaque terme suit les règles de la
+   case (approvisionnement ou repas annulé dans la période : rien ; remboursement rendu sur la carte : aucun argent
+   sorti) et est calculé à part, jamais par différence (`recetteToCash`, `src/components/cash/flows.js`, testé dans
+   `test/cash-categories.test.js`).

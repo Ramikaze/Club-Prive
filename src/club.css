@@ -1080,8 +1080,8 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 /* Picture of a ticket before it is shared on WhatsApp. */
 .ticket-image-preview { display: block; max-width: 100%; max-height: 55vh; margin: 0 auto; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
 
-/* The cash page (/caisse): « Soldes » full width, then « Recettes » and « Dépenses » side by side when the page's
-   content is wide enough (whatever the sidebar takes), each a summary, a compact list and its total. */
+/* The cash page (/caisse): « Soldes » full width, then « Argent encaissé » and « Dépenses » side by side when the
+   page's content is wide enough (whatever the sidebar takes), each a summary, a compact list and its total. */
 .cash-page { display: grid; gap: 16px; }
 .cash-columns { container-type: inline-size; }
 .cash-columns-inner { display: grid; gap: 16px; align-items: start; }
@@ -1089,8 +1089,11 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 /* « Par catégorie »: three columns (Boisson twice as wide, its two halves side by side) once the block is wide
    enough, one under the other below. */
 .cat-columns { container-type: inline-size; }
-.cat-columns-inner, .cat-parts { display: grid; gap: 20px; align-items: start; }
-.cat-col { min-width: 0; }
+.cat-columns-inner { display: grid; gap: 14px; align-items: stretch; }
+.cat-parts { display: grid; gap: 12px; align-items: start; }
+/* Each column is its own panel, so the three categories read apart at a glance; Boisson's two halves are inner panels. */
+.cat-col { min-width: 0; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+.cat-col-boisson .cat-part { min-width: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 2px 12px 10px; }
 .cat-col-head, .cat-part-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 2px 8px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
 .cat-col-head h3, .cat-part-head h4 { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
 .cat-col-head h3 svg, .cat-part-head h4 svg { width: 18px; height: 18px; color: var(--text-3); }

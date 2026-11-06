@@ -72,6 +72,37 @@ export function receiptSummary(journal, entries, { method = '', to, dayOf }) {
   return { lines, refunds, card, boutique, total: lines.reduce((s, [, v]) => s + v, 0) - refunds };
 }
 
+// From « Recette du jour » to « Argent encaissé », on all accounts (owner's rule, 2026-11-07). The recette is the
+// three columns only (the summary's net: sales collected less refunded, the card's part included, on the day the
+// card pays); « Argent encaissé » is receiptSummary's total, the money received. What one counts and the other does
+// not, each term summed on its own by receiptSummary's rules (never as the remainder), signed as it moves the
+// recette: the top-ups (money, no recette yet; one cancelled within the period adds nothing), the card's part of
+// the sales (recette, no money: it came in with the top-up), the card's part of the refunds (off the recette, but no
+// money out), the outside meals' money (the club pays the restaurant for the member: no recette; a cancelled one
+// adds nothing) and the other receipts. `cash` is the recette plus the terms: test/cash-categories.test.js checks
+// it is « Argent encaissé » to the unit.
+export function recetteToCash(sum, journal, entries, { to, dayOf }) {
+  let recharges = 0;
+  let cardSales = 0;
+  let meals = 0;
+  for (const p of journal.payments) {
+    if (p.kind === 'recharge') recharges += paymentAdds(p, to, dayOf);
+    else if (p.kind === 'repas') meals += paymentAdds(p, to, dayOf);
+    else cardSales -= p.card_amount ?? 0; // signed as it moves the recette (and 0 − 0 is +0, not −0)
+  }
+  const cardRefunds = journal.refunds.reduce((s, r) => s + (r.card_amount ?? 0), 0);
+  const other = entries.filter((e) => e.kind === 'recette' && e.status === 'active').reduce((s, e) => s + e.amount, 0);
+  const terms = [
+    { key: 'cartes', label: 'argent mis sur les cartes', amount: recharges },
+    { key: 'ventes_carte', label: 'ventes payées par carte membre', amount: cardSales },
+    { key: 'remboursements_carte', label: 'remboursements rendus sur la carte', amount: cardRefunds },
+    { key: 'repas', label: 'argent reçu pour les repas extérieurs (hors carte)', amount: meals },
+    { key: 'entrees', label: 'entrées diverses', amount: other },
+  ];
+  const recette = sum.total.net;
+  return { recette, terms, cash: terms.reduce((s, x) => s + x.amount, recette) };
+}
+
 // The expenses of the period on the account shown (active ones only).
 export const expenseTotal = (entries, method = '') => entries
   .filter((e) => e.kind === 'depense' && e.status === 'active' && onAccount(method, e.method))

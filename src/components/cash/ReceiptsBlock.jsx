@@ -112,7 +112,10 @@ function Row({ row, to, isAdmin, onChange }) {
   );
 }
 
-export default function ReceiptsBlock({ journal, entries, method = '', oneDay, isAdmin, onChange, title = 'Recettes', shopSplit = false }) {
+// `emptyText`: what the block says when nothing was received, worded after its title.
+export default function ReceiptsBlock({
+  journal, entries, method = '', oneDay, isAdmin, onChange, title = 'Recettes', emptyText = 'Aucune recette sur la période.', shopSplit = false,
+}) {
   const to = journal.to ?? journal.from;
   const sum = receiptSummary(journal, entries, { method, to, dayOf: bizDayOf });
   const rows = receiptRows(journal, entries, method, oneDay);
@@ -160,7 +163,7 @@ export default function ReceiptsBlock({ journal, entries, method = '', oneDay, i
             </details>
           )}
         </>
-      ) : <p className="subtle">Aucune recette sur la période.</p>}
+      ) : <p className="subtle">{emptyText}</p>}
     </section>
   );
 }
