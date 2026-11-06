@@ -677,6 +677,7 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .calc-line { display: flex; justify-content: space-between; gap: 10px; font-size: 0.88rem; padding: 2px 0; }
 .calc-line span:first-child { color: var(--text-2); }
 .calc-line span:last-child { font-variant-numeric: tabular-nums; }
+.calc-sub { font-size: 0.78rem; padding: 0 0 4px 10px; opacity: 0.8; }
 
 /* ------------------------------------------------------------------ agenda */
 
@@ -1196,3 +1197,68 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .pay-method.is-empty { cursor: not-allowed; opacity: 0.55; filter: grayscale(1); }
 .pay-method.is-empty:hover { border-color: var(--border); }
 .form-row:has(.pay-methods) { display: grid; grid-template-columns: minmax(0, 1fr); }
+
+/* ------------------------------------------------------------------ Boutique (counter sales) */
+
+/* Two wide tables of the Boutique, kept whole on a tablet-wide card instead of scrolling sideways (the phone stacks them):
+   « Historique des achats » tightens its cells and lets the date and its chips wrap, so « Ticket » stays in view; the
+   « Clients réguliers » list puts its two row buttons one above the other, so « Passer en membre » stays whole. */
+.purchase-history, .clients-card { container-type: inline-size; }
+@media (min-width: 700px) {
+  @container (max-width: 860px) {
+    .purchase-history .table th, .purchase-history .table td { padding-left: 6px; padding-right: 6px; }
+    .purchase-history .table td.nowrap, .clients-card .table td.nowrap-date { white-space: normal; }
+    .purchase-history .table .chip { white-space: normal; border-radius: var(--radius-sm); }
+    .clients-card td.actions { white-space: normal; }
+    .clients-card .row-actions { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  }
+}
+
+/* Caisse › Boutique: the member's card apart from the money that came into the till. */
+.calc.calc-apart { margin-top: 8px; border-style: dashed; }
+.calc-apart dt { display: inline-flex; align-items: center; gap: 6px; }
+.calc-apart dt svg { width: 16px; height: 16px; flex: none; }
+
+.shop-layout { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+.shop-layout > * { min-width: 0; }
+@media (min-width: 1100px) {
+  .shop-layout:not(.is-readonly) { grid-template-columns: minmax(0, 1fr) 380px; }
+  /* Sticky beside the products, never taller than the window: « Encaisser » stays within reach by scrolling the panel. */
+  .shop-side { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; }
+}
+.shop-grid { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+.shop-card {
+  display: flex; flex-direction: column; gap: 8px; padding: 10px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
+}
+.shop-card.is-out { opacity: 0.7; }
+.shop-card .product-photo-large { width: 100%; }
+.shop-card-body { display: grid; gap: 4px; flex: 1; align-content: start; }
+.shop-card-name { font-size: 0.95rem; line-height: 1.3; margin: 0; overflow-wrap: anywhere; }
+.shop-card-price { font-weight: 650; color: var(--bronze-text); margin: 0; }
+.shop-card .chip + .chip { margin-left: 4px; }
+.shop-card .btn { width: 100%; justify-content: center; }
+.shop-cart-jump { position: fixed; right: 16px; bottom: 16px; z-index: 20; box-shadow: var(--shadow); }
+@media (max-width: 899px) { .shop-cart-jump { bottom: calc(var(--tabbar-h) + 12px + env(safe-area-inset-bottom, 0px)); } }
+@media (min-width: 1100px) { .shop-cart-jump { display: none; } }
+
+.sale-panel { display: grid; gap: 14px; }
+.sale-panel .card-head { margin-bottom: 0; }
+.sale-panel h2 { margin: 0; }
+.buyer-picker { display: grid; gap: 10px; justify-items: start; }
+.buyer-picker .smart-search { width: 100%; }
+.buyer-chosen { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 8px 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.sale-lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.sale-lines li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px 10px; }
+.sale-line-name { overflow-wrap: anywhere; }
+.sale-line-amount { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; min-width: 5.5em; }
+.stepper { display: inline-flex; align-items: center; gap: 4px; }
+.stepper .btn { min-width: 36px; padding: 0 8px; justify-content: center; }
+.stepper output { min-width: 2ch; text-align: center; font-variant-numeric: tabular-nums; font-weight: 600; }
+.sale-empty { margin: 0; }
+.sale-panel .calc { margin: 0; }
+.sale-panel .pay-methods { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.sale-panel p.subtle { margin: 0; }
+.buyer-picker .segmented { width: 100%; }
+.buyer-picker .segmented button { flex: 1 1 auto; padding-left: 8px; padding-right: 8px; white-space: nowrap; }
+@media (max-width: 420px) { .buyer-picker .segmented button { font-size: 0.82rem; } }

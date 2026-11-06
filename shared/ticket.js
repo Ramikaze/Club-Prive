@@ -68,13 +68,14 @@ export function paymentLines({ kind, label, amount, allocations }) {
 
 // The receipt as text, for WhatsApp. `money(hundredths)` and `dateTime(iso)` are the caller's formatters.
 // Without `verifyUrl` (the demo) there is no « Vérifiez » line; a positive `refunded` adds a « Remboursé » line.
+// `clientLine` (a Boutique sale: « Client journalier », « Prénom NOM (C-0003) ») replaces the name and number on the « Client » line.
 // A positive `cardAmount` replaces « Payé » by the card's share and the rest with its method; `balance` (the
 // card's balance after the payment) and `timeAvailable` (minutes) add the member's balances when not null.
 export function ticketWhatsAppText({
   clubName, number, copyLabel, paidAt, memberName, memberNo, lines, total, method, reference, cashier,
-  refunded, verifyUrl, footer, money, dateTime, cardAmount = 0, balance = null, timeAvailable = null, cancelledAt = null,
+  refunded, verifyUrl, footer, money, dateTime, cardAmount = 0, balance = null, timeAvailable = null, cancelledAt = null, clientLine = null,
 }) {
-  const client = [clean(memberName), clean(memberNo) && `(${clean(memberNo)})`].filter(Boolean).join(' ');
+  const client = clean(clientLine) || [clean(memberName), clean(memberNo) && `(${clean(memberNo)})`].filter(Boolean).join(' ');
   const paid = [clean(method), clean(reference) && `(${clean(reference)})`].filter(Boolean).join(' ');
   const card = Number(cardAmount) || 0;
   const rest = total - card;

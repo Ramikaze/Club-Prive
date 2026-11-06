@@ -41,7 +41,7 @@ export function mealWhatsAppText({ clubName, lastName, label, amount, cardAmount
     .filter(Boolean).join('\n');
 }
 
-// The message of any other receipt (drinks and cigars taken during a session, room time, a subscription), in the
+// The message of any other receipt (drinks and cigars taken during a session or sold at the Boutique, room time, a subscription), in the
 // same words as the others: what was paid and when (with what it was for), the card's part and the rest with its
 // method, the new balance when the card paid, the ticket's number and verification link, signed by the club's team.
 export function paymentWhatsAppText({ clubName, lastName, amount, cardAmount = 0, method, balance, for: what, at, timezone, currency, number, verifyUrl }) {

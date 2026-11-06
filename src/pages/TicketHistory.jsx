@@ -1,5 +1,6 @@
-// Cash receipt history (/caisse/historique-tickets, administrators): every receipt that came out (print requested
+// Cash receipt history (/caisse/historique-tickets, administrator and associés): every receipt that came out (print requested
 // or sent on WhatsApp) over a period, with who did it. A receipt that came out 3 times or more is flagged.
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Empty, Loaded, Notice, PageHead } from '../components/ui/ui.jsx';
 import { copyLabel } from '../components/ui/TicketSheet.jsx';
@@ -45,9 +46,10 @@ export default function TicketHistory() {
   const userId = period.params.get('employe') ?? '';
   // Always both bounds: the server ignores `to` alone.
   const state = useLoad(() => api.get(`/api/ticket-events${qs({ from, to, user_id: userId })}`), [from, to, userId]);
-  // The employee list: the account routes are refused in the demo space, where the filter then offers nobody.
-  const usersState = useLoad(() => api.get('/api/users').catch(() => []), []);
-  const users = usersState.data ?? [];
+  // The employee list comes with the history (an associé cannot read the user accounts); the last one received is
+  // kept while another period loads.
+  const [users, setUsers] = useState([]);
+  useEffect(() => { if (state.data?.employees) setUsers(state.data.employees); }, [state.data]);
 
   return (
     <>

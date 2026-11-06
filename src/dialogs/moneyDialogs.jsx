@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, newKey } from '../lib/api.js';
 import { money, parseMoney, dateTime } from '../lib/format.js';
-import { useStore, useSettings, isAdminNow } from '../store/useStore.js';
+import { useStore, useSettings, isBossNow } from '../store/useStore.js';
 import { openDialog, Modal, actionDialog } from '../components/ui/Modal.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import { Hypothesis, AccountTag, FormError, Notice } from '../components/ui/ui.jsx';
@@ -203,7 +203,7 @@ export function cancelChargeDialog(charge, onDone) {
   });
 }
 
-export const canRefund = () => isAdminNow() || !useStore.getState().settings.refunds_admin_only;
+export const canRefund = () => isBossNow() || !useStore.getState().settings.refunds_admin_only;
 
 // ---------------------------------------------------------------- member card: recharge, outside meal
 

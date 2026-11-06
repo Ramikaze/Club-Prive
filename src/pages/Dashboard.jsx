@@ -2,7 +2,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useLoad } from '../lib/hooks.js';
 import { money, fmtDuration, dayLabel } from '../lib/format.js';
-import { useIsAdmin } from '../store/useStore.js';
+import { useIsBoss } from '../store/useStore.js';
 import Icon from '../components/ui/Icon.jsx';
 import SessionTimer, { isRunning } from '../components/ui/SessionTimer.jsx';
 import EndingSoonNotice from '../components/ui/EndingSoonNotice.jsx';
@@ -168,7 +168,7 @@ function RevenueBlock({ sum }) {
 }
 
 export default function Dashboard() {
-  const admin = useIsAdmin();
+  const admin = useIsBoss();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const state = useLoad(() => api.get('/api/dashboard'), [], { refreshMs: 60000 });

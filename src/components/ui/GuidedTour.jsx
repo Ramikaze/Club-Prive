@@ -1,5 +1,5 @@
 // Guided tour of the main screens: one highlighted element per step, after opening its page.
-// Screens reserved to administrators are skipped for the manager. Arrow keys move, Escape quits.
+// Screens reserved to club management (`boss`) or to the administrator alone (`owner`) are skipped for others. Arrow keys move, Escape quits.
 // The tour opens by itself on the first visit to the demo space, where a few controls are hidden or
 // replaced: a step then words itself differently (`inDemo` replaces the fields it names).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -17,7 +17,7 @@ export const TOUR_DEMO_DONE_KEY = 'club-tour-demo-done';
 const STEPS = [
   {
     route: '/', targets: ['[data-tour="nav"]', '[data-tour="nav-mobile"]'], icon: 'menu', title: 'Le menu du club',
-    body: 'Les rubriques suivent la soirée : Accueil, Salles, Agenda, Membres, Stocks & Cave, Caisse. Administration n’apparaît qu’aux administrateurs.',
+    body: 'Les rubriques suivent la soirée : Accueil, Salles, Agenda, Membres / Clients, Boutique, Stocks & Cave, Caisse. Administration n’apparaît qu’à l’administrateur.',
     features: ['Sur téléphone : rubriques principales en bas de l’écran, les autres dans le menu en haut à droite', 'Les onglets en tête de page passent d’une sous-rubrique à l’autre'],
   },
   {
@@ -31,7 +31,7 @@ const STEPS = [
   {
     route: '/salles', targets: ['.rooms-grid'], icon: 'rooms', title: 'Salles & salons',
     body: 'Une carte par salle : capacité, état (Disponible, Occupée, Fermée) et prochaine réservation prévue. La liste se met à jour toute seule.',
-    features: ['Filtres Toutes, Libres, Occupées', 'Création et modification des salles réservées aux administrateurs'],
+    features: ['Filtres Toutes, Libres, Occupées', 'Création et modification des salles réservées à l’administrateur'],
   },
   {
     route: '/salles', targets: ['.room-card.is-free .room-card-actions .btn-primary', '.rooms-grid'], icon: 'plus', title: 'Installer un membre',
@@ -67,6 +67,10 @@ const STEPS = [
     body: 'Fiche, formule et carte physique ou virtuelle en une seule étape. La fiche montre ensuite crédit, cartes, séances et paiements.',
   },
   {
+    route: '/boutique', targets: ['[data-tour="shop"]'], icon: 'shop', title: 'Boutique',
+    body: 'Vente de cigares et de champagne au comptoir, à un client journalier, à un client régulier ou à un membre. Chaque vente donne un ticket, un par rayon.',
+  },
+  {
     route: '/produits', targets: ['[data-tour="products"]'], icon: 'box', title: 'Catalogue & stocks',
     body: 'Cigares et bouteilles (vendues entières uniquement) avec leur stock. Entrées et ajustements avec motif ; chaque mouvement reste dans l’historique du produit.',
     features: ['Alerte quand un stock passe sous son seuil', 'Onglet Cave pour la conservation'],
@@ -83,10 +87,10 @@ const STEPS = [
   {
     route: '/caisse', targets: ['[data-tour="cash"] .actions .btn-primary', '[data-tour="cash"]'], icon: 'receipt', title: 'Nouvelle dépense',
     body: '« Nouvelle dépense » : catégorie, montant, caisse ou compte utilisé, et le sous-compte concerné pour suivre sa marge.',
-    features: ['L’administrateur saisit aussi entrées diverses et transferts', 'Annulation avec motif, jamais de suppression'],
+    features: ['L’administrateur et les associés saisissent aussi entrées diverses et transferts', 'Annulation avec motif, jamais de suppression'],
   },
   {
-    admin: true, route: '/parametres', targets: ['[data-tour="settings"]'], icon: 'settings', title: 'Paramètres',
+    owner: true, route: '/parametres', targets: ['[data-tour="settings"]'], icon: 'settings', title: 'Paramètres',
     body: 'Horaires, tarifs et formules, moyens de paiement, soldes d’ouverture, catégories de dépenses, utilisateurs et journal des actions.',
     inDemo: {
       body: 'Horaires, tarifs et formules, moyens de paiement, soldes d’ouverture, catégories de dépenses et journal des actions. Les changements faits ici restent dans la démo.',
@@ -97,15 +101,15 @@ const STEPS = [
     },
   },
   {
-    admin: true, route: '/tresorerie', targets: ['.account-cards', '[data-tour="treasury"]'], icon: 'bank', title: 'Trésorerie',
+    boss: true, route: '/tresorerie', targets: ['.account-cards', '[data-tour="treasury"]'], icon: 'bank', title: 'Trésorerie',
     body: 'Solde de chaque caisse et compte sur la période choisie, puis le résultat : encaissé net moins dépenses, par sous-compte.',
   },
   {
-    admin: true, route: '/grand-livre', targets: ['[data-tour="ledger"]'], icon: 'book', title: 'Grand livre',
+    boss: true, route: '/grand-livre', targets: ['[data-tour="ledger"]'], icon: 'book', title: 'Grand livre',
     body: 'Tous les mouvements de trésorerie dans l’ordre, avec le solde courant. Filtrez par compte ou par sous-compte.',
   },
   {
-    admin: true, route: '/cloture', targets: ['[data-tour="closing"]'], icon: 'lock', title: 'Clôture mensuelle',
+    boss: true, route: '/cloture', targets: ['[data-tour="closing"]'], icon: 'lock', title: 'Clôture mensuelle',
     body: 'Après trois vérifications (espèces comptées, relevés rapprochés, dépenses saisies), le mois est verrouillé. Une réouverture exige un motif et reste dans l’historique.',
   },
   {
@@ -160,11 +164,11 @@ const markDemoDone = () => {
   try { localStorage.setItem(TOUR_DEMO_DONE_KEY, '1'); } catch { /* storage unavailable */ }
 };
 
-export default function GuidedTour({ active, onClose, isAdmin, clubName }) {
+export default function GuidedTour({ active, onClose, isAdmin, isBoss, clubName }) {
   const demo = useStore((s) => s.demo);
   const steps = useMemo(
-    () => STEPS.filter((s) => isAdmin || !s.admin).map((s) => (demo && s.inDemo ? { ...s, ...s.inDemo } : s)),
-    [isAdmin, demo],
+    () => STEPS.filter((s) => (isBoss || !s.boss) && (isAdmin || !s.owner)).map((s) => (demo && s.inDemo ? { ...s, ...s.inDemo } : s)),
+    [isAdmin, isBoss, demo],
   );
   const [index, setIndex] = useState(-1); // -1: welcome, steps.length: finished
   const [rect, setRect] = useState(null);

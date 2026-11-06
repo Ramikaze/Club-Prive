@@ -335,8 +335,8 @@ test('configuration envoyée à la démo : les comptes ne portent que leur ident
   assert.equal(config.users.length, 2);
 
   // No login (the demo gives each account u<id>) and no password hash leave the real club.
-  assert.deepEqual(Object.keys(config.users[0]).sort(), ['active', 'id', 'name', 'role']);
-  for (const user of config.users) assert.deepEqual(Object.keys(user).sort(), ['active', 'id', 'name', 'role']);
+  assert.deepEqual(Object.keys(config.users[0]).sort(), ['active', 'id', 'name', 'rayon', 'role']);
+  for (const user of config.users) assert.deepEqual(Object.keys(user).sort(), ['active', 'id', 'name', 'rayon', 'role']);
   const hash = real.club.userByLogin('proprietaire').password_hash;
   assert.ok(hash && !JSON.stringify(config).includes(hash));
 });

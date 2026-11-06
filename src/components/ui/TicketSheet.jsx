@@ -8,6 +8,7 @@ import { useMemo } from 'react';
 import BrandLogo from './BrandLogo.jsx';
 import { money, dateTime, fmtDuration } from '../../lib/format.js';
 import { encodeQrMatrix, qrSvgPath } from '../../lib/qrcode.js';
+import { SHOP } from '../../../shared/roles.js';
 import { formatTicketCode, paymentLines, ticketVerifyUrl } from '../../../shared/ticket.js';
 
 export const copyLabel = (copyNo) => (copyNo <= 1 ? 'Original' : `Duplicata n°${copyNo}`);
@@ -51,7 +52,8 @@ export default function TicketSheet({ ticket, copyNo }) {
       <dl className="ts-facts">
         <div><dt>N°</dt><dd>{ticket.number}</dd></div>
         <div><dt>Date</dt><dd>{dateTime(ticket.paid_at)}</dd></div>
-        <div><dt>Client</dt><dd>{ticket.member_name}{ticket.member_no ? ` (${ticket.member_no})` : ''}</dd></div>
+        <div><dt>Client</dt><dd>{ticket.client_line ?? `${ticket.member_name}${ticket.member_no ? ` (${ticket.member_no})` : ''}`}</dd></div>
+        {ticket.shop_sale_id && <div><dt>Payé pour</dt><dd>{SHOP[ticket.shop_account]?.purpose ?? 'boutique'}</dd></div>}
       </dl>
 
       <ul className="ts-lines">
@@ -83,6 +85,10 @@ export default function TicketSheet({ ticket, copyNo }) {
 
       {ticket.cancelled_at && (
         <div className="ts-refunds"><p>Annulé le {dateTime(ticket.cancelled_at)}</p></div>
+      )}
+      {/* A Boutique sale is cancelled as a whole on the sale, its payment row stays as it was. */}
+      {ticket.shop_cancelled_at && (
+        <div className="ts-refunds"><p>Vente annulée le {dateTime(ticket.shop_cancelled_at)}</p></div>
       )}
 
       {ticket.refunds.length > 0 && (

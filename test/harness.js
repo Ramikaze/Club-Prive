@@ -58,9 +58,9 @@ export class Server {
 
   get club() { return this.api.club; }
 
-  async addUser(login, name, role, password) {
+  async addUser(login, name, role, password, rayon = null) {
     const passwordHash = await hashPassword(password);
-    this.club.tx(() => this.club.createUser(null, { login, name, role, password_hash: passwordHash }));
+    this.club.tx(() => this.club.createUser(null, { login, name, role, rayon, password_hash: passwordHash }));
   }
 
   fetch(url, init) {

@@ -9,6 +9,7 @@ import { openDialog } from '../components/ui/Modal.jsx';
 import { Loaded, Notice, PageHead } from '../components/ui/ui.jsx';
 import PeriodPicker, { usePeriod } from '../components/ui/PeriodPicker.jsx';
 import EntryDialog, { MANAGER_CAP_TEXT } from '../components/cash/EntryDialog.jsx';
+import CashTabs from '../components/cash/CashTabs.jsx';
 import CashBalance from '../components/cash/CashBalance.jsx';
 import CountDialog from '../components/cash/CountDialog.jsx';
 import ReceiptsBlock from '../components/cash/ReceiptsBlock.jsx';
@@ -18,7 +19,7 @@ import { DayClosingBar } from '../components/cash/CloseDay.jsx';
 import { api, qs } from '../lib/api.js';
 import { ACCOUNT_LABEL, bizToday, dayLabel } from '../lib/format.js';
 import { useLoad } from '../lib/hooks.js';
-import { useIsAdmin, useSettings } from '../store/useStore.js';
+import { useIsBoss, useSettings } from '../store/useStore.js';
 import { isValidDate } from '../../shared/time.js';
 import { CARD_METHOD } from '../../shared/rules.js';
 
@@ -102,10 +103,15 @@ function AdminCash() {
             <button type="button" className="btn btn-sm btn-ghost" disabled={!state.data} onClick={() => add('recette')}><Icon name="plus" /> Entrée diverse</button>
             <button type="button" className="btn btn-sm btn-ghost" disabled={!state.data} onClick={() => add('transfert')}><Icon name="transfer" /> Transfert</button>
             <Link className="btn btn-sm btn-ghost" to="/caisse/historique-tickets"><Icon name="receipt" /> Historique des tickets</Link>
+            <Link className="btn btn-sm btn-ghost" to="/tresorerie"><Icon name="bank" /> Trésorerie & Bilans</Link>
+            <Link className="btn btn-sm btn-ghost" to="/grand-livre"><Icon name="book" /> Grand livre</Link>
+            <Link className="btn btn-sm btn-ghost" to="/cloture"><Icon name="lock" /> Clôture mensuelle</Link>
+            <Link className="btn btn-sm btn-ghost" to="/journal"><Icon name="journal" /> Journal des opérations</Link>
             <button type="button" className="btn btn-primary" disabled={!state.data} onClick={() => add('depense')}><Icon name="plus" /> Nouvelle dépense</button>
           </>
         )}
       />
+      <CashTabs />
       <div className="toolbar">
         <PeriodPicker period={period} />
         <label className="cash-account"><span className="subtle">Caisse ou compte</span>
@@ -120,7 +126,7 @@ function AdminCash() {
           <CashBalance t={d.treasury} method={method} entries={d.entries} journal={d.journal} openingBalances={settings.opening_balances} onCount={count} />
           <div className="cash-columns">
             <div className="cash-columns-inner">
-              <ReceiptsBlock journal={d.journal} entries={d.entries} method={method} oneDay={oneDay} isAdmin onChange={state.reload} />
+              <ReceiptsBlock journal={d.journal} entries={d.entries} method={method} oneDay={oneDay} isAdmin onChange={state.reload} shopSplit />
               <ExpensesBlock entries={d.entries} method={method} oneDay={oneDay} isAdmin onChange={state.reload} />
             </div>
           </div>
@@ -170,6 +176,6 @@ function ManagerCash() {
 }
 
 export default function Cash() {
-  const admin = useIsAdmin();
+  const admin = useIsBoss();
   return admin ? <AdminCash /> : <ManagerCash />;
 }

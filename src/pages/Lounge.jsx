@@ -5,7 +5,7 @@ import { actionDialog } from '../components/ui/Modal.jsx';
 import { api, newKey } from '../lib/api.js';
 import { useLoad } from '../lib/hooks.js';
 import { dateTime, parts } from '../lib/format.js';
-import { useIsAdmin } from '../store/useStore.js';
+import { useIsBoss } from '../store/useStore.js';
 import { openHumidorForm, openReadingForm } from '../dialogs/loungeDialogs.jsx';
 
 const decimal = (v) => v == null ? '—' : new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 }).format(v);
@@ -49,7 +49,7 @@ function HumidorCard({ h, reload }) {
 }
 
 export default function Lounge() {
-  const admin = useIsAdmin();
+  const admin = useIsBoss();
   const state = useLoad(() => api.get('/api/lounge'), [], { refreshMs: 60000 });
   return <Loaded state={state}>{(d) => <>
     <StocksTabs />
@@ -70,7 +70,7 @@ export default function Lounge() {
 
     {d.humidors.length ? <div className="humidor-grid">{d.humidors.map((h) => <HumidorCard h={h} reload={state.reload} key={h.id} />)}</div>
       : <section className="card lounge-empty"><Empty icon="humidor"><h2>Une place pour chaque collection.</h2><p>Ajoutez votre première cave et définissez ses seuils pour commencer les contrôles.</p></Empty>
-        {admin ? <button type="button" className="btn btn-primary" onClick={() => openHumidorForm(null, state.reload)}>Configurer une cave</button> : <p className="muted">Un administrateur peut créer la première cave.</p>}
+        {admin ? <button type="button" className="btn btn-primary" onClick={() => openHumidorForm(null, state.reload)}>Configurer une cave</button> : <p className="muted">La direction du club peut créer la première cave.</p>}
       </section>}
     <p className="lounge-note"><Icon name="info" />Les alertes reflètent le dernier relevé saisi et les seuils définis par votre club. Un contrôle en retard ne permet pas de confirmer l’état actuel de la cave.</p>
   </>}</Loaded>;
@@ -100,7 +100,7 @@ function ReadingChart({ h, field, label, unit }) {
 
 export function HumidorPage() {
   const { id } = useParams();
-  const admin = useIsAdmin();
+  const admin = useIsBoss();
   const state = useLoad(() => api.get(`/api/humidors/${id}`), [id], { refreshMs: 60000 });
   const cancel = (reading) => {
     const key = newKey();

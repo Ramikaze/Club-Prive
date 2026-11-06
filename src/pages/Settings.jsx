@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
+import AuditTable from '../components/AuditTable.jsx';
 import { AdminTabs, Empty, FormError, Loaded, Notice, PageHead, PasswordField, Segmented } from '../components/ui/ui.jsx';
 import { Modal, actionDialog, openDialog } from '../components/ui/Modal.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import { api, newKey } from '../lib/api.js';
 import { ACCOUNT_LABEL, ROLE_LABEL, dateTime, fmtDuration, parseMoney, toMajor } from '../lib/format.js';
-import { ACTION_LABELS, auditSummary } from '../lib/audit.js';
 import { useBusy, useLoad, useSubmit } from '../lib/hooks.js';
+import { ROLES, RAYONS, RAYON_LABEL } from '../../shared/roles.js';
 import { useIsAdmin, useSettings, useStore } from '../store/useStore.js';
 
 const TIME_ZONES = ['Africa/Brazzaville', 'Africa/Kinshasa', 'Africa/Douala', 'Africa/Lagos', 'Africa/Abidjan', 'Africa/Casablanca',
@@ -62,10 +63,13 @@ function FormFooter({ busy, error }) {
 
 function UserDialog({ close, user, onDone }) {
   const editing = Boolean(user);
+  const [role, setRole] = useState(user?.role ?? 'gerant');
   const [key] = useState(newKey);
   const { busy, error, onSubmit } = useFormAction(async (v) => {
-    if (editing) await api.put(`/api/users/${user.id}`, { name: v.name, role: v.role, active: Boolean(v.active) }, key);
-    else await api.post('/api/users', { login: v.login, name: v.name, role: v.role, password: v.password }, key);
+    const rayon = v.role === 'associe' ? v.rayon : null;
+    if (v.role === 'associe' && !rayon) throw new Error('Choisissez le rayon de l’associé.');
+    if (editing) await api.put(`/api/users/${user.id}`, { name: v.name, role: v.role, rayon, active: Boolean(v.active) }, key);
+    else await api.post('/api/users', { login: v.login, name: v.name, role: v.role, rayon, password: v.password }, key);
     close();
     toast(editing ? 'Utilisateur modifié.' : 'Compte créé.');
     onDone?.();
@@ -78,9 +82,14 @@ function UserDialog({ close, user, onDone }) {
             pattern="[a-zA-Z0-9._-]{3,40}" /><span className="help">3 à 40 caractères : lettres, chiffres, point, tiret.</span></label>
         )}
         <label className="field"><span>Nom affiché</span><input name="name" required maxLength={80} defaultValue={user?.name ?? ''} /></label>
-        <label className="field"><span>Rôle</span><select name="role" defaultValue={user?.role === 'admin' ? 'admin' : 'gerant'}>
-          <option value="gerant">{ROLE_LABEL.gerant}</option>
-          <option value="admin">{ROLE_LABEL.admin}</option></select></label>
+        <label className="field"><span>Rôle</span><select name="role" value={role} onChange={(e) => setRole(e.target.value)}>
+          {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}</select></label>
+        {role === 'associe' && (
+          <label className="field"><span>Rayon</span><select name="rayon" required defaultValue={user?.rayon ?? ''}>
+            <option value="" disabled>Choisir…</option>
+            {RAYONS.map((r) => <option key={r} value={r}>{RAYON_LABEL[r]}</option>)}</select>
+          <span className="help">L’associé gère les produits, stocks et ventes de son rayon.</span></label>
+        )}
         {editing
           ? <label className="check"><input type="checkbox" name="active" value="1" defaultChecked={user.active} /><span>Compte actif</span></label>
           : (
@@ -628,14 +637,14 @@ function UsersSection({ users, onChanged }) {
           <tr key={u.id} className={u.active ? undefined : 'is-muted'}>
             <td data-label="Nom"><strong>{u.name}</strong> {!u.active && <span className="chip">désactivé</span>} {u.id === me.id && <span className="chip chip-bronze">vous</span>}</td>
             <td data-label="Identifiant" className="mono">{u.login}</td>
-            <td data-label="Rôle">{ROLE_LABEL[u.role]}</td>
+            <td data-label="Rôle">{ROLE_LABEL[u.role]}{u.rayon ? ` · ${RAYON_LABEL[u.rayon]}` : ''}</td>
             <td data-label="Dernière connexion">{u.last_login_at ? dateTime(u.last_login_at) : 'jamais'}</td>
             <td className="actions"><button type="button" className="btn btn-sm btn-ghost" onClick={() => openDialog(UserDialog, { user: u, onDone: onChanged })}>Modifier</button>{' '}
               <button type="button" className="btn btn-sm btn-ghost" onClick={() => openDialog(PasswordResetDialog, { user: u })}>Mot de passe</button></td>
           </tr>
         ))}</tbody>
       </table></div>
-      <p className="subtle" style={{ marginTop: 8 }}>Gérant : membres, cartes, réservations, consommations, encaissements et mouvements de stock. Administrateur : en plus, paramètres, tarifs, formules, produits, utilisateurs, sous-comptes et exports. Contrôlé côté serveur.</p>
+      <p className="subtle" style={{ marginTop: 8 }}>Gérant : membres, cartes, réservations, consommations, encaissements et mouvements de stock. Associé : tous les droits du club (caisse, trésorerie, comptabilité, journal), sauf l’administration de l’application (utilisateurs, paramètres, données, démo) ; il ne gère que les produits et les ventes Boutique de son rayon. Administrateur : tout. Contrôlé côté serveur.</p>
     </section>
   );
 }
@@ -655,23 +664,7 @@ function AuditSection({ audit }) {
   return (
     <section className="card settings-section" id="sec-audit">
       <div className="card-head"><h2>Journal des opérations</h2><span className="subtle">150 dernières</span></div>
-      <div className="table-wrap"><table className="table stack-sm">
-        <thead><tr><th>Date</th><th>Utilisateur</th><th>Opération</th><th>Détail</th></tr></thead>
-        <tbody>{audit.map((a) => {
-          const label = ACTION_LABELS[a.action] ?? a.action;
-          let operation = label;
-          if (a.entity === 'reservation' && a.entity_id) operation = <Link to={`/reservations/${a.entity_id}`}>{label}</Link>;
-          else if (a.entity === 'member' && a.entity_id) operation = <Link to={`/membres/${a.entity_id}`}>{label}</Link>;
-          return (
-            <tr key={a.id}>
-              <td data-label="Date" className="nowrap">{dateTime(a.at)}</td>
-              <td data-label="Utilisateur">{a.user_name ?? 'système'}</td>
-              <td data-label="Opération">{operation}</td>
-              <td data-label="Détail" className="subtle">{auditSummary(a)}</td>
-            </tr>
-          );
-        })}</tbody>
-      </table></div>
+      <AuditTable audit={audit} />
     </section>
   );
 }

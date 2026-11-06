@@ -9,11 +9,15 @@ import { api, newKey } from '../lib/api.js';
 import { dateTime, money, parseMoney, toMajor } from '../lib/format.js';
 import { useBusy, useLoad, useSubmit } from '../lib/hooks.js';
 import { preparePhoto } from '../lib/photo.js';
-import { useIsAdmin, useSettings, useStore } from '../store/useStore.js';
+import { useIsBoss, useMe, useSettings, useStore } from '../store/useStore.js';
 import { writeWorkbook } from '../utils/exportExcel.js';
 import { searchable, smartFilter } from '../../shared/search.js';
+import { accountOfCategory, canSellIn, ownsAccount } from '../../shared/roles.js';
 
 const CATEGORY = { cigare: 'Cigare', bouteille: 'Bouteille' };
+
+// A boss works only on the products of his rayon (the administrator owns both).
+const ownsProduct = (me, p) => ownsAccount(me, accountOfCategory(p.category));
 
 const formValues = (form) => Object.fromEntries(new FormData(form));
 
@@ -68,6 +72,9 @@ function ProductDialog({ close, product, onDone }) {
   const editing = Boolean(product);
   const [key] = useState(newKey);
   const settings = useSettings();
+  const me = useMe();
+  // An associé creates and edits products in his own rayon only.
+  const categories = Object.entries(CATEGORY).filter(([k]) => ownsAccount(me, accountOfCategory(k)));
   const { busy, error, submit } = useSubmit();
   const threshold = product?.low_stock_threshold ?? settings.low_stock_default;
 
@@ -98,8 +105,8 @@ function ProductDialog({ close, product, onDone }) {
     <Modal title={editing ? 'Modifier le produit' : 'Nouveau produit'} size="wide" onClose={close}>
       <form className="form-grid" onSubmit={onSubmit} noValidate>
         <div className="form-row">
-          <label className="field"><span>Catégorie</span><select name="category" defaultValue={product?.category ?? 'cigare'}>
-            {Object.entries(CATEGORY).map(([k, label]) => <option key={k} value={k}>{label}</option>)}</select></label>
+          <label className="field"><span>Catégorie</span><select name="category" defaultValue={product?.category ?? categories[0]?.[0] ?? 'cigare'}>
+            {categories.map(([k, label]) => <option key={k} value={k}>{label}</option>)}</select></label>
           <label className="field"><span>Référence</span><input name="reference" required maxLength={40} defaultValue={product?.reference ?? ''} /></label>
         </div>
         <label className="field"><span>Nom</span><input name="name" required maxLength={80} defaultValue={product?.name ?? ''} /></label>
@@ -126,15 +133,17 @@ function ProductDialog({ close, product, onDone }) {
 function StockDialog({ close, product, kind, onDone }) {
   const [key] = useState(newKey);
   const entry = kind === 'entree';
-  const isAdmin = useIsAdmin();
+  const me = useMe();
+  // Lowering a stock is for the boss of the rayon; the manager can only add.
+  const canLower = ownsProduct(me, product);
   const { busy, error, submit } = useSubmit();
 
   const onSubmit = (e) => {
     e.preventDefault();
     const v = formValues(e.currentTarget);
     submit(async () => {
-      if (!entry && !isAdmin && Number(v.target_qty) < product.stock_qty) {
-        throw new Error('Le gérant peut seulement ajouter des quantités. Pour en retirer, adressez-vous à un administrateur.');
+      if (!entry && !canLower && Number(v.target_qty) < product.stock_qty) {
+        throw new Error('Le gérant peut seulement ajouter des quantités. Pour en retirer, adressez-vous à l’administrateur ou à l’associé du rayon.');
       }
       const body = entry
         ? { kind: 'entree', quantity: Number(v.quantity), reason: v.reason }
@@ -157,8 +166,8 @@ function StockDialog({ close, product, kind, onDone }) {
           </>
         ) : (
           <>
-            <label className="field"><span>Quantité constatée (inventaire)</span><input type="number" name="target_qty" min={isAdmin ? 0 : product.stock_qty} step="1" required inputMode="numeric" defaultValue={product.stock_qty} autoFocus />
-              {!isAdmin && <span className="help">Vous pouvez seulement augmenter le stock. Pour le diminuer, un administrateur fait l’ajustement.</span>}</label>
+            <label className="field"><span>Quantité constatée (inventaire)</span><input type="number" name="target_qty" min={canLower ? 0 : product.stock_qty} step="1" required inputMode="numeric" defaultValue={product.stock_qty} autoFocus />
+              {!canLower && <span className="help">Vous pouvez seulement augmenter le stock. Pour le diminuer, l’administrateur ou l’associé du rayon fait l’ajustement.</span>}</label>
             <label className="field"><span>Motif (obligatoire)</span><input name="reason" required minLength={3} maxLength={200} placeholder="Casse, inventaire, erreur de saisie…" /></label>
             <p className="subtle">L’écart est enregistré comme un mouvement tracé, avec votre nom et le motif.</p>
           </>
@@ -193,11 +202,12 @@ function HistoryDialog({ close, product }) {
   return <Modal title={`Mouvements — ${product.name}`} size="wide" onClose={close}>{content}</Modal>;
 }
 
-// The sheet of a product, open to everyone: its photo large, its description, its price and stock. An administrator
+// The sheet of a product, open to everyone: its photo large, its description, its price and stock. The boss of its rayon
 // outside the demo also keeps the photo up here. A picture is saved the moment it is chosen (not with the Save
 // button of a form), and the list behind is refreshed so that its thumbnail follows.
 function ProductSheet({ close, product, onDone }) {
-  const admin = useIsAdmin();
+  const me = useMe();
+  const admin = ownsProduct(me, product);
   const demo = useStore((s) => s.demo);
   const [p, setP] = useState(product);
   const { busy, error, submit } = useSubmit();
@@ -278,7 +288,8 @@ const stockDialog = (product, kind, onDone) => openDialog(StockDialog, { product
 const historyDialog = (product) => openDialog(HistoryDialog, { product });
 
 export default function Products() {
-  const admin = useIsAdmin();
+  const me = useMe();
+  const boss = useIsBoss();
   const settings = useSettings();
   const excel = useBusy();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -311,7 +322,7 @@ export default function Products() {
               <>
                 <button type="button" className="btn" disabled={excel.busy || !list.length} aria-busy={excel.busy}
                   onClick={() => excel.run(() => exportCatalogue(list, settings.currency.label))}><Icon name="excel" /> Exporter en Excel</button>
-                {admin && <button type="button" className="btn btn-primary" onClick={() => productDialog(null, reload)}><Icon name="plus" /> Nouveau produit</button>}
+                {boss && <button type="button" className="btn btn-primary" onClick={() => productDialog(null, reload)}><Icon name="plus" /> Nouveau produit</button>}
               </>
             )}
             tour="products"
@@ -340,7 +351,7 @@ export default function Products() {
               options={[['', 'Tous'], ['cigare', 'Cigares'], ['bouteille', 'Bouteilles']]}
               onChange={(c) => setQuery({ cat: c, inactifs: showInactive ? '1' : '' })}
             />
-            {admin && (
+            {boss && (
               <label className="check"><input type="checkbox" checked={showInactive} onChange={(e) => setQuery({ cat, inactifs: e.target.checked ? '1' : '' })} />
                 <span>Afficher les produits inactifs</span></label>
             )}
@@ -366,10 +377,14 @@ export default function Products() {
                     <td data-label="Stock"><StockChip p={p} /> <span className="subtle">seuil {p.low_stock_threshold}</span></td>
                     <td className="actions">
                       <div className="product-actions">
-                        <button type="button" className="btn btn-sm" onClick={() => stockDialog(p, 'entree', reload)}>Entrée</button>
-                        <button type="button" className="btn btn-sm btn-ghost" onClick={() => stockDialog(p, 'ajustement', reload)}>Ajuster</button>
+                        {canSellIn(me, accountOfCategory(p.category)) && (
+                          <>
+                            <button type="button" className="btn btn-sm" onClick={() => stockDialog(p, 'entree', reload)}>Entrée</button>
+                            <button type="button" className="btn btn-sm btn-ghost" onClick={() => stockDialog(p, 'ajustement', reload)}>Ajuster</button>
+                          </>
+                        )}
                         <button type="button" className="btn btn-sm btn-ghost" onClick={() => historyDialog(p)}>Historique</button>
-                        {admin && <button type="button" className="btn btn-sm btn-ghost" onClick={() => productDialog(p, reload)}><Icon name="edit" /><span className="sr-only">Modifier {p.name}</span></button>}
+                        {ownsProduct(me, p) && <button type="button" className="btn btn-sm btn-ghost" onClick={() => productDialog(p, reload)}><Icon name="edit" /><span className="sr-only">Modifier {p.name}</span></button>}
                       </div>
                     </td>
                   </tr>

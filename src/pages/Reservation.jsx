@@ -12,7 +12,7 @@ import { api, newKey } from '../lib/api.js';
 import { money, fmtDuration, dayLabel, dateTime, ACCOUNT_LABEL, paymentMethodText } from '../lib/format.js';
 import { ACTION_LABELS, auditSummary } from '../lib/audit.js';
 import { useBusy, useLoad } from '../lib/hooks.js';
-import { useIsAdmin, useRooms } from '../store/useStore.js';
+import { useIsBoss, useRooms } from '../store/useStore.js';
 import { partyLabel } from '../../shared/rules.js';
 import { searchable, smartFilter } from '../../shared/search.js';
 import {
@@ -23,7 +23,7 @@ import {
 const CAT_FILTERS = [['tous', 'Tous'], ['cigare', 'Cigares'], ['bouteille', 'Bouteilles']];
 
 function ReservationDetail({ d, products, reload }) {
-  const isAdmin = useIsAdmin();
+  const isAdmin = useIsBoss();
   const rooms = useRooms();
   const activeRooms = rooms.filter((rm) => rm.active || rm.id === d.reservation.room_id);
   const r = d.reservation;

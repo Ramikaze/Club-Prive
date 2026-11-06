@@ -1,5 +1,5 @@
 // Boot (session check), sign-in, then the routed application. Every rule is enforced by the server;
-// the admin guard here only avoids showing pages the server would refuse.
+// the guards here only avoid showing pages the server would refuse.
 import { Component, useEffect, useRef, useState } from 'react';
 import { HashRouter, Routes, Route, Link, Navigate, useLocation } from 'react-router-dom';
 import AppShell from './components/layout/AppShell.jsx';
@@ -12,29 +12,40 @@ import Rooms from './pages/Rooms.jsx';
 import Agenda from './pages/Agenda.jsx';
 import Members from './pages/Members.jsx';
 import Member from './pages/Member.jsx';
+import ClientsList from './components/members/ClientsList.jsx';
 import MemberCard from './pages/MemberCard.jsx';
 import Statement from './pages/Statement.jsx';
 import Reservation from './pages/Reservation.jsx';
 import BookingConfirmation from './pages/BookingConfirmation.jsx';
 import Products from './pages/Products.jsx';
+import Shop from './pages/Shop.jsx';
 import Lounge, { HumidorPage } from './pages/Lounge.jsx';
 import Cash from './pages/Cash.jsx';
+import ShopTab from './components/cash/ShopTab.jsx';
 import Ticket from './pages/Ticket.jsx';
 import TicketHistory from './pages/TicketHistory.jsx';
 import Treasury from './pages/Treasury.jsx';
 import Ledger from './pages/Ledger.jsx';
 import Closing from './pages/Closing.jsx';
 import Settings from './pages/Settings.jsx';
+import AuditJournal from './pages/AuditJournal.jsx';
 import PublicTicket, { isPublicTicketHash } from './pages/PublicTicket.jsx';
 import { api, setUnauthorizedHandler } from './lib/api.js';
 import { isDemoSpace, leaveDemo } from './lib/space.js';
 import { applyTheme } from './lib/theme.js';
-import { useStore, useIsAdmin } from './store/useStore.js';
+import { useStore, useIsAdmin, useIsBoss } from './store/useStore.js';
 
 function AdminOnly({ children }) {
   const isAdmin = useIsAdmin();
   if (isAdmin) return children;
   return <div className="card"><Empty icon="alert">Cette page est réservée aux administrateurs.</Empty></div>;
+}
+
+// Club management (administrator and associés): treasury, ledger, closing, ticket history, journal.
+function BossOnly({ children }) {
+  const isBoss = useIsBoss();
+  if (isBoss) return children;
+  return <div className="card"><Empty icon="alert">Cette page est réservée à la direction du club.</Empty></div>;
 }
 
 // The former expenses page is now part of the cash page: its links (period, ?type=depense) open there.
@@ -168,11 +179,15 @@ export default function App() {
             <Route path="lounge/caves/:id" element={<HumidorPage />} />
             <Route path="caisse" element={<Cash />} />
             <Route path="caisse/ticket/:id" element={<Ticket />} />
-            <Route path="caisse/historique-tickets" element={<AdminOnly><TicketHistory /></AdminOnly>} />
+            <Route path="caisse/historique-tickets" element={<BossOnly><TicketHistory /></BossOnly>} />
             <Route path="depenses" element={<ToCash />} />
-            <Route path="tresorerie" element={<AdminOnly><Treasury /></AdminOnly>} />
-            <Route path="grand-livre" element={<AdminOnly><Ledger /></AdminOnly>} />
-            <Route path="cloture" element={<AdminOnly><Closing /></AdminOnly>} />
+            <Route path="tresorerie" element={<BossOnly><Treasury /></BossOnly>} />
+            <Route path="grand-livre" element={<BossOnly><Ledger /></BossOnly>} />
+            <Route path="cloture" element={<BossOnly><Closing /></BossOnly>} />
+            <Route path="caisse/boutique" element={<BossOnly><ShopTab /></BossOnly>} />
+            <Route path="journal" element={<BossOnly><AuditJournal /></BossOnly>} />
+            <Route path="boutique" element={<Shop />} />
+            <Route path="clients" element={<ClientsList />} />
             <Route path="parametres" element={<AdminOnly><Settings /></AdminOnly>} />
             <Route path="*" element={<NotFound />} />
           </Route>

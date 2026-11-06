@@ -7,6 +7,7 @@ import PeriodPicker, { usePeriod } from '../components/ui/PeriodPicker.jsx';
 import { api, qs } from '../lib/api.js';
 import { money, dayLabel } from '../lib/format.js';
 import { useLoad } from '../lib/hooks.js';
+import { useIsAdmin } from '../store/useStore.js';
 
 const methodIcon = (m) => (/esp[eè]ce/i.test(m) ? 'cash' : /carte/i.test(m) ? 'card' : /virement|banque/i.test(m) ? 'bank' : 'wallet');
 
@@ -27,6 +28,8 @@ export default function Treasury() {
   const period = usePeriod('month');
   const { from, to } = period;
   const state = useLoad(() => api.get(`/api/treasury${qs({ from, to })}`), [from, to]);
+  // The opening balances are part of the application's settings: only the administrator types them.
+  const isAdmin = useIsAdmin();
 
   return (
     <>
@@ -47,7 +50,9 @@ export default function Treasury() {
                 <div className="toolbar">
                   <Notice kind="bronze">
                     Aucun mouvement ni solde d’ouverture sur la période. Pour partir des soldes réels des caisses et comptes,
-                    saisissez-les dans <Link to="/parametres">Paramètres</Link>, rubrique Trésorerie.
+                    {isAdmin
+                      ? <> saisissez-les dans <Link to="/parametres">Paramètres</Link>, rubrique Trésorerie.</>
+                      : ' l’administrateur les saisit dans ses Paramètres, rubrique Trésorerie.'}
                   </Notice>
                 </div>
               )}

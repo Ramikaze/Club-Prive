@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
 import SmartSearch from '../components/ui/SmartSearch.jsx';
+import MembersTabs from '../components/members/MembersTabs.jsx';
 import { Chip, DemoChip, Empty, Loaded, PageHead, Segmented } from '../components/ui/ui.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import { api, qs } from '../lib/api.js';
@@ -125,11 +126,12 @@ function MemberSearch({ initialQ, setQuery }) {
       return (
         <>
           <PageHead
-            title="Membres"
+            title="Membres / Clients"
             lead={`${items.length} ${items.length > 1 ? 'membres' : 'membre'}${statut === 'desactives' ? (items.length > 1 ? ' désactivés' : ' désactivé') : ''}${q ? (items.length > 1 ? ' trouvés' : ' trouvé') : ''}`}
             actions={<button type="button" className="btn btn-primary" onClick={() => openMemberDialog(null, (m) => navigate(`/membres/${m.id}`))}><Icon name="plus" /> Nouveau membre</button>}
             tour="members"
           />
+          <MembersTabs />
           <form className="toolbar" role="search" onSubmit={(e) => e.preventDefault()}>
             <SmartSearch
               value={text}

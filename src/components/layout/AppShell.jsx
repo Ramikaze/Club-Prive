@@ -14,17 +14,19 @@ import { toggleTheme } from '../../lib/theme.js';
 import { enterDemo, leaveDemo } from '../../lib/space.js';
 import { ROLE_LABEL } from '../../lib/format.js';
 import { useStore } from '../../store/useStore.js';
+import { isBoss } from '../../../shared/roles.js';
 
 export const NAV = [
   { group: 'Opérations' },
   { path: '/', label: 'Accueil', short: 'Accueil', icon: 'home', tab: true },
   { path: '/salles', label: 'Salles', short: 'Salles', icon: 'rooms', tab: true },
   { path: '/agenda', label: 'Agenda', short: 'Agenda', icon: 'calendar', tab: true, also: ['/reservations'] },
-  { path: '/membres', label: 'Membres', short: 'Membres', icon: 'users', tab: true, also: ['/cartes'] },
+  { path: '/membres', label: 'Membres / Clients', short: 'Membres', icon: 'users', tab: true, also: ['/clients', '/cartes'] },
+  { path: '/boutique', label: 'Boutique', short: 'Boutique', icon: 'shop' },
   { path: '/produits', label: 'Stocks & Cave', short: 'Stocks', icon: 'box', also: ['/lounge'] },
   { path: '/caisse', label: 'Caisse', short: 'Caisse', icon: 'wallet', tab: true },
   { group: 'Administration', admin: true },
-  { path: '/parametres', label: 'Administration', short: 'Admin', icon: 'settings', admin: true, also: ['/tresorerie', '/grand-livre', '/cloture'] },
+  { path: '/parametres', label: 'Administration', short: 'Admin', icon: 'settings', admin: true, also: ['/tresorerie', '/grand-livre', '/cloture', '/journal'] },
 ];
 
 
@@ -214,7 +216,7 @@ export default function AppShell() {
           <Link key={n.path} to={n.path} aria-current={aria(n.path)}><Icon name={n.icon} /><span>{n.short}</span></Link>
         ))}
       </nav>
-      <GuidedTour active={tour} onClose={() => setTour(false)} isAdmin={isAdmin} clubName={settings.club_name} />
+      <GuidedTour active={tour} onClose={() => setTour(false)} isAdmin={isAdmin} isBoss={isBoss(me)} clubName={settings.club_name} />
       {demo && <div className="demo-watermark" aria-hidden="true">DÉMO</div>}
     </div>
   );

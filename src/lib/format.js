@@ -3,6 +3,7 @@
 import { localParts, addDays } from '../../shared/time.js';
 import { bookingWindow, fmtDuration, CARD_METHOD } from '../../shared/rules.js';
 import { RECHARGE_LINE_LABEL } from '../../shared/ticket.js';
+import { SHOP } from '../../shared/roles.js';
 import { useStore } from '../store/useStore.js';
 
 export { fmtDuration };
@@ -77,7 +78,7 @@ export const relLabel = (rel) => `${pad2(Math.floor(rel / 60) % 24)}:${pad2(rel 
 
 // ---------------------------------------------------------------- labels
 
-export const ROLE_LABEL = { admin: 'Propriétaire / administrateur', gerant: 'Gérant' };
+export { ROLE_LABEL } from '../../shared/roles.js';
 
 export const STATUS = {
   humidor: { conforme: ['Dans les seuils', 'ok'], alerte: ['Hors seuils', 'danger'], a_controler: ['À contrôler', 'warn'] },
@@ -102,11 +103,18 @@ export const subStateLabel = (summary) => {
 // ---------------------------------------------------------------- payments in the lists
 
 // What a payment that has no line was for: a recharge of the card or an outside meal (its label); null for a
-// plain payment, whose lines say it.
+// plain payment, whose lines say it. A Boutique sale has lines: the Caisse names its products.
 export function paymentPurpose(p) {
   if (p.kind === 'recharge') return RECHARGE_LINE_LABEL;
   if (p.kind === 'repas') return `Repas extérieur : ${p.label ?? ''}`;
   return null;
+}
+
+// What a payment was for in the member's « Paiements »: « boutique cigares » or « boutique champagne » for a
+// Boutique sale (as its ticket says « Payé pour »), else as paymentPurpose.
+export function paidForLabel(p) {
+  if (p.shop_sale_id) return SHOP[p.shop_account]?.purpose ?? 'boutique';
+  return paymentPurpose(p);
 }
 
 // How a payment was paid: the card's part apart from the rest when the card paid only part of it.

@@ -4,7 +4,7 @@
 // the closing balance includes them. « Compter la caisse » (onCount, administrators) sets the first cash fund, then
 // records the gap between the till and the books.
 import Icon from '../ui/Icon.jsx';
-import { tillFigures } from './flows.js';
+import { receiptSummary, tillFigures } from './flows.js';
 import { bizDayOf } from './when.js';
 import { bizToday, dayLabel, money } from '../../lib/format.js';
 
@@ -13,6 +13,7 @@ const signed = (v, out = false) => `${(out ? v >= 0 : v < 0) ? '−' : '+'}${mon
 
 export default function CashBalance({ t, method, entries, journal, openingBalances, onCount }) {
   const f = tillFigures(t, method, { entries, journal, openingBalances, dayOf: bizDayOf });
+  const shop = receiptSummary(journal, entries, { method, to: t.to, dayOf: bizDayOf }).boutique;
   const end = t.to >= bizToday() ? 'à ce jour' : `au ${dayLabel(t.to, 'short')}`;
   return (
     <section className="card cash-balance-card" aria-labelledby="caisse-soldes-title">
@@ -30,6 +31,7 @@ export default function CashBalance({ t, method, entries, journal, openingBalanc
           <div className="label">Recettes</div>
           <div className="value amount-in">{signed(f.in)}</div>
           <div className="hint">argent reçu, remboursements déduits</div>
+          <div className="hint">dont Boutique {money(shop)}</div>
         </div>
         <div className="kpi">
           <div className="label">Dépenses</div>

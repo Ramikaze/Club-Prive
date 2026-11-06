@@ -6,6 +6,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import Icon from './Icon.jsx';
 import { STATUS, ACCOUNT_LABEL } from '../../lib/format.js';
 import { photoUrl } from '../../lib/photo.js';
+import { useIsAdmin } from '../../store/useStore.js';
 
 export function Chip({ group, value }) {
   const [label, kind] = STATUS[group]?.[value] ?? [value, 'neutral'];
@@ -158,8 +159,9 @@ export function RouteTabs({ items, label }) {
   const { pathname } = useLocation();
   return (
     <nav className="section-tabs no-print" aria-label={label}>
-      {items.map(([path, text, icon]) => {
-        const active = pathname === path || pathname.startsWith(`${path}/`);
+      {items.map(([path, text, icon, exact]) => {
+        // An exact tab (its path is the prefix of a sibling's) lights up on its own path only.
+        const active = pathname === path || (!exact && pathname.startsWith(`${path}/`));
         return (
           <Link key={path} to={path} className={`section-tab ${active ? 'active' : ''}`} aria-current={active ? 'page' : undefined}>
             {icon && <Icon name={icon} />}
@@ -184,14 +186,17 @@ export function StocksTabs() {
 }
 
 export function AdminTabs() {
+  const isAdmin = useIsAdmin();
   return (
     <RouteTabs
       label="Rubriques Administration"
       items={[
-        ['/parametres', 'Paramètres du club', 'settings'],
+        // The application's own settings belong to the administrator; the other rubriques to the associés too.
+        ...(isAdmin ? [['/parametres', 'Paramètres du club', 'settings']] : []),
         ['/tresorerie', 'Trésorerie & Bilans', 'bank'],
         ['/grand-livre', 'Grand livre', 'book'],
         ['/cloture', 'Clôture mensuelle', 'lock'],
+        ['/journal', 'Journal des opérations', 'journal'],
       ]}
     />
   );

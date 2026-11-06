@@ -1,4 +1,5 @@
 // Human-readable history lines for the audit log (reservation history, settings > journal).
+import { RAYON_LABEL } from '../../shared/roles.js';
 import { money, fmtDuration, dayLabel, ACCOUNT_LABEL } from './format.js';
 
 export const ACTION_LABELS = {
@@ -19,15 +20,26 @@ export const ACTION_LABELS = {
   'membre.supprimer': 'Membre supprimé',
   'membre.desactiver': 'Membre désactivé',
   'membre.reactiver': 'Membre réactivé',
+  'client.creer': 'Client régulier créé',
+  'client.passer_membre': 'Client régulier passé en membre',
+  'boutique.vente': 'Vente Boutique',
+  'boutique.vente.annuler': 'Vente Boutique annulée',
   'salle.creer': 'Salle créée',
   'salle.modifier': 'Salle modifiée',
   'salle.supprimer': 'Salle supprimée',
   'abonnement.activer': 'Formule activée',
   'abonnement.renouveler': 'Formule renouvelée',
   'abonnement.annuler': 'Abonnement annulé',
+  'abonnement.renouveler_auto': 'Formule renouvelée automatiquement',
   'credit.ajuster': 'Crédit ajusté',
   'carte.emettre': 'Carte émise',
   'carte.desactiver': 'Carte désactivée',
+  'carte.recharger': 'Carte membre approvisionnée',
+  'carte.annuler_recharge': 'Approvisionnement de carte annulé',
+  'carte.payer': 'Paiement par carte membre',
+  'carte.rembourser': 'Rendu sur la carte membre',
+  'carte.repas': 'Repas extérieur',
+  'carte.annuler_repas': 'Repas extérieur annulé',
   'reservation.creer': 'Réservation créée',
   'reservation.modifier': 'Salle / nombre de personnes modifié',
   'reservation.prolonger': 'Prolongation',
@@ -38,22 +50,34 @@ export const ACTION_LABELS = {
   'reservation.annuler': 'Réservation annulée',
   'reservation.absence': 'Absence du membre : réservation close',
   'reservation.consommation.ajouter': 'Consommation ajoutée',
+  'reservation.retirer_membre': 'Membre retiré de la réservation',
   'paiement.enregistrer': 'Encaissement',
+  'ticket.imprimer': 'Ticket imprimé',
+  'ticket.whatsapp': 'Ticket envoyé par WhatsApp',
   'ligne.annuler': 'Ligne annulée',
   'ligne.rembourser': 'Remboursement',
   'produit.creer': 'Produit créé',
   'produit.modifier': 'Produit modifié',
+  'produit.photo': 'Photo du produit enregistrée',
+  'produit.photo_retirer': 'Photo du produit retirée',
+  'produit.importer': 'Produit importé du catalogue',
+  'produits.desactiver_fictifs': 'Produits de démonstration désactivés',
   'stock.entree': 'Entrée de stock',
   'stock.ajustement': 'Ajustement de stock',
   'categorie.creer': 'Catégorie créée',
   'categorie.modifier': 'Catégorie modifiée',
   'operation.creer': 'Opération de trésorerie',
   'operation.annuler': 'Opération annulée',
+  'caisse.compter': 'Caisse comptée',
+  'caisse.fermer': 'Caisse du jour fermée',
+  'caisse.rouvrir': 'Caisse du jour rouverte',
   'periode.cloturer': 'Mois clôturé',
   'periode.rouvrir': 'Mois rouvert',
   'donnees.effacer': 'Données effacées',
   'demo.remettre_a_neuf': 'Démo remise à neuf',
 };
+
+const BUYER_LABEL = { journalier: 'client journalier', client: 'client régulier', membre: 'membre' };
 
 const ENTRY_KIND = { depense: 'Dépense', recette: 'Entrée diverse', transfert: 'Transfert' };
 
@@ -93,6 +117,14 @@ export function auditSummary(a) {
       return `${d.motif ?? ''} ; ${fmtDuration(d.minutes_liberees ?? 0)} libérées${d.acompte_conserve ? ` ; acompte de ${money(d.acompte_conserve)} conservé` : ''}`;
     case 'reservation.consommation.ajouter':
       return `${d.produit} × ${d.quantite} (${money(d.montant)}, ${ACCOUNT_LABEL[d.sous_compte] ?? ''})`;
+    case 'client.creer':
+      return `${d.nom ?? ''} (${d.member_no ?? ''})`;
+    case 'client.passer_membre':
+      return `${d.nom ?? ''} : ${d.ancien_numero ?? ''} → ${d.nouveau_numero ?? ''}`;
+    case 'boutique.vente':
+      return `${RAYON_LABEL[d.rayon] ?? d.rayon} · ${BUYER_LABEL[d.acheteur] ?? d.acheteur} · ${money(d.montant)}${d.carte > 0 ? ` (dont ${money(d.carte)} par carte)` : ''}`;
+    case 'boutique.vente.annuler':
+      return `${RAYON_LABEL[d.rayon] ?? d.rayon} · ${money(d.montant)} — ${d.motif}`;
     case 'paiement.enregistrer':
       return `${money(d.montant)} — ${d.moyen}${d.reference ? ` (${d.reference})` : ''}`;
     case 'ligne.annuler':

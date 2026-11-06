@@ -7,9 +7,13 @@ import { api, newKey } from '../lib/api.js';
 import MemberCard3D from '../components/ui/MemberCard3D.jsx';
 import SessionTimer, { isRunning } from '../components/ui/SessionTimer.jsx';
 import EndingSoonNotice from '../components/ui/EndingSoonNotice.jsx';
-import { money, fmtDuration, dayLabel, dateTime, dayMonth, paymentPurpose, paymentMethodText } from '../lib/format.js';
+import { money, fmtDuration, dayLabel, dateTime, dayMonth, paidForLabel, paymentMethodText } from '../lib/format.js';
 import { useLoad } from '../lib/hooks.js';
-import { useIsAdmin } from '../store/useStore.js';
+import { useIsBoss } from '../store/useStore.js';
+import PurchaseHistory from '../components/members/PurchaseHistory.jsx';
+import {
+  openClientDialog, openConvertClientDialog, openDeactivateClientDialog, openReactivateClientDialog,
+} from '../dialogs/clientDialogs.jsx';
 import {
   openBookingDialog, openMemberDialog, openSubscriptionDialog, openCardDialog, openAdjustCreditDialog, openPaymentDialog,
   openDeactivateMemberDialog, openReactivateMemberDialog, memberRoomEligibility, openRechargeDialog, openOutsideMealDialog,
@@ -93,7 +97,7 @@ const MOVE_LABEL = {
 };
 
 function WalletMovements({ m, reload }) {
-  const isAdmin = useIsAdmin();
+  const isAdmin = useIsBoss();
   const moves = m.wallet.movements;
   const payments = new Map(m.payments.map((p) => [p.id, p]));
   const cancelled = new Set(moves.filter((w) => w.kind === 'annulation_recharge').map((w) => w.payment_id));
@@ -127,7 +131,7 @@ function WalletMovements({ m, reload }) {
 // The « Carte » tile: the card itself (turned over for its QR code), the two credits under it, then the actions.
 function CardTile({ m, current, summary, reload, book }) {
   const navigate = useNavigate();
-  const isAdmin = useIsAdmin();
+  const isAdmin = useIsBoss();
   const shown = m.cards.find((c) => c.status === 'active') ?? m.cards[0] ?? null;
   const older = m.cards.filter((c) => c !== shown);
   const activeCard = shown?.status === 'active' ? shown : null;
@@ -216,9 +220,51 @@ function CardTile({ m, current, summary, reload, book }) {
   );
 }
 
+// A regular client's file: identity, the purchase history, deactivation and the move to member. No card, plan or booking.
+function ClientDetail({ m, reload }) {
+  return (
+    <>
+      <PageHead
+        title={m.name}
+        lead={<>{m.member_no} <span className="chip">client régulier</span> {m.active ? null : <span className="chip chip-danger">désactivé</span>} <DemoChip on={m.is_demo} /></>}
+        back={{ to: '/clients', label: 'Clients réguliers' }}
+        actions={(
+          <>
+            <button type="button" className="btn" onClick={() => openClientDialog(m, reload)}><Icon name="edit" /> Modifier</button>
+            {m.active
+              ? <button type="button" className="btn btn-danger" onClick={() => openDeactivateClientDialog(m, reload)}><Icon name="ban" /> Désactiver</button>
+              : <button type="button" className="btn" onClick={() => openReactivateClientDialog(m, reload)}><Icon name="undo" /> Réactiver</button>}
+            {m.active ? <button type="button" className="btn btn-primary" onClick={() => openConvertClientDialog(m, reload)}>Passer en membre</button> : null}
+          </>
+        )}
+      />
+      {!m.active && (
+        <div className="toolbar">
+          <Notice kind="warn">
+            Client désactivé le {dateTime(m.deactivated_at)}{m.deactivated_by_name ? ` par ${m.deactivated_by_name}` : ''} : {m.deactivation_reason}.
+            Ses achats restent consultables ci-dessous.
+          </Notice>
+        </div>
+      )}
+      <div className="grid-2">
+        <section className="card">
+          <div className="card-head"><h2>Coordonnées</h2></div>
+          <dl className="kv">
+            <dt>Téléphone</dt><dd>{m.phone}</dd>
+            <dt>Courriel</dt><dd>{m.email ?? '—'}</dd>
+            <dt>Notes</dt><dd>{m.notes ?? '—'}</dd>
+            <dt>Client depuis</dt><dd>{dateTime(m.created_at)}</dd>
+          </dl>
+        </section>
+        <PurchaseHistory memberId={m.id} file={m} />
+      </div>
+    </>
+  );
+}
+
 function MemberDetail({ m, reload }) {
   const navigate = useNavigate();
-  const isAdmin = useIsAdmin();
+  const isAdmin = useIsBoss();
   const summary = m.subscription;
   const current = m.subscriptions.find((s) => s.id === summary.id && ['active', 'expire_bientot'].includes(summary.state));
   // The booking member may pay the room with his card when his plan has no time left, or when he has none.
@@ -294,7 +340,8 @@ function MemberDetail({ m, reload }) {
               <dt>Téléphone</dt><dd>{m.phone}</dd>
               <dt>Courriel</dt><dd>{m.email ?? '—'}</dd>
               <dt>Notes</dt><dd>{m.notes ?? '—'}</dd>
-              <dt>Membre depuis</dt><dd>{dateTime(m.created_at)}</dd>
+              <dt>Membre depuis</dt><dd>{dateTime(m.became_member_at ?? m.created_at)}</dd>
+              {m.former_client_no ? <><dt>Origine</dt><dd>ancien client régulier {m.former_client_no}, passé membre le {dateTime(m.became_member_at)}</dd></> : null}
             </dl>
           </section>
 
@@ -343,20 +390,27 @@ function MemberDetail({ m, reload }) {
         <section className="card">
           <div className="card-head"><h2>Paiements</h2></div>
           {m.payments.length ? (
-            <div className="list">{m.payments.map((p) => (
-              <div className={`list-item list-item-wrap ${p.cancelled_at ? 'is-cancelled' : ''}`} key={p.id}>
-                <div className="grow"><div className="title">{money(p.amount)} — {paymentMethodText(p)}</div>
-                  <div className="meta">{dateTime(p.paid_at)}
-                    {paymentPurpose(p) ? ` · ${paymentPurpose(p)}` : null}
-                    {p.reservation_id ? <> · <Link to={`/reservations/${p.reservation_id}`}>réservation n° {p.reservation_id}</Link></> : (paymentPurpose(p) ? null : ' · abonnement')}
-                    {p.cancelled_at ? ` · annulé le ${dateTime(p.cancelled_at)} : ${p.cancel_reason}` : null}</div></div>
-                {p.cancelled_at ? <span className="chip">annulé</span> : <span className="chip chip-ok">n° {p.id}</span>}
-                {isAdmin && p.kind === 'repas' && !p.cancelled_at
-                  ? <button type="button" className="btn btn-sm btn-ghost" onClick={() => openCancelMealDialog(p, reload)}>Annuler le repas</button> : null}
-                <Link className="btn btn-sm" to={`/caisse/ticket/${p.id}`}>Ticket</Link></div>
-            ))}</div>
+            <div className="list">{m.payments.map((p) => {
+              // A recharge or meal is cancelled on the payment; a Boutique sale on the sale.
+              const cancelledAt = p.cancelled_at ?? p.shop_cancelled_at;
+              const reason = p.cancelled_at ? p.cancel_reason : p.shop_cancel_reason;
+              return (
+                <div className={`list-item list-item-wrap ${cancelledAt ? 'is-cancelled' : ''}`} key={p.id}>
+                  <div className="grow"><div className="title">{money(p.amount)} — {paymentMethodText(p)}</div>
+                    <div className="meta">{dateTime(p.paid_at)}
+                      {paidForLabel(p) ? ` · ${paidForLabel(p)}` : null}
+                      {p.reservation_id ? <> · <Link to={`/reservations/${p.reservation_id}`}>réservation n° {p.reservation_id}</Link></> : (paidForLabel(p) ? null : ' · abonnement')}
+                      {cancelledAt ? ` · annulé le ${dateTime(cancelledAt)} : ${reason}` : null}</div></div>
+                  {cancelledAt ? <span className="chip">annulé</span> : <span className="chip chip-ok">n° {p.id}</span>}
+                  {isAdmin && p.kind === 'repas' && !p.cancelled_at
+                    ? <button type="button" className="btn btn-sm btn-ghost" onClick={() => openCancelMealDialog(p, reload)}>Annuler le repas</button> : null}
+                  <Link className="btn btn-sm" to={`/caisse/ticket/${p.id}`}>Ticket</Link></div>
+              );
+            })}</div>
           ) : <Empty icon="wallet">Aucun paiement.</Empty>}
         </section>
+
+        <PurchaseHistory memberId={m.id} file={m} />
       </div>
     </>
   );
@@ -365,5 +419,5 @@ function MemberDetail({ m, reload }) {
 export default function Member() {
   const { id } = useParams();
   const state = useLoad(() => api.get(`/api/members/${id}`), [id]);
-  return <Loaded state={state}>{(m) => <MemberDetail m={m} reload={state.reload} />}</Loaded>;
+  return <Loaded state={state}>{(m) => (m.kind === 'client' ? <ClientDetail m={m} reload={state.reload} /> : <MemberDetail m={m} reload={state.reload} />)}</Loaded>;
 }

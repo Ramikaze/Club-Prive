@@ -659,7 +659,56 @@ const V17 = [
   )`,
 ];
 
-export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17];
+// The shop (« Boutique »): a third role, the associé, who runs one rayon (cigars or champagne); the buyer's kind on
+// a member (member, walk-in client, day visitor) and the shop sales that charges and payments will point at.
+// `users.role` is under a CHECK that SQLite cannot alter, so the table is rebuilt as in V15: its rows wait in a
+// plain copy while it is dropped and created again, the deferred foreign keys allow the rows of the tables that cite
+// a user to be orphans for that moment, and the accounts copied back (same ids) make them whole again. The login
+// stays unique and case-insensitive. An associé has a rayon and nobody else has one.
+const V18 = [
+  'PRAGMA defer_foreign_keys = ON',
+  'CREATE TABLE users_v17 AS SELECT * FROM users',
+  'DROP TABLE users',
+  `CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    login TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    name TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('admin', 'associe', 'gerant')),
+    password_hash TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    last_login_at TEXT,
+    rayon TEXT CHECK (rayon IS NULL OR rayon IN ('cigares', 'alcool')),
+    CHECK ((role = 'associe') = (rayon IS NOT NULL))
+  )`,
+  `INSERT INTO users (id, login, name, role, password_hash, active, created_at, created_by, last_login_at)
+   SELECT id, login, name, role, password_hash, active, created_at, created_by, last_login_at FROM users_v17`,
+  'DROP TABLE users_v17',
+  "ALTER TABLE members ADD COLUMN kind TEXT NOT NULL DEFAULT 'membre' CHECK (kind IN ('membre', 'client', 'journalier'))",
+  'ALTER TABLE members ADD COLUMN former_client_no TEXT',
+  'ALTER TABLE members ADD COLUMN became_member_at TEXT',
+  'ALTER TABLE members ADD COLUMN became_member_by INTEGER REFERENCES users(id)',
+  `CREATE TABLE shop_sales (
+    id INTEGER PRIMARY KEY,
+    account TEXT NOT NULL CHECK (account IN ('alcool', 'cigares')),
+    member_id INTEGER NOT NULL REFERENCES members(id),
+    buyer_kind TEXT NOT NULL CHECK (buyer_kind IN ('journalier', 'client', 'membre')),
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    cancelled_at TEXT,
+    cancelled_by INTEGER REFERENCES users(id),
+    cancel_reason TEXT
+  )`,
+  'CREATE INDEX shop_sales_created ON shop_sales(created_at)',
+  'CREATE INDEX shop_sales_member ON shop_sales(member_id)',
+  'ALTER TABLE charges ADD COLUMN shop_sale_id INTEGER REFERENCES shop_sales(id)',
+  'ALTER TABLE payments ADD COLUMN shop_sale_id INTEGER REFERENCES shop_sales(id)',
+  'CREATE INDEX charges_shop_sale ON charges(shop_sale_id)',
+  'CREATE INDEX payments_shop_sale ON payments(shop_sale_id)',
+];
+
+export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18];
 
 export function migrate(db) {
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');

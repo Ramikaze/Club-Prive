@@ -8,6 +8,7 @@ import { searchable, smartFilter } from '../shared/search.js';
 import { text, int, toId, flag, frDate } from './validate.js';
 import { ledgerMethods, DEFAULT_CATEGORIES, OUTSIDE_MEAL_CATEGORY, CASH_GAP_CATEGORY } from './ledger.js';
 import { loungeMethods } from './lounge.js';
+import { shopMethods, buyerShown } from './shop.js';
 import {
   newTicketCode, formatTicketNumber, normalizeTicketCode, memberInitials, paymentLines, TICKET_CODE_LENGTH,
 } from '../shared/ticket.js';
@@ -22,6 +23,7 @@ import {
   formatFirstName, formatLastName, CASH_METHOD, DEFAULT_CLOSE,
 } from '../shared/rules.js';
 import { waDigits } from '../shared/whatsapp.js';
+import { ROLES, RAYONS, isBoss, ownsAccount, accountOfCategory } from '../shared/roles.js';
 
 // A session has one member, its holder; whoever comes with the holder is a guest, not a member.
 const oneMemberOnly = () => invalid(
@@ -48,7 +50,7 @@ const SESSION_DAYS = 14;
 const WIPE_ORDER = [
   'humidor_readings', 'humidors',
   'idempotency_keys', 'wallet_movements', 'payment_allocations', 'refunds', 'stock_movements', 'credit_movements', 'charges',
-  'ticket_events', 'payments',
+  'ticket_events', 'payments', 'shop_sales',
   'reservation_attendees', 'reservations', 'cards', 'subscriptions', 'members', 'product_photos', 'products',
   'ledger_entries', 'closed_periods', 'day_closings', 'audit_log',
 ];
@@ -126,7 +128,7 @@ const CHARGE_SELECT = `
   SELECT c.*, u.name AS created_by_name, cu.name AS cancelled_by_name,
     pa.payment_id, p.paid_at, p.method AS payment_method,
     rf.id AS refund_id, rf.created_at AS refunded_at, rf.reason AS refund_reason,
-    m.first_name, m.last_name, m.member_no
+    m.first_name, m.last_name, m.member_no, m.kind AS buyer_kind
   FROM charges c
   JOIN members m ON m.id = c.member_id
   LEFT JOIN users u ON u.id = c.created_by
@@ -523,7 +525,7 @@ export class Club {
 
   userDTO(u) {
     return {
-      id: u.id, login: u.login, name: u.name, role: u.role, active: !!u.active,
+      id: u.id, login: u.login, name: u.name, role: u.role, rayon: u.rayon ?? null, active: !!u.active,
       last_login_at: u.last_login_at ?? null, created_at: u.created_at,
     };
   }
@@ -539,18 +541,26 @@ export class Club {
   }
 
   // `password_hash` is computed by the API layer (asynchronous WebCrypto) after its strength check.
+  // The rayon of an account: required for an associé, none for anyone else.
+  rayonFor(role, rayon) {
+    if (role !== 'associe') return null;
+    if (!RAYONS.includes(rayon)) throw invalid('Un associé doit avoir un rayon : cigares ou champagne.');
+    return rayon;
+  }
+
   createUser(actor, input) {
     const login = text(input.login, 'Identifiant', { required: true, max: 40 });
     if (!/^[a-zA-Z0-9._-]{3,40}$/.test(login)) throw invalid('Identifiant : 3 à 40 caractères (lettres, chiffres, point, tiret).');
     const name = text(input.name, 'Nom', { required: true, max: 80 });
-    if (!['admin', 'gerant'].includes(input.role)) throw invalid('Rôle invalide.');
+    if (!ROLES.includes(input.role)) throw invalid('Rôle invalide.');
+    const rayon = this.rayonFor(input.role, input.rayon);
     if (typeof input.password_hash !== 'string' || !input.password_hash) throw invalid('Mot de passe manquant.');
     if (this.get('SELECT 1 AS x FROM users WHERE login = ?', login)) throw conflict('IDENTIFIANT_PRIS', 'Cet identifiant est déjà utilisé.');
     const id = this.insert(
-      'INSERT INTO users (login, name, role, password_hash, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?)',
-      login, name, input.role, input.password_hash, this.nowIso(), actor?.id ?? null,
+      'INSERT INTO users (login, name, role, rayon, password_hash, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      login, name, input.role, rayon, input.password_hash, this.nowIso(), actor?.id ?? null,
     );
-    this.audit(actor, 'utilisateur.creer', 'user', id, { login, name, role: input.role });
+    this.audit(actor, 'utilisateur.creer', 'user', id, { login, name, role: input.role, rayon });
     return this.userDTO(this.userRow(id));
   }
 
@@ -558,7 +568,8 @@ export class Club {
     const u = this.userRow(userId);
     const name = input.name !== undefined ? text(input.name, 'Nom', { required: true, max: 80 }) : u.name;
     const role = input.role !== undefined ? input.role : u.role;
-    if (!['admin', 'gerant'].includes(role)) throw invalid('Rôle invalide.');
+    if (!ROLES.includes(role)) throw invalid('Rôle invalide.');
+    const rayon = this.rayonFor(role, input.rayon !== undefined ? input.rayon : u.rayon);
     const active = input.active !== undefined ? flag(input.active) : !!u.active;
     if (u.id === actor.id && (role !== 'admin' || !active)) {
       throw invalid("Vous ne pouvez ni retirer vos propres droits d'administrateur ni désactiver votre compte.");
@@ -567,10 +578,10 @@ export class Club {
       const { n } = this.get("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND active = 1");
       if (n <= 1) throw conflict('DERNIER_ADMIN', 'Il doit rester au moins un administrateur actif.');
     }
-    this.run('UPDATE users SET name = ?, role = ?, active = ? WHERE id = ?', name, role, active ? 1 : 0, u.id);
-    if (!active || role !== u.role) this.run('DELETE FROM sessions WHERE user_id = ?', u.id);
+    this.run('UPDATE users SET name = ?, role = ?, rayon = ?, active = ? WHERE id = ?', name, role, rayon, active ? 1 : 0, u.id);
+    if (!active || role !== u.role || rayon !== (u.rayon ?? null)) this.run('DELETE FROM sessions WHERE user_id = ?', u.id);
     this.audit(actor, 'utilisateur.modifier', 'user', u.id, {
-      avant: { name: u.name, role: u.role, active: !!u.active }, apres: { name, role, active },
+      avant: { name: u.name, role: u.role, rayon: u.rayon ?? null, active: !!u.active }, apres: { name, role, rayon, active },
     });
     return this.userDTO(this.userRow(u.id));
   }
@@ -650,6 +661,33 @@ export class Club {
     return m;
   }
 
+  // The file of a member or regular client. The hidden walk-in row has none: it is read by sales, payments and
+  // tickets through memberRow, never opened or edited.
+  fileRow(id) {
+    const m = this.memberRow(id);
+    if (m.kind === 'journalier') throw notFound('Membre');
+    return m;
+  }
+
+  // The next number with this prefix ('M' members, 'C' regular clients): one more than the highest in use, so the
+  // two sequences are independent and existing numbers never move. A client made member keeps his old C- number
+  // in former_client_no: it counts too, so it is never handed out again.
+  nextMemberNo(prefix) {
+    const { n } = this.get(
+      `SELECT COALESCE(MAX(CAST(SUBSTR(no, 3) AS INTEGER)), 0) AS n FROM (
+         SELECT member_no AS no FROM members WHERE member_no LIKE ?
+         UNION ALL SELECT former_client_no FROM members WHERE former_client_no LIKE ?)`, `${prefix}-%`, `${prefix}-%`,
+    );
+    return `${prefix}-${String(n + 1).padStart(4, '0')}`;
+  }
+
+  // Plans, cards, recharges, meals and bookings are for members: a regular client must be made a member first.
+  assertIsMember(m, what) {
+    if (m.kind !== 'membre') {
+      throw conflict('PAS_MEMBRE', `${m.first_name} ${m.last_name} est un client régulier : passez-le en membre avant ${what}.`);
+    }
+  }
+
   memberFields(input, current = {}) {
     const pick = (k) => (input[k] !== undefined ? input[k] : current[k]);
     const first = formatFirstName(text(pick('first_name'), 'Prénom', { required: true, max: 60 }));
@@ -664,8 +702,7 @@ export class Club {
 
   createMember(actor, input, { demo = false } = {}) {
     const f = this.memberFields(input);
-    const { n } = this.get('SELECT COALESCE(MAX(id), 0) + 1 AS n FROM members');
-    const memberNo = `M-${String(n).padStart(4, '0')}`;
+    const memberNo = this.nextMemberNo('M');
     const id = this.insert(
       `INSERT INTO members (member_no, first_name, last_name, phone, email, notes, is_demo, created_at, created_by)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -677,7 +714,7 @@ export class Club {
   }
 
   updateMember(actor, memberId, input) {
-    const m = this.memberRow(memberId);
+    const m = this.fileRow(memberId);
     const f = this.memberFields(input, m);
     this.run(
       'UPDATE members SET first_name = ?, last_name = ?, phone = ?, email = ?, notes = ?, updated_at = ?, updated_by = ? WHERE id = ?',
@@ -699,7 +736,7 @@ export class Club {
   }
 
   deactivateMember(actor, memberId, input) {
-    const m = this.memberRow(memberId);
+    const m = this.fileRow(memberId);
     if (m.active === 0) throw conflict('DEJA_DESACTIVE', 'Ce membre est déjà désactivé.');
     const reason = text(input.reason, 'Motif de la désactivation', { required: true, min: 3, max: 300 });
     const { n } = this.get(
@@ -720,7 +757,7 @@ export class Club {
   }
 
   reactivateMember(actor, memberId) {
-    const m = this.memberRow(memberId);
+    const m = this.fileRow(memberId);
     if (m.active !== 0) throw conflict('DEJA_ACTIF', 'Ce membre est déjà actif.');
     this.run(
       'UPDATE members SET active = 1, deactivated_at = NULL, deactivated_by = NULL, deactivation_reason = NULL, updated_at = ?, updated_by = ? WHERE id = ?',
@@ -861,33 +898,43 @@ export class Club {
       id: m.id, member_no: m.member_no, first_name: m.first_name, last_name: m.last_name,
       name: `${m.first_name} ${m.last_name}`, phone: m.phone, email: m.email, notes: m.notes,
       is_demo: !!m.is_demo, created_at: m.created_at,
+      kind: m.kind, former_client_no: m.former_client_no ?? null, became_member_at: m.became_member_at ?? null,
       card_code: this.activeCardCode(m.id),
       active: m.active !== 0, deactivated_at: m.deactivated_at ?? null, deactivation_reason: m.deactivation_reason ?? null,
     };
   }
 
-  // statut: 'actifs' (default), 'desactives' or 'tous'.
-  listMembers(q, statut = 'actifs') {
-    const keep = statut === 'tous' ? () => true : statut === 'desactives' ? (m) => m.active === 0 : (m) => m.active !== 0;
+  // The rows of one kind ('membre' or 'client') matching the search, in name order. The walk-in row is never
+  // returned: no list asks for its kind.
+  searchMemberRows(q, kind) {
     let raw = typeof q === 'string' ? q.trim() : '';
     const qrCardMatch = raw.match(/[?&]card=([A-Z0-9-]{4,40})/i);
     if (qrCardMatch) raw = qrCardMatch[1];
     const query = raw.slice(0, 60);
-    let rows;
     if (searchable(query)) {
       // Forgiving search (shared/search.js) on the name both ways round, the phone (also as bare digits), the member
       // number and the card codes.
       const all = this.all(
         `SELECT m.*, (SELECT GROUP_CONCAT(c.code, ' ') FROM cards c WHERE c.member_id = m.id) AS card_codes
-         FROM members m ORDER BY m.last_name, m.first_name`,
+         FROM members m WHERE m.kind = ? ORDER BY m.last_name, m.first_name`, kind,
       );
-      rows = smartFilter(all, query, (m) => [
+      return smartFilter(all, query, (m) => [
         `${m.first_name} ${m.last_name}`, `${m.last_name} ${m.first_name}`, m.member_no, m.phone,
         String(m.phone ?? '').replace(/\D/g, ''), m.card_codes,
       ]).slice(0, 200);
-    } else {
-      rows = this.all('SELECT * FROM members ORDER BY last_name, first_name LIMIT 500');
     }
+    return this.all('SELECT * FROM members WHERE kind = ? ORDER BY last_name, first_name LIMIT 500', kind);
+  }
+
+  // statut: 'actifs' (default), 'desactives' or 'tous'.
+  keepByStatus(statut) {
+    return statut === 'tous' ? () => true : statut === 'desactives' ? (m) => m.active === 0 : (m) => m.active !== 0;
+  }
+
+  listMembers(q, statut = 'actifs') {
+    const keep = this.keepByStatus(statut);
+    const rows = this.searchMemberRows(q, 'membre');
+    const inRoom = new Set(this.all("SELECT DISTINCT member_id FROM reservations WHERE status = 'en_cours'").map((r) => r.member_id));
     const today = this.bizToday();
     return rows.filter(keep).map((m) => {
       const base = this.memberBase(m);
@@ -901,12 +948,13 @@ export class Club {
         subscription,
         cards_deactivated: cardsDeactivated,
         can_enter_room: canEnterRoom,
+        in_room: inRoom.has(m.id),
       };
     });
   }
 
   memberDetail(memberId) {
-    const m = this.memberRow(memberId);
+    const m = this.fileRow(memberId);
     const today = this.bizToday();
     const subscriptions = this.all(
       `SELECT s.*, u.name AS created_by_name FROM subscriptions s LEFT JOIN users u ON u.id = s.created_by
@@ -947,7 +995,7 @@ export class Club {
   // card's movements carry the running balance over the member's whole history, so the first one of the period
   // starts from what came before it.
   memberStatement(memberId, from, to) {
-    const m = this.memberRow(memberId);
+    const m = this.fileRow(memberId);
     const today = this.bizToday();
     const end = to ?? today;
     const start = from ?? `${String(end).slice(0, 8)}01`;
@@ -1104,6 +1152,7 @@ export class Club {
 
   activateSubscription(actor, memberId, input) {
     const m = this.memberRow(memberId);
+    this.assertIsMember(m, 'd’activer une formule');
     this.assertMemberActive(m, 'd’activer une formule');
     const plan = this.get('SELECT * FROM plans WHERE id = ?', toId(input.plan_id, 'Formule'));
     if (!plan || !plan.active) throw invalid('Formule invalide ou inactive.');
@@ -1223,7 +1272,7 @@ export class Club {
   renewalCandidates(today = this.bizToday()) {
     return this.all(
       `SELECT DISTINCT m.id FROM members m JOIN subscriptions s ON s.member_id = m.id
-       WHERE m.active = 1 AND s.status = 'active' AND s.end_date < ? AND s.end_date >= ? ORDER BY m.id`,
+       WHERE m.active = 1 AND m.kind = 'membre' AND s.status = 'active' AND s.end_date < ? AND s.end_date >= ? ORDER BY m.id`,
       today, addDays(today, -RENEWAL_GRACE_DAYS),
     ).map((m) => m.id);
   }
@@ -1339,6 +1388,7 @@ export class Club {
 
   issueCard(actor, memberId, input) {
     const m = this.memberRow(memberId);
+    this.assertIsMember(m, 'd’émettre une carte');
     this.assertMemberActive(m, 'd’émettre une carte');
     const kind = input.kind;
     if (!['physique', 'virtuelle'].includes(kind)) throw invalid('Type de carte invalide.');
@@ -1446,6 +1496,7 @@ export class Club {
   rechargeWallet(actor, memberId, input) {
     const s = this.settings();
     const m = this.memberRow(memberId);
+    this.assertIsMember(m, 'd’approvisionner sa carte');
     this.assertMemberActive(m, 'd’approvisionner sa carte');
     const amount = int(input.amount, 'Montant de l’approvisionnement', { min: 1, max: 1e13 });
     const method = text(input.method, 'Moyen de paiement', { required: true, max: 40 });
@@ -1472,6 +1523,7 @@ export class Club {
   recordOutsideMeal(actor, memberId, input, { demo = false } = {}) {
     const s = this.settings();
     const m = this.memberRow(memberId);
+    this.assertIsMember(m, 'de commander un repas');
     this.assertMemberActive(m, 'de commander un repas');
     const amount = int(input.amount, 'Montant du repas', { min: 1, max: 1e13 });
     const label = text(input.label, 'Restaurant ou plat', { required: true, max: 100 });
@@ -1521,7 +1573,7 @@ export class Club {
   // Only an administrator cancels an outside meal, with a reason: the courier's expense is cancelled, the card
   // part goes back on the card, and the cash share leaves the till on the day of the cancellation.
   cancelOutsideMeal(actor, paymentId, input) {
-    if (actor.role !== 'admin') throw forbidden("L'annulation d'un repas extérieur est réservée à un administrateur.");
+    if (!isBoss(actor)) throw forbidden("L'annulation d'un repas extérieur est réservée à un administrateur.");
     const p = this.get('SELECT * FROM payments WHERE id = ?', toId(paymentId, 'Encaissement'));
     if (!p) throw notFound('Encaissement');
     if (p.kind !== 'repas') throw conflict('PAS_UN_REPAS', "Cet encaissement n'est pas un repas commandé à l'extérieur.");
@@ -1557,7 +1609,7 @@ export class Club {
   // Only an administrator cancels a recharge, with a reason: the money leaves the till on the day of the
   // cancellation, and the card is debited, which is refused once the money has been spent.
   cancelRecharge(actor, paymentId, input) {
-    if (actor.role !== 'admin') throw forbidden("L'annulation d'un approvisionnement est réservée à un administrateur.");
+    if (!isBoss(actor)) throw forbidden("L'annulation d'un approvisionnement est réservée à un administrateur.");
     const p = this.get('SELECT * FROM payments WHERE id = ?', toId(paymentId, 'Encaissement'));
     if (!p) throw notFound('Encaissement');
     if (p.kind !== 'recharge') throw conflict('PAS_UNE_RECHARGE', "Cet encaissement n'est pas un approvisionnement de carte.");
@@ -1599,6 +1651,7 @@ export class Club {
   verifyMemberRoomAccess(memberId, bizDay, { requireRemainingCredit = true, allowWithoutSubscription = false } = {}) {
     const member = this.memberRow(memberId);
     const who = `${member.first_name} ${member.last_name}`;
+    this.assertIsMember(member, 'toute réservation ou entrée en salle');
     this.assertMemberActive(member, 'toute réservation ou entrée en salle');
     if (this.hasDeactivatedCardsOnly(member.id)) {
       throw conflict('CARTE_DESACTIVEE', `La carte de membre de ${who} est désactivée : émettez une carte active avant l'accès en salle.`);
@@ -2285,7 +2338,7 @@ export class Club {
   // the card, what was paid otherwise is refunded through `input.method`, what was left to collect is cancelled),
   // then the overrun up to that time, if any, is recorded again as at the exit. Only the last exit's overrun, once.
   correctDeparture(actor, id, input = {}) {
-    if (actor.role !== 'admin') throw forbidden("Seul un administrateur peut corriger l'heure de départ.");
+    if (!isBoss(actor)) throw forbidden("Seul un administrateur peut corriger l'heure de départ.");
     const r = this.reservationRow(id);
     if (r.status !== 'terminee') throw conflict('STATUT', "Seule une séance terminée peut voir son heure de départ corrigée.");
     const overrun = this.get(
@@ -2553,11 +2606,11 @@ export class Club {
   insertCharge(actor, c) {
     return this.insert(
       `INSERT INTO charges (account, kind, member_id, reservation_id, subscription_id, product_id, label, quantity,
-         unit_price, amount, status, tariff_validated, created_at, created_by, deposit)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'due', ?, ?, ?, ?)`,
+         unit_price, amount, status, tariff_validated, created_at, created_by, deposit, shop_sale_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'due', ?, ?, ?, ?, ?)`,
       c.account, c.kind, c.member_id, c.reservation_id ?? null, c.subscription_id ?? null, c.product_id ?? null,
       c.label, c.quantity, c.unit_price, c.quantity * c.unit_price, c.tariff_validated ?? 1, this.nowIso(), actor.id,
-      c.deposit ? 1 : 0,
+      c.deposit ? 1 : 0, c.shop_sale_id ?? null,
     );
   }
 
@@ -2657,15 +2710,21 @@ export class Club {
     if (c.product_id) this.moveStock(actor, c.product_id, c.quantity, 'annulation_vente', { chargeId: c.id, reason });
   }
 
+  // A Boutique sale is cancelled as a whole (cancelShopSale), never line by line.
+  assertNotShopLine(c) {
+    if (c.shop_sale_id) throw conflict('VENTE_BOUTIQUE', 'Une vente Boutique s’annule en entier, depuis Caisse › Boutique.');
+  }
+
   cancelCharge(actor, chargeId, input) {
     const c = this.get('SELECT * FROM charges WHERE id = ?', toId(chargeId, 'Ligne'));
     if (!c) throw notFound('Ligne');
+    this.assertNotShopLine(c);
     if (c.status !== 'due') {
       throw conflict('STATUT_LIGNE', c.status === 'payee'
         ? 'Cette ligne est déjà encaissée : un remboursement est nécessaire.'
         : `Cette ligne est déjà ${CHARGE_STATUS[c.status].toLowerCase()}.`);
     }
-    if (c.kind !== 'produit' && actor.role !== 'admin') {
+    if (c.kind !== 'produit' && !isBoss(actor)) {
       throw forbidden("Seul un administrateur peut annuler une ligne de temps supplémentaire ou d'abonnement.");
     }
     const reason = text(input.reason, "Motif d'annulation", { required: true, min: 3, max: 300 });
@@ -2683,17 +2742,24 @@ export class Club {
     );
     const byAccount = Object.fromEntries(ACCOUNTS.map((k) => [k, 0]));
     for (const a of allocations) byAccount[a.account] += a.amount;
+    const shop = p.shop_sale_id
+      ? this.get('SELECT account, buyer_kind, cancelled_at, cancel_reason FROM shop_sales WHERE id = ?', p.shop_sale_id) : null;
+    const walkIn = shop?.buyer_kind === 'journalier';
+    const buyer = p.first_name ? buyerShown(shop?.buyer_kind, p) : null;
     return {
-      id: p.id, member_id: p.member_id, member_name: p.first_name ? `${p.first_name} ${p.last_name}` : undefined,
-      member_no: p.member_no, reservation_id: p.reservation_id, amount: p.amount, method: p.method, reference: p.reference,
+      id: p.id, member_id: walkIn ? null : p.member_id, member_name: buyer ? buyer.name : undefined,
+      member_no: walkIn ? null : p.member_no, shop_account: shop?.account ?? null, buyer_kind: shop?.buyer_kind ?? null,
+      reservation_id: p.reservation_id, amount: p.amount, method: p.method, reference: p.reference,
       paid_at: p.paid_at, ticket_code: p.ticket_code ?? null, created_by_name: p.created_by_name ?? null, allocations, by_account: byAccount,
       kind: p.kind ?? 'encaissement', card_amount: p.card_amount ?? 0, label: p.label ?? null,
-      cancelled_at: p.cancelled_at ?? null, cancel_reason: p.cancel_reason ?? null,
+      cancelled_at: p.cancelled_at ?? null, cancel_reason: p.cancel_reason ?? null, shop_sale_id: p.shop_sale_id ?? null,
+      shop_cancelled_at: shop?.cancelled_at ?? null, shop_cancel_reason: shop?.cancel_reason ?? null,
     };
   }
 
-  // V1: each selected line is collected in full; the payment is split by line, hence by sub-account.
-  recordPayment(actor, input) {
+  // V1: each selected line is collected in full; the payment is split by line, hence by sub-account. `shopSaleId`
+  // ties the payment to a Boutique sale: only createShopSale passes it, it is never read from the request.
+  recordPayment(actor, input, { shopSaleId = null } = {}) {
     const s = this.settings();
     if (!Array.isArray(input.charge_ids) || !input.charge_ids.length) throw invalid('Sélectionnez au moins une ligne à encaisser.');
     const ids = [...new Set(input.charge_ids.map((v) => toId(v, 'Ligne')))];
@@ -2726,9 +2792,10 @@ export class Club {
     const reservationIds = new Set(charges.map((c) => c.reservation_id));
     const reservationId = reservationIds.size === 1 ? [...reservationIds][0] : null;
     const paymentId = this.insert(
-      `INSERT INTO payments (member_id, reservation_id, amount, method, reference, paid_at, created_by, ticket_code, card_amount)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO payments (member_id, reservation_id, amount, method, reference, paid_at, created_by, ticket_code, card_amount, shop_sale_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       memberId, reservationId, total, method, reference, this.nowIso(), actor.id, this.freshTicketCode(), cardAmount,
+      shopSaleId,
     );
     for (const c of charges) {
       this.run('INSERT INTO payment_allocations (payment_id, charge_id, account, amount) VALUES (?, ?, ?, ?)', paymentId, c.id, c.account, c.amount);
@@ -2754,9 +2821,10 @@ export class Club {
 
   refundCharge(actor, chargeId, input) {
     const s = this.settings();
-    if (s.refunds_admin_only && actor.role !== 'admin') throw forbidden('Les remboursements sont réservés à un administrateur.');
+    if (s.refunds_admin_only && !isBoss(actor)) throw forbidden('Les remboursements sont réservés à un administrateur.');
     const c = this.get('SELECT * FROM charges WHERE id = ?', toId(chargeId, 'Ligne'));
     if (!c) throw notFound('Ligne');
+    this.assertNotShopLine(c);
     if (c.status !== 'payee') throw conflict('STATUT_LIGNE', 'Seule une ligne encaissée peut être remboursée.');
     const reason = text(input.reason, 'Motif du remboursement', { required: true, min: 3, max: 300 });
     const { payment: p, cardPart } = this.cardPartOf(c);
@@ -2804,7 +2872,7 @@ export class Club {
     const n = Number(id);
     if (!Number.isSafeInteger(n) || n < 1) return null;
     return this.get(
-      `SELECT p.*, m.first_name, m.last_name, m.member_no, m.phone AS member_phone, u.name AS created_by_name FROM payments p
+      `SELECT p.*, m.first_name, m.last_name, m.member_no, m.phone AS member_phone, m.kind AS member_kind, u.name AS created_by_name FROM payments p
        JOIN members m ON m.id = p.member_id LEFT JOIN users u ON u.id = p.created_by WHERE p.id = ?`, n,
     ) ?? null;
   }
@@ -2813,6 +2881,7 @@ export class Club {
   // payment is refunded, else partial.
   ticketStatus(p) {
     if (p.cancelled_at) return 'annule';
+    if (p.shop_sale_id && this.get('SELECT cancelled_at FROM shop_sales WHERE id = ?', p.shop_sale_id)?.cancelled_at) return 'annule';
     const lines = this.get('SELECT COUNT(*) AS n FROM payment_allocations WHERE payment_id = ?', p.id).n;
     const refunds = this.get('SELECT COUNT(*) AS n FROM refunds WHERE payment_id = ?', p.id).n;
     if (!refunds) return 'valide';
@@ -2840,12 +2909,15 @@ export class Club {
     const refunds = this.all('SELECT amount, created_at FROM refunds WHERE payment_id = ? ORDER BY id', p.id);
     const last = this.get('SELECT COALESCE(MAX(copy_no), 0) AS n FROM ticket_events WHERE payment_id = ?', p.id).n;
     const s = this.settings();
+    const dto = this.paymentDTO(p);
+    const walkIn = dto.buyer_kind === 'journalier';
     const ticket = {
-      ...this.paymentDTO(p),
+      ...dto,
       number: formatTicketNumber(p.id),
-      member_phone: p.member_phone ?? '',
-      member_first_name: p.first_name,
-      member_last_name: p.last_name,
+      client_line: walkIn ? dto.member_name : `${p.first_name} ${p.last_name} (${p.member_no})`,
+      member_phone: walkIn ? '' : (p.member_phone ?? ''),
+      member_first_name: walkIn ? 'Client' : p.first_name,
+      member_last_name: walkIn ? 'journalier' : p.last_name,
       refunded_amount: refunds.reduce((sum, r) => sum + r.amount, 0),
       refunds,
       status: this.ticketStatus(p),
@@ -2858,7 +2930,7 @@ export class Club {
       club_name: s.club_name,
       demo: this.demo,
     };
-    if (actor.role !== 'admin') return { ticket };
+    if (!isBoss(actor)) return { ticket };
     const events = this.all(
       `SELECT e.at, e.kind, e.copy_no, e.phone, u.name AS user_name FROM ticket_events e
        LEFT JOIN users u ON u.id = e.user_id WHERE e.payment_id = ? ORDER BY e.copy_no`, p.id,
@@ -2873,6 +2945,9 @@ export class Club {
     if (kind !== 'impression' && kind !== 'whatsapp') throw invalid('Sortie de ticket inconnue.');
     const p = this.ticketPaymentRow(id);
     if (!p) throw notFound('Paiement');
+    if (kind === 'whatsapp' && p.member_kind === 'journalier') {
+      throw conflict('CLIENT_JOURNALIER', 'Un client journalier n’a pas de numéro : imprimez le ticket.');
+    }
     const copyNo = this.get('SELECT COALESCE(MAX(copy_no), 0) AS n FROM ticket_events WHERE payment_id = ?', p.id).n + 1;
     const at = this.nowIso();
     const phone = kind === 'whatsapp' ? (p.member_phone || null) : null;
@@ -2918,7 +2993,7 @@ export class Club {
       lines,
       total: p.amount,
       method: p.method,
-      initials: memberInitials(p.first_name, p.last_name),
+      initials: p.member_kind === 'journalier' ? '' : memberInitials(p.first_name, p.last_name),
       status: this.ticketStatus(p),
       refunded_amount: refunded,
     };
@@ -2940,7 +3015,7 @@ export class Club {
     }
     const rows = this.all(
       `SELECT e.at, e.kind, e.copy_no, e.payment_id, p.amount, e.user_id, u.name AS user_name,
-              m.first_name, m.last_name,
+              m.first_name, m.last_name, m.kind AS member_kind,
               (SELECT COUNT(*) FROM ticket_events x WHERE x.payment_id = e.payment_id) AS copies_total
        FROM ticket_events e JOIN payments p ON p.id = e.payment_id JOIN members m ON m.id = p.member_id
        LEFT JOIN users u ON u.id = e.user_id
@@ -2949,9 +3024,11 @@ export class Club {
     return {
       events: rows.map((r) => ({
         at: r.at, kind: r.kind, copy_no: r.copy_no, payment_id: r.payment_id, number: formatTicketNumber(r.payment_id),
-        member_name: `${r.first_name} ${r.last_name}`, amount: r.amount, user_id: r.user_id, user_name: r.user_name ?? null,
+        member_name: buyerShown(r.member_kind, r).name, amount: r.amount, user_id: r.user_id, user_name: r.user_name ?? null,
         copies_total: r.copies_total,
       })),
+      // The staff, for the « Employé » filter: an associé reads this history but not the user accounts.
+      employees: this.all('SELECT id, name FROM users ORDER BY name, id'),
     };
   }
 
@@ -3011,8 +3088,15 @@ export class Club {
     return { category, name, reference, description, price, threshold, active };
   }
 
+  // Product files, photos and stock belong to the rayon of an associé; the administrator owns both, and the
+  // manager keeps his own rights (checked where they apply). Sessions have no such limit.
+  assertRayon(actor, category) {
+    if (isBoss(actor) && !ownsAccount(actor, accountOfCategory(category))) throw forbidden('Vous ne gérez que les produits de votre rayon.');
+  }
+
   createProduct(actor, input, { demo = false } = {}) {
     const f = this.productFields(input);
+    this.assertRayon(actor, f.category);
     if (this.get('SELECT 1 AS x FROM products WHERE reference = ?', f.reference)) throw conflict('REFERENCE_PRISE', 'Cette référence existe déjà.');
     const initial = input.initial_stock === undefined || input.initial_stock === '' ? 0 : int(input.initial_stock, 'Stock initial', { min: 0, max: 100000 });
     const id = this.insert(
@@ -3029,6 +3113,8 @@ export class Club {
     const p = this.get('SELECT * FROM products WHERE id = ?', toId(productId, 'Produit'));
     if (!p) throw notFound('Produit');
     const f = this.productFields(input, { ...p, low_stock_threshold: p.low_stock_threshold });
+    this.assertRayon(actor, p.category);
+    this.assertRayon(actor, f.category);
     if (f.reference.toLowerCase() !== p.reference.toLowerCase()
       && this.get('SELECT 1 AS x FROM products WHERE reference = ? AND id <> ?', f.reference, p.id)) {
       throw conflict('REFERENCE_PRISE', 'Cette référence existe déjà.');
@@ -3048,6 +3134,7 @@ export class Club {
   stockOperation(actor, productId, input) {
     const p = this.get('SELECT * FROM products WHERE id = ?', toId(productId, 'Produit'));
     if (!p) throw notFound('Produit');
+    this.assertRayon(actor, p.category);
     if (input.kind === 'entree') {
       const qty = int(input.quantity, 'Quantité reçue', { min: 1, max: 100000 });
       const reason = text(input.reason, 'Remarque', { max: 200 });
@@ -3062,7 +3149,7 @@ export class Club {
       const reason = text(input.reason, "Motif de l'ajustement", { required: true, min: 3, max: 200 });
       const delta = target - p.stock_qty;
       if (delta === 0) throw invalid('La quantité constatée est identique au stock enregistré : aucun ajustement.');
-      if (delta < 0 && actor.role !== 'admin') {
+      if (delta < 0 && !isBoss(actor)) {
         throw forbidden('Le gérant peut seulement ajouter des quantités. Pour en retirer, adressez-vous à un administrateur.');
       }
       this.moveStock(actor, p.id, delta, 'ajustement', { reason });
@@ -3112,7 +3199,9 @@ export class Club {
 
   setProductPhoto(actor, productId, input) {
     const id = toId(productId, 'Produit');
-    if (!this.get('SELECT 1 AS x FROM products WHERE id = ?', id)) throw notFound('Produit');
+    const p = this.get('SELECT category FROM products WHERE id = ?', id);
+    if (!p) throw notFound('Produit');
+    this.assertRayon(actor, p.category);
     const photo = decodePhoto(input);
     const replaced = this.storePhoto(id, photo, actor.id);
     this.audit(actor, 'produit.photo', 'product', id, { mime: photo.mime, bytes: photo.bytes.length, replaced });
@@ -3122,7 +3211,9 @@ export class Club {
   // Removing a photo that is not there changes nothing, and is not written to the journal.
   removeProductPhoto(actor, productId) {
     const id = toId(productId, 'Produit');
-    if (!this.get('SELECT 1 AS x FROM products WHERE id = ?', id)) throw notFound('Produit');
+    const p = this.get('SELECT category FROM products WHERE id = ?', id);
+    if (!p) throw notFound('Produit');
+    this.assertRayon(actor, p.category);
     if (this.run('DELETE FROM product_photos WHERE product_id = ?', id).changes) this.audit(actor, 'produit.photo_retirer', 'product', id);
     return this.productById(id);
   }
@@ -3265,7 +3356,7 @@ export class Club {
     ).map((x) => ({ ...x, member_name: `${x.first_name} ${x.last_name}`, days_since: daysBetween(x.end_date, today) }));
     const renewalAlerts = this.all(
       `SELECT DISTINCT m.* FROM members m JOIN subscriptions s ON s.member_id = m.id
-       WHERE m.active = 1 AND s.status = 'active' AND s.end_date >= ? AND s.end_date <= ? ORDER BY m.last_name, m.first_name`,
+       WHERE m.active = 1 AND m.kind = 'membre' AND s.status = 'active' AND s.end_date >= ? AND s.end_date <= ? ORDER BY m.last_name, m.first_name`,
       addDays(today, -RENEWAL_GRACE_DAYS), addDays(today, RENEWAL_WARNING_DAYS),
     ).flatMap((m) => {
       const status = this.renewalStatus(m.id, today);
@@ -3285,7 +3376,7 @@ export class Club {
       cash_today: this.financeSummary(today, today),
       lounge: this.loungeOverview(),
     };
-    if (actor.role === 'admin') {
+    if (isBoss(actor)) {
       result.revenue = {
         week: this.financeSummary(addDays(today, -6), today),
         month: this.financeSummary(`${today.slice(0, 8)}01`, today),
@@ -3296,32 +3387,59 @@ export class Club {
 
   financeSummary(from, to) {
     const [a, b] = this.periodBounds(from, to);
-    const empty = (key, label) => ({ account: key, label, billed: 0, collected: 0, refunded: 0, net: 0, outstanding: 0, cancelled: 0, lines: 0 });
+    const FIELDS = ['billed', 'collected', 'refunded', 'net', 'outstanding', 'cancelled', 'lines'];
+    const zero = () => ({ billed: 0, collected: 0, refunded: 0, net: 0, outstanding: 0, cancelled: 0, lines: 0 });
+    // Every figure is also split by origin: money of the sessions (seances) and of Boutique sales (boutique), so
+    // that seances + boutique is always the figure itself.
+    const empty = (key, label) => ({ account: key, label, ...zero(), seances: zero(), boutique: zero() });
     const acc = Object.fromEntries(ACCOUNTS.map((k) => [k, empty(k, ACCOUNT_LABELS[k])]));
+    const part = (x, shop) => (shop ? x.boutique : x.seances);
     for (const r of this.all(
-      'SELECT account, status, SUM(amount) AS total, COUNT(*) AS n FROM charges WHERE created_at >= ? AND created_at < ? GROUP BY account, status', a, b,
+      `SELECT account, status, shop_sale_id IS NOT NULL AS shop, SUM(amount) AS total, COUNT(*) AS n FROM charges
+       WHERE created_at >= ? AND created_at < ? GROUP BY account, status, shop`, a, b,
     )) {
       const x = acc[r.account];
-      if (r.status === 'annulee') x.cancelled += r.total;
-      else {
+      const y = part(x, r.shop);
+      if (r.status === 'annulee') {
+        x.cancelled += r.total;
+        y.cancelled += r.total;
+      } else {
         x.billed += r.total;
         x.lines += r.n;
+        y.billed += r.total;
+        y.lines += r.n;
       }
-      if (r.status === 'due') x.outstanding += r.total;
+      if (r.status === 'due') {
+        x.outstanding += r.total;
+        y.outstanding += r.total;
+      }
     }
     for (const r of this.all(
-      `SELECT pa.account, SUM(pa.amount) AS total FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
-       WHERE p.paid_at >= ? AND p.paid_at < ? GROUP BY pa.account`, a, b,
-    )) acc[r.account].collected += r.total;
-    for (const r of this.all('SELECT account, SUM(amount) AS total FROM refunds WHERE created_at >= ? AND created_at < ? GROUP BY account', a, b)) {
+      `SELECT pa.account, p.shop_sale_id IS NOT NULL AS shop, SUM(pa.amount) AS total FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
+       WHERE p.paid_at >= ? AND p.paid_at < ? GROUP BY pa.account, shop`, a, b,
+    )) {
+      acc[r.account].collected += r.total;
+      part(acc[r.account], r.shop).collected += r.total;
+    }
+    for (const r of this.all(
+      `SELECT rf.account, c.shop_sale_id IS NOT NULL AS shop, SUM(rf.amount) AS total FROM refunds rf JOIN charges c ON c.id = rf.charge_id
+       WHERE rf.created_at >= ? AND rf.created_at < ? GROUP BY rf.account, shop`, a, b,
+    )) {
       acc[r.account].refunded += r.total;
+      part(acc[r.account], r.shop).refunded += r.total;
     }
     const accounts = ACCOUNTS.map((k) => {
-      acc[k].net = acc[k].collected - acc[k].refunded;
+      for (const y of [acc[k], acc[k].seances, acc[k].boutique]) y.net = y.collected - y.refunded;
       return acc[k];
     });
     const total = empty('total', 'Total');
-    for (const x of accounts) for (const f of ['billed', 'collected', 'refunded', 'net', 'outstanding', 'cancelled', 'lines']) total[f] += x[f];
+    for (const x of accounts) {
+      for (const f of FIELDS) {
+        total[f] += x[f];
+        total.seances[f] += x.seances[f];
+        total.boutique[f] += x.boutique[f];
+      }
+    }
     // The part of a payment taken from the card shows under CARD_METHOD, the rest under its own method.
     const methods = this.all(
       `SELECT method, SUM(total) AS total, SUM(n) AS n FROM (
@@ -3365,17 +3483,20 @@ export class Club {
        WHERE p.paid_at >= ? AND p.paid_at < ? ORDER BY p.paid_at DESC`, a, b,
     ).map((p) => this.paymentDTO(p));
     const refunds = this.all(
-      `SELECT rf.*, c.label, c.member_id, c.reservation_id, m.first_name, m.last_name, u.name AS created_by_name FROM refunds rf
-       JOIN charges c ON c.id = rf.charge_id JOIN members m ON m.id = c.member_id LEFT JOIN users u ON u.id = rf.created_by
+      `SELECT rf.*, c.label, c.member_id, c.shop_sale_id, c.reservation_id, m.first_name, m.last_name,
+         COALESCE(s.buyer_kind, m.kind) AS buyer_kind, u.name AS created_by_name FROM refunds rf
+       JOIN charges c ON c.id = rf.charge_id JOIN members m ON m.id = c.member_id LEFT JOIN shop_sales s ON s.id = c.shop_sale_id
+       LEFT JOIN users u ON u.id = rf.created_by
        WHERE rf.created_at >= ? AND rf.created_at < ? ORDER BY rf.created_at DESC`, a, b,
-    ).map((r) => ({ ...r, member_name: `${r.first_name} ${r.last_name}`, account_label: ACCOUNT_LABELS[r.account] }));
+    ).map((r) => ({ ...r, member_name: buyerShown(r.buyer_kind, r).name, account_label: ACCOUNT_LABELS[r.account] }));
     return { from, to, payments, refunds };
   }
 
   auditLog(query = {}) {
     const limit = Math.min(1000, Math.max(1, Number(query.limit) || 200));
     return this.all(
-      `SELECT a.*, u.name AS user_name FROM audit_log a LEFT JOIN users u ON u.id = a.user_id ORDER BY a.id DESC LIMIT ?`, limit,
+      `SELECT a.*, u.name AS user_name, m.kind AS member_kind FROM audit_log a LEFT JOIN users u ON u.id = a.user_id
+       LEFT JOIN members m ON a.entity = 'member' AND m.id = a.entity_id ORDER BY a.id DESC LIMIT ?`, limit,
     ).map((a) => ({ ...a, details: a.details ? JSON.parse(a.details) : null }));
   }
 
@@ -3404,8 +3525,8 @@ export class Club {
           `Prix unitaire ${cur}`, `Montant ${cur}`, 'Statut', 'Tarif validé', 'Saisi par'];
         rows = this.all(`${CHARGE_SELECT} WHERE c.created_at >= ? AND c.created_at < ? ${account ? 'AND c.account = ?' : ''} ORDER BY c.created_at`,
           ...(account ? [a, b, account] : [a, b]))
-          .map((c) => [when(c.created_at), c.id, ACCOUNT_LABELS[c.account], CHARGE_KIND[c.kind], c.member_no, `${c.first_name} ${c.last_name}`,
-            c.reservation_id ?? '', c.label, c.quantity, money(c.unit_price), money(c.amount), CHARGE_STATUS[c.status],
+          .map((c) => [when(c.created_at), c.id, ACCOUNT_LABELS[c.account], CHARGE_KIND[c.kind], buyerShown(c.buyer_kind, c).no ?? '',
+            buyerShown(c.buyer_kind, c).name, c.reservation_id ?? '', c.label, c.quantity, money(c.unit_price), money(c.amount), CHARGE_STATUS[c.status],
             c.tariff_validated ? 'oui' : 'non', c.created_by_name ?? '']);
         break;
       }
@@ -3413,13 +3534,14 @@ export class Club {
         header = ['Date', 'N° encaissement', 'N° membre', 'Membre', 'Moyen', 'Référence', 'Sous-compte', 'N° ligne', 'Libellé',
           `Montant ${cur}`, 'Saisi par'];
         rows = this.all(
-          `SELECT p.id, p.paid_at, p.method, p.reference, pa.account, pa.amount, pa.charge_id, c.label, m.member_no, m.first_name, m.last_name,
+          `SELECT p.id, p.paid_at, p.method, p.reference, pa.account, pa.amount, pa.charge_id, c.label, m.member_no, m.first_name, m.last_name, m.kind AS buyer_kind,
              u.name AS created_by_name
            FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id JOIN charges c ON c.id = pa.charge_id
            JOIN members m ON m.id = p.member_id LEFT JOIN users u ON u.id = p.created_by
            WHERE p.paid_at >= ? AND p.paid_at < ? ${account ? 'AND pa.account = ?' : ''} ORDER BY p.paid_at, pa.id`,
           ...(account ? [a, b, account] : [a, b]),
-        ).map((r) => [when(r.paid_at), r.id, r.member_no, `${r.first_name} ${r.last_name}`, r.method, r.reference ?? '',
+        ).map((r) => [when(r.paid_at), r.id, buyerShown(r.buyer_kind, r).no ?? '',
+          buyerShown(r.buyer_kind, r).name, r.method, r.reference ?? '',
           ACCOUNT_LABELS[r.account], r.charge_id, r.label, money(r.amount), r.created_by_name ?? '']);
         break;
       }
@@ -3528,7 +3650,7 @@ export class Club {
   // picture: this is handed over with every demo request.
   demoConfig() {
     return {
-      users: this.all('SELECT id, name, role, active FROM users ORDER BY id'),
+      users: this.all('SELECT id, name, role, rayon, active FROM users ORDER BY id'),
       settings: this.all(
         "SELECT key, value, updated_at, updated_by FROM settings WHERE key NOT IN ('demo_mode', 'opening_balances') ORDER BY key",
       ),
@@ -3552,12 +3674,12 @@ export class Club {
     this.assertDemo();
     for (const u of users) {
       this.run(
-        `INSERT INTO users (id, login, name, role, password_hash, active, created_at) VALUES (?, ?, ?, ?, '!', ?, ?)
+        `INSERT INTO users (id, login, name, role, rayon, password_hash, active, created_at) VALUES (?, ?, ?, ?, ?, '!', ?, ?)
          ON CONFLICT(id) DO UPDATE SET login = excluded.login, name = excluded.name, role = excluded.role,
-           password_hash = excluded.password_hash, active = excluded.active
+           rayon = excluded.rayon, password_hash = excluded.password_hash, active = excluded.active
          WHERE login IS NOT excluded.login OR name IS NOT excluded.name OR role IS NOT excluded.role
-           OR password_hash IS NOT excluded.password_hash OR active IS NOT excluded.active`,
-        u.id, `u${u.id}`, u.name, u.role, u.active ? 1 : 0, this.nowIso(),
+           OR rayon IS NOT excluded.rayon OR password_hash IS NOT excluded.password_hash OR active IS NOT excluded.active`,
+        u.id, `u${u.id}`, u.name, u.role, u.rayon ?? null, u.active ? 1 : 0, this.nowIso(),
       );
     }
   }
@@ -3647,3 +3769,4 @@ export class Club {
 
 Object.assign(Club.prototype, ledgerMethods);
 Object.assign(Club.prototype, loungeMethods);
+Object.assign(Club.prototype, shopMethods);
