@@ -22,6 +22,7 @@ import {
   formatFirstName, formatLastName, CASH_METHOD, DEFAULT_CLOSE,
 } from '../shared/rules.js';
 import { waDigits } from '../shared/whatsapp.js';
+import { ROLES, RAYONS } from '../shared/roles.js';
 
 // A session has one member, its holder; whoever comes with the holder is a guest, not a member.
 const oneMemberOnly = () => invalid(
@@ -48,7 +49,7 @@ const SESSION_DAYS = 14;
 const WIPE_ORDER = [
   'humidor_readings', 'humidors',
   'idempotency_keys', 'wallet_movements', 'payment_allocations', 'refunds', 'stock_movements', 'credit_movements', 'charges',
-  'ticket_events', 'payments',
+  'ticket_events', 'payments', 'shop_sales',
   'reservation_attendees', 'reservations', 'cards', 'subscriptions', 'members', 'product_photos', 'products',
   'ledger_entries', 'closed_periods', 'day_closings', 'audit_log',
 ];
@@ -523,7 +524,7 @@ export class Club {
 
   userDTO(u) {
     return {
-      id: u.id, login: u.login, name: u.name, role: u.role, active: !!u.active,
+      id: u.id, login: u.login, name: u.name, role: u.role, rayon: u.rayon ?? null, active: !!u.active,
       last_login_at: u.last_login_at ?? null, created_at: u.created_at,
     };
   }
@@ -539,18 +540,26 @@ export class Club {
   }
 
   // `password_hash` is computed by the API layer (asynchronous WebCrypto) after its strength check.
+  // The rayon of an account: required for an associé, none for anyone else.
+  rayonFor(role, rayon) {
+    if (role !== 'associe') return null;
+    if (!RAYONS.includes(rayon)) throw invalid('Un associé doit avoir un rayon : cigares ou champagne.');
+    return rayon;
+  }
+
   createUser(actor, input) {
     const login = text(input.login, 'Identifiant', { required: true, max: 40 });
     if (!/^[a-zA-Z0-9._-]{3,40}$/.test(login)) throw invalid('Identifiant : 3 à 40 caractères (lettres, chiffres, point, tiret).');
     const name = text(input.name, 'Nom', { required: true, max: 80 });
-    if (!['admin', 'gerant'].includes(input.role)) throw invalid('Rôle invalide.');
+    if (!ROLES.includes(input.role)) throw invalid('Rôle invalide.');
+    const rayon = this.rayonFor(input.role, input.rayon);
     if (typeof input.password_hash !== 'string' || !input.password_hash) throw invalid('Mot de passe manquant.');
     if (this.get('SELECT 1 AS x FROM users WHERE login = ?', login)) throw conflict('IDENTIFIANT_PRIS', 'Cet identifiant est déjà utilisé.');
     const id = this.insert(
-      'INSERT INTO users (login, name, role, password_hash, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?)',
-      login, name, input.role, input.password_hash, this.nowIso(), actor?.id ?? null,
+      'INSERT INTO users (login, name, role, rayon, password_hash, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      login, name, input.role, rayon, input.password_hash, this.nowIso(), actor?.id ?? null,
     );
-    this.audit(actor, 'utilisateur.creer', 'user', id, { login, name, role: input.role });
+    this.audit(actor, 'utilisateur.creer', 'user', id, { login, name, role: input.role, rayon });
     return this.userDTO(this.userRow(id));
   }
 
@@ -558,7 +567,8 @@ export class Club {
     const u = this.userRow(userId);
     const name = input.name !== undefined ? text(input.name, 'Nom', { required: true, max: 80 }) : u.name;
     const role = input.role !== undefined ? input.role : u.role;
-    if (!['admin', 'gerant'].includes(role)) throw invalid('Rôle invalide.');
+    if (!ROLES.includes(role)) throw invalid('Rôle invalide.');
+    const rayon = this.rayonFor(role, input.rayon !== undefined ? input.rayon : u.rayon);
     const active = input.active !== undefined ? flag(input.active) : !!u.active;
     if (u.id === actor.id && (role !== 'admin' || !active)) {
       throw invalid("Vous ne pouvez ni retirer vos propres droits d'administrateur ni désactiver votre compte.");
@@ -567,10 +577,10 @@ export class Club {
       const { n } = this.get("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND active = 1");
       if (n <= 1) throw conflict('DERNIER_ADMIN', 'Il doit rester au moins un administrateur actif.');
     }
-    this.run('UPDATE users SET name = ?, role = ?, active = ? WHERE id = ?', name, role, active ? 1 : 0, u.id);
-    if (!active || role !== u.role) this.run('DELETE FROM sessions WHERE user_id = ?', u.id);
+    this.run('UPDATE users SET name = ?, role = ?, rayon = ?, active = ? WHERE id = ?', name, role, rayon, active ? 1 : 0, u.id);
+    if (!active || role !== u.role || rayon !== (u.rayon ?? null)) this.run('DELETE FROM sessions WHERE user_id = ?', u.id);
     this.audit(actor, 'utilisateur.modifier', 'user', u.id, {
-      avant: { name: u.name, role: u.role, active: !!u.active }, apres: { name, role, active },
+      avant: { name: u.name, role: u.role, rayon: u.rayon ?? null, active: !!u.active }, apres: { name, role, rayon, active },
     });
     return this.userDTO(this.userRow(u.id));
   }
@@ -3528,7 +3538,7 @@ export class Club {
   // picture: this is handed over with every demo request.
   demoConfig() {
     return {
-      users: this.all('SELECT id, name, role, active FROM users ORDER BY id'),
+      users: this.all('SELECT id, name, role, rayon, active FROM users ORDER BY id'),
       settings: this.all(
         "SELECT key, value, updated_at, updated_by FROM settings WHERE key NOT IN ('demo_mode', 'opening_balances') ORDER BY key",
       ),
@@ -3552,12 +3562,12 @@ export class Club {
     this.assertDemo();
     for (const u of users) {
       this.run(
-        `INSERT INTO users (id, login, name, role, password_hash, active, created_at) VALUES (?, ?, ?, ?, '!', ?, ?)
+        `INSERT INTO users (id, login, name, role, rayon, password_hash, active, created_at) VALUES (?, ?, ?, ?, ?, '!', ?, ?)
          ON CONFLICT(id) DO UPDATE SET login = excluded.login, name = excluded.name, role = excluded.role,
-           password_hash = excluded.password_hash, active = excluded.active
+           rayon = excluded.rayon, password_hash = excluded.password_hash, active = excluded.active
          WHERE login IS NOT excluded.login OR name IS NOT excluded.name OR role IS NOT excluded.role
-           OR password_hash IS NOT excluded.password_hash OR active IS NOT excluded.active`,
-        u.id, `u${u.id}`, u.name, u.role, u.active ? 1 : 0, this.nowIso(),
+           OR rayon IS NOT excluded.rayon OR password_hash IS NOT excluded.password_hash OR active IS NOT excluded.active`,
+        u.id, `u${u.id}`, u.name, u.role, u.rayon ?? null, u.active ? 1 : 0, this.nowIso(),
       );
     }
   }
