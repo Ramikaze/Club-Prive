@@ -81,7 +81,7 @@ const STEPS = [
   },
   {
     route: '/caisse', targets: ['#caisse-recettes', '[data-tour="cash"]'], icon: 'wallet', title: 'Caisse',
-    body: 'Une seule page : les soldes, puis les recettes et les dépenses de la période, chacune détaillée avec son total. Les recettes sont ventilées exactement entre Réservations, Alcool et Cigares.',
+    body: 'Une seule page : l’argent reçu et les dépenses de la période, chacun détaillé avec son total (« Recettes du jour » pour le gérant ; « Argent encaissé » pour l’administrateur et les associés, avec les soldes). L’argent reçu compte aussi les approvisionnements de cartes, les repas extérieurs et les entrées diverses ; la recette par catégorie est dans « Par catégorie » (administrateurs).',
     features: ['Notes ouvertes encaissées ligne par ligne, en totalité', 'Remboursement tracé avec son motif', 'Détails par sous-compte en bas de page'],
   },
   {

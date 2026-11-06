@@ -149,8 +149,8 @@ chaque colonne, la recette du jour ; dessous, la liste de ce qui a été factur�
    « Argent encaissé ». La caisse du gérant ne change pas (« Recettes du jour »).
 4. **Une petite ligne sous les trois colonnes explique l'écart** entre la recette et l'argent encaissé, avec les
    montants, et tombe exactement sur le chiffre de la case « Argent encaissé » : « Argent encaissé = recette du jour
-   … + argent mis sur les cartes … − ventes payées par carte membre … + remboursements rendus sur la carte … + repas
-   extérieurs … + entrées diverses … = … ». Seuls les termes non nuls sont écrits. Elle se lit sur « Toutes » les
+   … + argent mis sur les cartes … − ventes payées par carte membre … + remboursements rendus sur la carte … + argent
+   reçu pour les repas extérieurs (hors carte) … + entrées diverses … = … ». Seuls les termes non nuls sont écrits. Elle se lit sur « Toutes » les
    caisses et comptes ; avec un filtre, une phrase invite à choisir « Toutes ». Chaque terme suit les règles de la
    case (approvisionnement ou repas annulé dans la période : rien ; remboursement rendu sur la carte : aucun argent
    sorti) et est calculé à part, jamais par différence (`recetteToCash`, `src/components/cash/flows.js`, testé dans

@@ -136,7 +136,10 @@ function AdminCash() {
           <div className="cash-columns">
             <div className="cash-columns-inner">
               {/* The money received, as the box of « Soldes »: the recette is « Par catégorie » (owner's rule, 2026-11-07). */}
-              <ReceiptsBlock journal={d.journal} entries={d.entries} method={method} oneDay={oneDay} isAdmin onChange={state.reload} shopSplit title="Argent encaissé" />
+              <ReceiptsBlock
+                journal={d.journal} entries={d.entries} method={method} oneDay={oneDay} isAdmin onChange={state.reload} shopSplit
+                title="Argent encaissé" emptyText="Aucun argent encaissé sur la période."
+              />
               <ExpensesBlock entries={d.entries} method={method} oneDay={oneDay} isAdmin onChange={state.reload} />
             </div>
           </div>

@@ -96,7 +96,7 @@ export function recetteToCash(sum, journal, entries, { to, dayOf }) {
     { key: 'cartes', label: 'argent mis sur les cartes', amount: recharges },
     { key: 'ventes_carte', label: 'ventes payées par carte membre', amount: cardSales },
     { key: 'remboursements_carte', label: 'remboursements rendus sur la carte', amount: cardRefunds },
-    { key: 'repas', label: 'repas extérieurs', amount: meals },
+    { key: 'repas', label: 'argent reçu pour les repas extérieurs (hors carte)', amount: meals },
     { key: 'entrees', label: 'entrées diverses', amount: other },
   ];
   const recette = sum.total.net;

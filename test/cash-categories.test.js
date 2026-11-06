@@ -163,7 +163,7 @@ test('recette du jour → argent encaissé : chaque écart à part, et la ligne 
   assert.equal(p.cash, 130000 * UM + X);
   // The line names each term in plain French, in the owner's order.
   assert.deepEqual(p.bridge.terms.map((x) => x.label), [
-    'argent mis sur les cartes', 'ventes payées par carte membre', 'remboursements rendus sur la carte', 'repas extérieurs', 'entrées diverses',
+    'argent mis sur les cartes', 'ventes payées par carte membre', 'remboursements rendus sur la carte', 'argent reçu pour les repas extérieurs (hors carte)', 'entrées diverses',
   ]);
 });
 

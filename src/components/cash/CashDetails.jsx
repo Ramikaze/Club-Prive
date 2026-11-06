@@ -34,7 +34,7 @@ export function OpenNotes({ groups, onDone, allPeriods = false }) {
   );
 }
 
-const FIGURES = [['billed', 'Facturé (dû)'], ['collected', 'Encaissé'], ['refunded', 'Remboursé'], ['net', 'Net encaissé'],
+const FIGURES = [['billed', 'Facturé (dû)'], ['collected', 'Encaissé'], ['refunded', 'Remboursé'], ['net', 'Recette (net)'],
   ['outstanding', 'Reste à payer']];
 
 // A figure and, under it, its two parts: the sessions' money and the Boutique's (on the Alcool and Cigares cards
