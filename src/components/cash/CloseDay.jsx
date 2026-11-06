@@ -184,7 +184,7 @@ function Wizard({ close, day, data, onDone }) {
               <input maxLength={300} placeholder="Monnaie rendue en trop, erreur de saisie…" value={v.gap_reason ?? ''} onChange={set('gap_reason')} />
               <span className="help">L’écart est enregistré dans « Écart de caisse » : en recette s’il y a plus, en dépense s’il manque.</span></label>
           )}
-          <p className="subtle">Une fois fermée, plus aucun encaissement ni dépense ne peut être daté de ce jour. Seul un administrateur peut rouvrir la journée.</p>
+          <p className="subtle">Une fois fermée, plus aucun encaissement ni dépense ne peut être daté de ce jour. Seule la direction (administrateur ou associé) peut rouvrir la journée.</p>
         </>
       )}
       <FormError error={error} />

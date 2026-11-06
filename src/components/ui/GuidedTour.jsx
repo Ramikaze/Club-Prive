@@ -17,7 +17,7 @@ export const TOUR_DEMO_DONE_KEY = 'club-tour-demo-done';
 const STEPS = [
   {
     route: '/', targets: ['[data-tour="nav"]', '[data-tour="nav-mobile"]'], icon: 'menu', title: 'Le menu du club',
-    body: 'Les rubriques suivent la soirée : Accueil, Salles, Agenda, Membres, Stocks & Cave, Caisse. Administration n’apparaît qu’à l’administrateur.',
+    body: 'Les rubriques suivent la soirée : Accueil, Salles, Agenda, Membres / Clients, Boutique, Stocks & Cave, Caisse. Administration n’apparaît qu’à l’administrateur.',
     features: ['Sur téléphone : rubriques principales en bas de l’écran, les autres dans le menu en haut à droite', 'Les onglets en tête de page passent d’une sous-rubrique à l’autre'],
   },
   {

@@ -17,6 +17,7 @@ import { useLoad } from '../lib/hooks.js';
 import { useStore } from '../store/useStore.js';
 import { paymentLines, ticketVerifyUrl, ticketWhatsAppText } from '../../shared/ticket.js';
 import { mealWhatsAppText, paymentWhatsAppText, rechargeWhatsAppText } from '../../shared/wallet.js';
+import { SHOP } from '../../shared/roles.js';
 import { waDigits } from '../../shared/whatsapp.js';
 import { ARMED, setRollLength, useRollPage } from '../lib/rollPrint.js';
 
@@ -29,7 +30,7 @@ const MESSAGE_TITLE = { recharge: 'Reçu d’approvisionnement par WhatsApp', re
 const MESSAGE_BUTTON = { recharge: 'Envoyer le reçu par WhatsApp', repas: 'Envoyer le message du repas par WhatsApp', encaissement: 'Envoyer par WhatsApp' };
 // What a receipt's lines were for, in the member's words.
 const FOR_LABEL = { reservations: 'salle', alcool: 'alcool', cigares: 'cigares' };
-const paidFor = (ticket) => Object.entries(ticket.by_account ?? {}).filter(([, v]) => v > 0).map(([k]) => FOR_LABEL[k] ?? k).join(', ');
+const paidFor = (ticket) => ticket.shop_sale_id ? (SHOP[ticket.shop_account]?.purpose ?? 'boutique') : Object.entries(ticket.by_account ?? {}).filter(([, v]) => v > 0).map(([k]) => FOR_LABEL[k] ?? k).join(', ');
 
 // The text sent on WhatsApp for one copy: the same content as the sheet. The demo has no verification link.
 function whatsAppText(ticket, copyNo) {
@@ -53,6 +54,7 @@ function whatsAppText(ticket, copyNo) {
     paidAt: ticket.paid_at,
     memberName: ticket.member_name,
     memberNo: ticket.member_no,
+    clientLine: ticket.client_line,
     lines: paymentLines({ kind: ticket.kind, label: ticket.label, amount: ticket.amount, allocations: ticket.allocations }),
     total: ticket.amount,
     method: ticket.method,
@@ -130,6 +132,8 @@ function TicketPage({ data, reload }) {
     };
   });
 
+  // A day client has no phone and no file: no WhatsApp, no link to a member's page (the server refuses it too).
+  const dayClient = ticket.buyer_kind === 'journalier';
   const digits = waDigits(ticket.member_phone);
 
   // Records the way out, runs it, and keeps one at a time (a double click must not use up two copies).
@@ -198,14 +202,16 @@ function TicketPage({ data, reload }) {
             <>
               <button type="button" className="btn btn-primary" onClick={print} disabled={busy !== null} aria-busy={busy === 'impression'}>
                 <Icon name="printer" /> Imprimer</button>
-              <button type="button" className="btn" onClick={sendWhatsApp} disabled={busy !== null} aria-busy={busy === 'whatsapp'}>
-                <Icon name="message" /> {isMemberMessage(ticket) ? MESSAGE_BUTTON[ticket.kind] : 'Envoyer par WhatsApp'}</button>
+              {!dayClient && (
+                <button type="button" className="btn" onClick={sendWhatsApp} disabled={busy !== null} aria-busy={busy === 'whatsapp'}>
+                  <Icon name="message" /> {isMemberMessage(ticket) ? MESSAGE_BUTTON[ticket.kind] : 'Envoyer par WhatsApp'}</button>
+              )}
               <Link className="btn" to="/caisse"><Icon name="left" /> Retour à la caisse</Link>
-              <Link className="btn" to={`/membres/${ticket.member_id}`}><Icon name="users" /> Fiche du membre</Link>
+              {!dayClient && <Link className="btn" to={`/membres/${ticket.member_id}`}><Icon name="users" /> Fiche du membre</Link>}
             </>
           )}
         />
-        {!ticket.demo && !digits && (
+        {!ticket.demo && !dayClient && !digits && (
           <Notice kind="warn">
             Numéro WhatsApp du membre inutilisable : corrigez-le sur sa <Link to={`/membres/${ticket.member_id}`}>fiche</Link>.
           </Notice>

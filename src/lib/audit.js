@@ -1,4 +1,5 @@
 // Human-readable history lines for the audit log (reservation history, settings > journal).
+import { RAYON_LABEL } from '../../shared/roles.js';
 import { money, fmtDuration, dayLabel, ACCOUNT_LABEL } from './format.js';
 
 export const ACTION_LABELS = {
@@ -19,6 +20,10 @@ export const ACTION_LABELS = {
   'membre.supprimer': 'Membre supprimé',
   'membre.desactiver': 'Membre désactivé',
   'membre.reactiver': 'Membre réactivé',
+  'client.creer': 'Client régulier créé',
+  'client.passer_membre': 'Client régulier passé en membre',
+  'boutique.vente': 'Vente Boutique',
+  'boutique.vente.annuler': 'Vente Boutique annulée',
   'salle.creer': 'Salle créée',
   'salle.modifier': 'Salle modifiée',
   'salle.supprimer': 'Salle supprimée',
@@ -54,6 +59,8 @@ export const ACTION_LABELS = {
   'donnees.effacer': 'Données effacées',
   'demo.remettre_a_neuf': 'Démo remise à neuf',
 };
+
+const BUYER_LABEL = { journalier: 'client journalier', client: 'client régulier', membre: 'membre' };
 
 const ENTRY_KIND = { depense: 'Dépense', recette: 'Entrée diverse', transfert: 'Transfert' };
 
@@ -93,6 +100,14 @@ export function auditSummary(a) {
       return `${d.motif ?? ''} ; ${fmtDuration(d.minutes_liberees ?? 0)} libérées${d.acompte_conserve ? ` ; acompte de ${money(d.acompte_conserve)} conservé` : ''}`;
     case 'reservation.consommation.ajouter':
       return `${d.produit} × ${d.quantite} (${money(d.montant)}, ${ACCOUNT_LABEL[d.sous_compte] ?? ''})`;
+    case 'client.creer':
+      return `${d.nom ?? ''} (${d.member_no ?? ''})`;
+    case 'client.passer_membre':
+      return `${d.nom ?? ''} : ${d.ancien_numero ?? ''} → ${d.nouveau_numero ?? ''}`;
+    case 'boutique.vente':
+      return `${RAYON_LABEL[d.rayon] ?? d.rayon} · ${BUYER_LABEL[d.acheteur] ?? d.acheteur} · ${money(d.montant)}${d.carte > 0 ? ` (dont ${money(d.carte)} par carte)` : ''}`;
+    case 'boutique.vente.annuler':
+      return `${RAYON_LABEL[d.rayon] ?? d.rayon} · ${money(d.montant)} — ${d.motif}`;
     case 'paiement.enregistrer':
       return `${money(d.montant)} — ${d.moyen}${d.reference ? ` (${d.reference})` : ''}`;
     case 'ligne.annuler':

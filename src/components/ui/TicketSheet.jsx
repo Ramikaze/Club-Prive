@@ -51,7 +51,7 @@ export default function TicketSheet({ ticket, copyNo }) {
       <dl className="ts-facts">
         <div><dt>N°</dt><dd>{ticket.number}</dd></div>
         <div><dt>Date</dt><dd>{dateTime(ticket.paid_at)}</dd></div>
-        <div><dt>Client</dt><dd>{ticket.member_name}{ticket.member_no ? ` (${ticket.member_no})` : ''}</dd></div>
+        <div><dt>Client</dt><dd>{ticket.client_line ?? `${ticket.member_name}${ticket.member_no ? ` (${ticket.member_no})` : ''}`}</dd></div>
       </dl>
 
       <ul className="ts-lines">

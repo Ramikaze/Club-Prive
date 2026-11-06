@@ -3,6 +3,7 @@
 import { localParts, addDays } from '../../shared/time.js';
 import { bookingWindow, fmtDuration, CARD_METHOD } from '../../shared/rules.js';
 import { RECHARGE_LINE_LABEL } from '../../shared/ticket.js';
+import { SHOP } from '../../shared/roles.js';
 import { useStore } from '../store/useStore.js';
 
 export { fmtDuration };
@@ -101,9 +102,10 @@ export const subStateLabel = (summary) => {
 
 // ---------------------------------------------------------------- payments in the lists
 
-// What a payment that has no line was for: a recharge of the card or an outside meal (its label); null for a
-// plain payment, whose lines say it.
+// What a payment was for when its lines do not say it: a Boutique sale (« boutique cigares »), a recharge of the
+// card or an outside meal (its label); null for a plain payment, whose lines say it.
 export function paymentPurpose(p) {
+  if (p.shop_sale_id) return SHOP[p.shop_account]?.purpose ?? 'boutique';
   if (p.kind === 'recharge') return RECHARGE_LINE_LABEL;
   if (p.kind === 'repas') return `Repas extérieur : ${p.label ?? ''}`;
   return null;

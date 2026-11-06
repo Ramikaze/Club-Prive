@@ -271,3 +271,19 @@ test('Salutation : « Monsieur » et le nom de famille, « Monsieur » seul sans
   assert.equal(statementWhatsAppText({ ...at, lastName: 'DUPONT' }).split('\n')[0], 'Bonjour Monsieur DUPONT,');
   assert.equal(statementWhatsAppText({ ...at, lastName: '  ' }).split('\n')[0], 'Bonjour Monsieur,');
 });
+
+test('ticketWhatsAppText : la ligne client d’une vente Boutique', () => {
+  const text = ticketWhatsAppText({ ...base, clientLine: 'Client journalier' });
+  assert.ok(text.includes('Client : Client journalier'));
+  assert.ok(!text.includes('Jean Dupont'));
+  assert.ok(ticketWhatsAppText({ ...base, clientLine: 'Awa TEST (C-0003)' }).includes('Client : Awa TEST (C-0003)'));
+  assert.ok(ticketWhatsAppText(base).includes('Client : Jean Dupont (M-0012)')); // unchanged without clientLine
+});
+
+test('paymentWhatsAppText : une vente Boutique dit « boutique cigares »', () => {
+  const base = { clubName: 'Limen', lastName: 'TEST', at: '2026-10-25T21:10:00.000Z', timezone: 'Africa/Brazzaville', number: 'T-000021' };
+  const text = paymentWhatsAppText({ ...base, amount: 5000 * 100, method: 'Espèces', for: 'boutique cigares' }).split('\n');
+  assert.match(text[1], /\(boutique cigares\) a bien été reçu \(Espèces\)\.$/);
+  const card = paymentWhatsAppText({ ...base, amount: 50000 * 100, cardAmount: 20000 * 100, balance: 0, method: 'MTN MoMo', for: 'boutique champagne' });
+  assert.ok(card.includes('(boutique champagne)'));
+});

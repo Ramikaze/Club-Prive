@@ -14,7 +14,7 @@ const DONE = { depense: 'Dépense enregistrée.', recette: 'Entrée enregistrée
 
 // The largest expense a manager records alone, in hundredths; the server refuses more (MANAGER_EXPENSE_MAX, worker/ledger.js).
 export const MANAGER_EXPENSE_MAX = 5000 * 100;
-export const MANAGER_CAP_TEXT = 'Le gérant enregistre des dépenses de 5 000 FCFA au plus. Au-delà, adressez-vous à un administrateur.';
+export const MANAGER_CAP_TEXT = 'Le gérant enregistre des dépenses de 5 000 FCFA au plus. Au-delà, adressez-vous à la direction (administrateur ou associé).';
 
 export default function EntryDialog({ close, kind, categories, onDone }) {
   const methods = useStore((s) => s.settings.payment_methods);
@@ -75,7 +75,7 @@ export default function EntryDialog({ close, kind, categories, onDone }) {
         ))}
         <label className="field"><span>Montant ({currency})</span>
           <input inputMode="decimal" autoComplete="off" placeholder={managerCapped ? '5 000' : '25 000'} required value={v.amount} onChange={set('amount')} />
-          {managerCapped && <span className="help">5 000 {currency} au plus par dépense. Au-delà, un administrateur l’enregistre.</span>}</label>
+          {managerCapped && <span className="help">5 000 {currency} au plus par dépense. Au-delà, la direction (administrateur ou associé) l’enregistre.</span>}</label>
         <div className="form-row">
           <label className="field"><span>{kind === 'depense' ? 'Payé depuis' : kind === 'recette' ? 'Reçu sur' : 'Depuis'}</span>
             <select value={v.method} onChange={set('method')}>

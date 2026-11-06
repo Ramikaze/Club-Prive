@@ -644,7 +644,7 @@ function UsersSection({ users, onChanged }) {
           </tr>
         ))}</tbody>
       </table></div>
-      <p className="subtle" style={{ marginTop: 8 }}>Gérant : membres, cartes, réservations, consommations, encaissements et mouvements de stock. Associé : en plus, la caisse, la trésorerie et les produits de son rayon. Administrateur : tout, y compris paramètres, tarifs, formules, produits, utilisateurs, sous-comptes et exports. Contrôlé côté serveur.</p>
+      <p className="subtle" style={{ marginTop: 8 }}>Gérant : membres, cartes, réservations, consommations, encaissements et mouvements de stock. Associé : tous les droits du club (caisse, trésorerie, comptabilité, journal), sauf l’administration de l’application (utilisateurs, paramètres, données, démo) ; il ne gère que les produits et les ventes Boutique de son rayon. Administrateur : tout. Contrôlé côté serveur.</p>
     </section>
   );
 }
