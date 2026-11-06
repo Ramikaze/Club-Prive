@@ -12,6 +12,7 @@ import Rooms from './pages/Rooms.jsx';
 import Agenda from './pages/Agenda.jsx';
 import Members from './pages/Members.jsx';
 import Member from './pages/Member.jsx';
+import ClientsList from './components/members/ClientsList.jsx';
 import MemberCard from './pages/MemberCard.jsx';
 import Statement from './pages/Statement.jsx';
 import Reservation from './pages/Reservation.jsx';
@@ -185,7 +186,7 @@ export default function App() {
             <Route path="caisse/boutique" element={<BossOnly><Empty icon="shop">Vente au comptoir : bientôt disponible.</Empty></BossOnly>} />
             <Route path="journal" element={<BossOnly><AuditJournal /></BossOnly>} />
             <Route path="boutique" element={<Shop />} />
-            <Route path="clients" element={<div className="card"><Empty icon="users">Les clients arrivent bientôt.</Empty></div>} />
+            <Route path="clients" element={<ClientsList />} />
             <Route path="parametres" element={<AdminOnly><Settings /></AdminOnly>} />
             <Route path="*" element={<NotFound />} />
           </Route>
