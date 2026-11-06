@@ -86,7 +86,7 @@ const STEPS = [
   },
   {
     boss: true, route: '/caisse', targets: ['#caisse-categories', '[data-tour="cash"]'], icon: 'list', title: 'Par catégorie',
-    body: 'Trois colonnes : Réservation séance, Boisson (Champagne et Autres boissons) et Cigare. En haut, l’argent encaissé ; dessous, tout ce qui a été facturé, payé ou non.',
+    body: 'Trois colonnes : Réservation séance, Boisson (Champagne et Autres boissons) et Cigare. En haut de chacune, sa recette (ventes payées par carte membre comprises) ; leur somme est la recette du jour ; dessous, tout ce qui a été facturé, payé ou non. Une ligne explique l’écart avec l’argent encaissé.',
     features: ['« à encaisser » : facturé, pas encore payé', 'Une ligne annulée ou remboursée reste visible, barrée', 'Les ventes Boutique sont marquées « Boutique »'],
   },
   {
