@@ -88,7 +88,8 @@ function Row({ row, to, isAdmin, onChange }) {
         title={`Remboursement : ${r.label}`}
         meta={metaLine(row.when, r.shop_sale_id && shopTag(r.account), ticketLink(r.payment_id, `Ticket d’origine ${formatTicketNumber(r.payment_id)}`),
           r.shop_sale_id ? buyerOf(r.buyer_kind, r.member_id, r.member_name) : memberLink(r.member_id, r.member_name, r.buyer_kind),
-          cash ? r.method : null, card > 0 && cash > 0 && `dont ${money(card)} rendus sur la carte`)}
+          cash ? r.method : null, card > 0 && cash > 0 && `dont ${money(card)} rendus sur la carte`,
+          r.shop_sale_id && r.created_by_name && `par ${r.created_by_name}`)}
         note={cash === 0 ? `Rendu sur la carte membre : non compté · ${r.reason}` : `Motif : ${r.reason}`}
         amount={cash || r.amount} sign={cash ? '−' : ''} quiet={cash === 0}
       />
