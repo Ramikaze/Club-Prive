@@ -152,8 +152,9 @@ function DayPanel({ active }) {
   );
 }
 
-// On a computer or a tablet the whole business day fits the screen under the page header, so nothing has to be
-// scrolled to see a time; on a phone the slots keep their full height (a finger needs it) and the page scrolls.
+// On a computer (a mouse) the whole business day fits the screen under the page header, so nothing has to be
+// scrolled to see a time; on a phone or a tablet the slots keep their full height (a finger needs it) and the
+// page scrolls.
 const FIT_MIN_WIDTH = 768;
 const FIT_MIN_SLOT_H = 12;
 const LEGEND_SPACE = 110; // the legend, the empty-day hint and the page margin under the grid
@@ -162,7 +163,7 @@ function useFitSlotHeight(ref, slotCount) {
   useEffect(() => {
     const measure = () => {
       const el = ref.current;
-      if (!el || window.innerWidth < FIT_MIN_WIDTH) return setSlotH(DAY_SLOT_H);
+      if (!el || window.innerWidth < FIT_MIN_WIDTH || !window.matchMedia('(pointer: fine)').matches) return setSlotH(DAY_SLOT_H);
       const top = el.getBoundingClientRect().top + window.scrollY;
       const room = window.innerHeight - top - LEGEND_SPACE;
       setSlotH(Math.max(FIT_MIN_SLOT_H, Math.min(DAY_SLOT_H, Math.floor(room / slotCount))));

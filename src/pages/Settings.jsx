@@ -213,12 +213,12 @@ function RoomDialog({ close, room, onDone }) {
       description: v.description,
       active: editing ? Boolean(v.active) : true,
     };
-    const list = editing
+    const res = editing
       ? await api.put(`/api/rooms/${room.id}`, body, key)
       : await api.post('/api/rooms', body, key);
     close();
     toast(editing ? 'Salle modifiée.' : 'Salle ajoutée.');
-    onDone?.(list);
+    onDone?.(res);
   });
   return (
     <Modal title={editing ? `Modifier ${room.name}` : 'Nouvelle salle'} onClose={close}>
@@ -241,15 +241,15 @@ function RoomDialog({ close, room, onDone }) {
 
 function RoomsSection() {
   const rooms = useStore((st) => st.rooms);
-  const updateRooms = (list) => useStore.setState({ rooms: list });
+  // The server answers with the club's whole bundle (its rooms included), not with the list of rooms.
+  const updateRooms = (res) => { if (res?.bundle) useStore.getState().setBundle(res.bundle); };
   const onDelete = (rm) => actionDialog({
     title: `Supprimer ${rm.name}`,
     danger: true,
     confirmLabel: 'Supprimer la salle',
     message: `Confirmer la suppression de la salle « ${rm.name} » ?`,
     run: async () => {
-      const list = await api.del(`/api/rooms/${rm.id}`, {});
-      updateRooms(list);
+      updateRooms(await api.del(`/api/rooms/${rm.id}`, {}));
       toast('Salle supprimée.');
     },
   });

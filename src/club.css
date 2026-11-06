@@ -45,7 +45,8 @@
   --ending-deep: #b34f00;
   --ending-on-deep: #fff;
   --off-hours: repeating-linear-gradient(135deg, #f0e6d5 0 6px, #e8dcc7 6px 12px);
-  --focus-ring: 0 0 0 3px rgba(158, 101, 46, 0.38);
+  /* Solid bronze, set off from the element by a gap of the page colour: a pale ring was too faint to see. */
+  --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--bronze);
   --radius: 14px;
   --radius-sm: 9px;
   --shadow-sm: 0 1px 2px rgba(42, 28, 14, 0.05), 0 4px 12px rgba(42, 28, 14, 0.04);
@@ -175,6 +176,10 @@ h3 { font-size: 0.96rem; font-weight: 650; }
 p { margin: 0; }
 
 :focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 6px; }
+/* On the charcoal areas the ring takes the bronze made for charcoal. */
+.sidebar, .topbar, .tabbar, .toast, .account-card.total, .lounge-overview {
+  --focus-ring: 0 0 0 2px var(--charcoal), 0 0 0 4px var(--bronze-on-charcoal);
+}
 
 .muted { color: var(--text-2); }
 .subtle { color: var(--text-3); font-size: 0.875rem; }
@@ -399,7 +404,9 @@ a.list-item:hover .list-go { color: var(--text); transform: translateX(2px); }
 
 /* ------------------------------------------------------------------ lists & tables */
 
-.list { display: grid; }
+/* Rows keep their content height: in a box that scrolls (the day closing's tickets) a grid would squeeze them to
+   their min-height and their lines would overlap. */
+.list { display: grid; grid-auto-rows: max-content; }
 .list-item {
   display: flex; align-items: center; gap: 12px;
   padding: 11px 4px; border-top: 1px solid var(--border); min-height: 52px;
@@ -575,7 +582,9 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-top: 18px; }
 @media (max-width: 599px) {
   .modal-backdrop { place-items: end stretch; padding: 0; }
-  .modal, .modal.wide { width: 100%; max-height: 92vh; border-radius: 16px 16px 0 0; }
+  /* dvh follows the on-screen keyboard; the last buttons stay above the iPhone's home bar. */
+  .modal, .modal.wide { width: 100%; max-height: 92vh; max-height: 92dvh; border-radius: 16px 16px 0 0; }
+  .modal-body { padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
   .modal-actions .btn { flex: 1; }
 }
 
@@ -609,8 +618,11 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 
 /* ------------------------------------------------------------------ segmented & toolbar */
 
-.segmented { display: inline-flex; background: var(--surface-3); border-radius: 10px; padding: 3px; gap: 2px; }
+/* Too wide for a phone (the settings tabs), its choices go onto a second line instead of making the page scroll
+   sideways: every tab stays in sight. */
+.segmented { display: inline-flex; flex-wrap: wrap; max-width: 100%; background: var(--surface-3); border-radius: 10px; padding: 3px; gap: 2px; }
 .segmented button {
+  flex: none; white-space: nowrap;
   border: 0; background: transparent; color: var(--text-2); font: inherit; font-weight: 550;
   min-height: 38px; padding: 0 14px; border-radius: 8px; cursor: pointer;
 }
@@ -730,7 +742,7 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
   --bronze: #c8925a; --bronze-text: #dcaa75; --bronze-soft: #33271c; --bronze-line: #6b4f33; --on-bronze: #1a1208;
   --ok: #7cc79c; --ok-soft: #1b3326; --warn: #e7b65a; --warn-soft: #3a2d12;
   --danger: #f08b7f; --danger-soft: #3d1d19; --info: #8db8e6; --info-soft: #1a2a3c;
-  --focus-ring: 0 0 0 3px rgba(200, 146, 90, 0.45);
+  --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--bronze);
   color-scheme: dark; color: var(--text);
   position: relative; overflow: hidden;
   min-height: 100vh; display: grid; place-items: center; padding: 24px 16px;
