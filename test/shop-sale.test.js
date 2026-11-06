@@ -46,7 +46,8 @@ test('vente à un client journalier : stock baissé, ticket sans données person
   const r = ok(await sale(ger, { account: 'cigares', buyer: { kind: 'journalier' }, lines: [{ product_id: CIG, quantity: 2 }], method: 'Espèces' }));
   assert.equal(r.sale.amount, 10000 * UM);
   assert.equal(r.sale.buyer_kind, 'journalier');
-  assert.equal(r.sale.member_no, '');
+  assert.equal(r.sale.member_no, null);
+  assert.equal(r.sale.member_id, null);
   assert.equal(r.sale.member_name, 'Client journalier');
   assert.equal(r.sale.payment_id, r.payment.id);
   assert.match(r.sale.ticket_number, /^T-\d{6,}$/);

@@ -2,8 +2,16 @@
 // writes run inside the API transaction, including audit and idempotency.
 import { conflict, invalid, forbidden, notFound } from './errors.js';
 import { toId, flag, text } from './validate.js';
-import { SHOP, canSellIn } from '../shared/roles.js';
+import { SHOP, canSellIn, ownsAccount } from '../shared/roles.js';
 import { formatTicketNumber } from '../shared/ticket.js';
+
+// How a buyer is shown anywhere in the app: a day client ('journalier') is only « Client journalier », with no
+// number and no personal data (the hidden row's own name is never printed); anyone else by name and number.
+export const WALK_IN_NAME = 'Client journalier';
+export function buyerShown(kind, { first_name, last_name, member_no }) {
+  if (kind === 'journalier') return { name: WALK_IN_NAME, no: null };
+  return { name: `${first_name} ${last_name}`, no: member_no };
+}
 
 export const shopMethods = {
   // The one hidden row every walk-in sale is booked on, created on first use. It has no card and no file: it is
@@ -130,6 +138,27 @@ export const shopMethods = {
     return { sale: this.shopSaleDTO(saleId), payment };
   },
 
+  // Cancels a whole sale: every line is refunded by the method it was paid with (the card part back onto the
+  // card), the goods go back to stock. Only the boss of the rayon or the admin; money moves today, so a closed day
+  // refuses it (inside writeRefund) and the transaction leaves nothing behind.
+  cancelShopSale(actor, saleId, input) {
+    const sale = this.get('SELECT * FROM shop_sales WHERE id = ?', toId(saleId, 'Vente'));
+    if (!sale) throw notFound('Vente');
+    if (!ownsAccount(actor, sale.account)) throw forbidden('Seul l’associé du rayon ou l’administrateur annule une vente Boutique.');
+    const reason = text(input?.reason, 'Motif d’annulation', { required: true, min: 3, max: 300 });
+    if (sale.cancelled_at) throw conflict('DEJA_ANNULEE', 'Cette vente est déjà annulée.');
+    const lines = this.all("SELECT * FROM charges WHERE shop_sale_id = ? AND status = 'payee' ORDER BY id", sale.id);
+    for (const c of lines) {
+      const { payment, cardPart } = this.cardPartOf(c);
+      this.writeRefund(actor, c, payment, cardPart, { method: payment.method, reason, restock: true });
+    }
+    this.run('UPDATE shop_sales SET cancelled_at = ?, cancelled_by = ?, cancel_reason = ? WHERE id = ?', this.nowIso(), actor.id, reason, sale.id);
+    this.audit(actor, 'boutique.vente.annuler', 'shop_sale', sale.id, {
+      rayon: sale.account, montant: lines.reduce((n, c) => n + c.amount, 0), motif: reason,
+    });
+    return { sale: this.shopSaleDTO(sale.id) };
+  },
+
   // A day client is shown without any number or personal data; the hidden row's name is never printed.
   shopSaleDTO(id) {
     const s = this.get(
@@ -144,12 +173,11 @@ export const shopMethods = {
       charge_id: c.id, product_id: c.product_id, label: c.label, quantity: c.quantity, unit_price: c.unit_price,
       amount: c.amount, status: c.status,
     }));
-    const pay = this.get('SELECT id, method, card_amount FROM payments WHERE shop_sale_id = ?', id);
-    const walkIn = s.buyer_kind === 'journalier';
+    const pay = this.get('SELECT id, method, card_amount FROM payments WHERE shop_sale_id = ? ORDER BY id LIMIT 1', id);
+    const buyer = buyerShown(s.buyer_kind, s);
     return {
-      id: s.id, account: s.account, buyer_kind: s.buyer_kind, member_id: s.member_id,
-      member_name: walkIn ? 'Client journalier' : `${s.first_name} ${s.last_name}`,
-      member_no: walkIn ? '' : s.member_no,
+      id: s.id, account: s.account, buyer_kind: s.buyer_kind, member_id: s.buyer_kind === 'journalier' ? null : s.member_id,
+      member_name: buyer.name, member_no: buyer.no,
       payment_id: pay?.id ?? null, ticket_number: pay ? formatTicketNumber(pay.id) : null,
       amount: lines.reduce((n, l) => n + l.amount, 0), card_amount: pay?.card_amount ?? 0, method: pay?.method ?? null,
       created_at: s.created_at, created_by_name: s.created_by_name ?? null,

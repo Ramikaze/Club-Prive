@@ -260,6 +260,7 @@ export function createApi({ db, env = {}, demo = false }) {
   add('POST', '/api/clients', {}, (ctx) => club.createClient(ctx.user, ctx.body));
   // Open to every signed-in user: the rights (gérant, or the boss of the rayon) are checked inside.
   add('POST', '/api/shop/sales', {}, (ctx) => club.createShopSale(ctx.user, ctx.body));
+  add('POST', '/api/shop/sales/:id/cancel', {}, (ctx) => club.cancelShopSale(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/clients/:id/convert', {}, (ctx) => club.convertClient(ctx.user, ctx.params.id));
   add('GET', '/api/members/:id', {}, (ctx) => club.memberDetail(ctx.params.id));
   add('GET', '/api/members/:id/statement', {}, (ctx) => club.memberStatement(ctx.params.id, ctx.query.from, ctx.query.to));
