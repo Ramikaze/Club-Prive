@@ -3379,32 +3379,59 @@ export class Club {
 
   financeSummary(from, to) {
     const [a, b] = this.periodBounds(from, to);
-    const empty = (key, label) => ({ account: key, label, billed: 0, collected: 0, refunded: 0, net: 0, outstanding: 0, cancelled: 0, lines: 0 });
+    const FIELDS = ['billed', 'collected', 'refunded', 'net', 'outstanding', 'cancelled', 'lines'];
+    const zero = () => ({ billed: 0, collected: 0, refunded: 0, net: 0, outstanding: 0, cancelled: 0, lines: 0 });
+    // Every figure is also split by origin: money of the sessions (seances) and of Boutique sales (boutique), so
+    // that seances + boutique is always the figure itself.
+    const empty = (key, label) => ({ account: key, label, ...zero(), seances: zero(), boutique: zero() });
     const acc = Object.fromEntries(ACCOUNTS.map((k) => [k, empty(k, ACCOUNT_LABELS[k])]));
+    const part = (x, shop) => (shop ? x.boutique : x.seances);
     for (const r of this.all(
-      'SELECT account, status, SUM(amount) AS total, COUNT(*) AS n FROM charges WHERE created_at >= ? AND created_at < ? GROUP BY account, status', a, b,
+      `SELECT account, status, shop_sale_id IS NOT NULL AS shop, SUM(amount) AS total, COUNT(*) AS n FROM charges
+       WHERE created_at >= ? AND created_at < ? GROUP BY account, status, shop`, a, b,
     )) {
       const x = acc[r.account];
-      if (r.status === 'annulee') x.cancelled += r.total;
-      else {
+      const y = part(x, r.shop);
+      if (r.status === 'annulee') {
+        x.cancelled += r.total;
+        y.cancelled += r.total;
+      } else {
         x.billed += r.total;
         x.lines += r.n;
+        y.billed += r.total;
+        y.lines += r.n;
       }
-      if (r.status === 'due') x.outstanding += r.total;
+      if (r.status === 'due') {
+        x.outstanding += r.total;
+        y.outstanding += r.total;
+      }
     }
     for (const r of this.all(
-      `SELECT pa.account, SUM(pa.amount) AS total FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
-       WHERE p.paid_at >= ? AND p.paid_at < ? GROUP BY pa.account`, a, b,
-    )) acc[r.account].collected += r.total;
-    for (const r of this.all('SELECT account, SUM(amount) AS total FROM refunds WHERE created_at >= ? AND created_at < ? GROUP BY account', a, b)) {
+      `SELECT pa.account, p.shop_sale_id IS NOT NULL AS shop, SUM(pa.amount) AS total FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
+       WHERE p.paid_at >= ? AND p.paid_at < ? GROUP BY pa.account, shop`, a, b,
+    )) {
+      acc[r.account].collected += r.total;
+      part(acc[r.account], r.shop).collected += r.total;
+    }
+    for (const r of this.all(
+      `SELECT rf.account, c.shop_sale_id IS NOT NULL AS shop, SUM(rf.amount) AS total FROM refunds rf JOIN charges c ON c.id = rf.charge_id
+       WHERE rf.created_at >= ? AND rf.created_at < ? GROUP BY rf.account, shop`, a, b,
+    )) {
       acc[r.account].refunded += r.total;
+      part(acc[r.account], r.shop).refunded += r.total;
     }
     const accounts = ACCOUNTS.map((k) => {
-      acc[k].net = acc[k].collected - acc[k].refunded;
+      for (const y of [acc[k], acc[k].seances, acc[k].boutique]) y.net = y.collected - y.refunded;
       return acc[k];
     });
     const total = empty('total', 'Total');
-    for (const x of accounts) for (const f of ['billed', 'collected', 'refunded', 'net', 'outstanding', 'cancelled', 'lines']) total[f] += x[f];
+    for (const x of accounts) {
+      for (const f of FIELDS) {
+        total[f] += x[f];
+        total.seances[f] += x.seances[f];
+        total.boutique[f] += x.boutique[f];
+      }
+    }
     // The part of a payment taken from the card shows under CARD_METHOD, the rest under its own method.
     const methods = this.all(
       `SELECT method, SUM(total) AS total, SUM(n) AS n FROM (

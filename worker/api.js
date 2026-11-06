@@ -333,6 +333,7 @@ export function createApi({ db, env = {}, demo = false }) {
     return { ticket };
   });
   add('GET', '/api/finance/summary', CLUB, (ctx) => club.financeSummary(ctx.query.from, ctx.query.to ?? ctx.query.from));
+  add('GET', '/api/shop/summary', CLUB, (ctx) => club.shopSummary(ctx.query.from, ctx.query.to ?? ctx.query.from));
   add('GET', '/api/finance/journal', {}, (ctx) => {
     if (!isBoss(ctx.user)) {
       const today = club.bizToday();

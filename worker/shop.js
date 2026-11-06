@@ -4,6 +4,7 @@ import { conflict, invalid, forbidden, notFound } from './errors.js';
 import { toId, flag, text } from './validate.js';
 import { SHOP, canSellIn, ownsAccount } from '../shared/roles.js';
 import { formatTicketNumber } from '../shared/ticket.js';
+import { CARD_METHOD } from '../shared/rules.js';
 
 // How a buyer is shown anywhere in the app: a day client ('journalier') is only « Client journalier », with no
 // number and no personal data (the hidden row's own name is never printed); anyone else by name and number.
@@ -184,6 +185,62 @@ export const shopMethods = {
       cancelled_at: s.cancelled_at, cancel_reason: s.cancel_reason, cancelled_by_name: s.cancelled_by_name ?? null,
       lines,
     };
+  },
+
+  // Figures of the Caisse « Boutique » tab, one column per rayon. A sale counts in the period of its creation (listed,
+  // marked cancelled when it is); money given back counts in the period of the refund, as a negative amount on the
+  // same buyer kind and methods. So the same day the two cancel out, and a past period never changes afterwards.
+  // The card part of a payment or refund shows under CARD_METHOD, the rest under its own method.
+  shopSummary(from, to) {
+    const [a, b] = this.periodBounds(from, to);
+    const accounts = {};
+    for (const account of Object.keys(SHOP)) {
+      const by_buyer = { journalier: 0, client: 0, membre: 0 };
+      const methods = new Map();
+      const addMethod = (method, amount) => methods.set(method, (methods.get(method) ?? 0) + amount);
+      const addSplit = (kind, amount, cardPart, method, sign) => {
+        by_buyer[kind] += sign * amount;
+        if (amount - cardPart) addMethod(method, sign * (amount - cardPart));
+        if (cardPart) addMethod(CARD_METHOD, sign * cardPart);
+      };
+      let count = 0;
+      const sales = this.all(
+        'SELECT id FROM shop_sales WHERE account = ? AND created_at >= ? AND created_at < ? ORDER BY created_at DESC, id DESC', account, a, b,
+      ).map((x) => this.shopSaleDTO(x.id));
+      let total = 0;
+      for (const s of sales) {
+        addSplit(s.buyer_kind, s.amount, s.card_amount, s.method, 1);
+        total += s.amount;
+        if (!(s.cancelled_at && s.cancelled_at >= a && s.cancelled_at < b)) count += 1;
+      }
+      // One line per cancelled sale, with what went back in this period (the refunds of a sale share one moment).
+      const sold = new Map();
+      for (const r of this.all(
+        `SELECT rf.amount, rf.card_amount, rf.method, rf.created_at, s.id AS sale_id, s.buyer_kind, s.cancel_reason, cu.name AS cancelled_by_name
+         FROM refunds rf JOIN charges c ON c.id = rf.charge_id JOIN shop_sales s ON s.id = c.shop_sale_id
+         LEFT JOIN users cu ON cu.id = s.cancelled_by
+         WHERE s.account = ? AND rf.created_at >= ? AND rf.created_at < ? ORDER BY rf.created_at, rf.id`, account, a, b,
+      )) {
+        addSplit(r.buyer_kind, r.amount, r.card_amount, r.method, -1);
+        total -= r.amount;
+        const x = sold.get(r.sale_id) ?? {
+          sale_id: r.sale_id, at: r.created_at, amount: 0, reason: r.cancel_reason, cancelled_by_name: r.cancelled_by_name ?? null,
+          ticket_number: null,
+        };
+        x.amount += r.amount;
+        sold.set(r.sale_id, x);
+      }
+      for (const x of sold.values()) {
+        const pay = this.get('SELECT id FROM payments WHERE shop_sale_id = ? ORDER BY id LIMIT 1', x.sale_id);
+        x.ticket_number = pay ? formatTicketNumber(pay.id) : null;
+      }
+      accounts[account] = {
+        account, total, count, by_buyer,
+        by_method: [...methods].map(([method, t]) => ({ method, total: t })).filter((x) => x.total !== 0).sort((p, q) => q.total - p.total),
+        sales, cancellations: [...sold.values()],
+      };
+    }
+    return { from, to, accounts };
   },
 
   // Product lines bought by a member or regular client, Boutique and session mixed, newest first. Payment details
