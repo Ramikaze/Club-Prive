@@ -67,7 +67,7 @@ const STEPS = [
     body: 'Fiche, formule et carte physique ou virtuelle en une seule étape. La fiche montre ensuite crédit, cartes, séances et paiements.',
   },
   {
-    route: '/boutique', targets: ['[data-tour="shop"]'], icon: 'cart', title: 'Boutique',
+    route: '/boutique', targets: ['[data-tour="shop"]'], icon: 'shop', title: 'Boutique',
     body: 'Vente de cigares et de champagne au comptoir, à un client journalier, à un client régulier ou à un membre. Chaque vente donne un ticket, un par rayon.',
   },
   {
