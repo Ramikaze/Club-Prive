@@ -17,6 +17,7 @@ import Statement from './pages/Statement.jsx';
 import Reservation from './pages/Reservation.jsx';
 import BookingConfirmation from './pages/BookingConfirmation.jsx';
 import Products from './pages/Products.jsx';
+import Shop from './pages/Shop.jsx';
 import Lounge, { HumidorPage } from './pages/Lounge.jsx';
 import Cash from './pages/Cash.jsx';
 import Ticket from './pages/Ticket.jsx';
@@ -183,7 +184,7 @@ export default function App() {
             <Route path="cloture" element={<BossOnly><Closing /></BossOnly>} />
             <Route path="caisse/boutique" element={<BossOnly><Empty icon="shop">Vente au comptoir : bientôt disponible.</Empty></BossOnly>} />
             <Route path="journal" element={<BossOnly><AuditJournal /></BossOnly>} />
-            <Route path="boutique" element={<div className="card"><Empty icon="shop">La boutique arrive bientôt.</Empty></div>} />
+            <Route path="boutique" element={<Shop />} />
             <Route path="clients" element={<div className="card"><Empty icon="users">Les clients arrivent bientôt.</Empty></div>} />
             <Route path="parametres" element={<AdminOnly><Settings /></AdminOnly>} />
             <Route path="*" element={<NotFound />} />
