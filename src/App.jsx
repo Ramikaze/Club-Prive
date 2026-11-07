@@ -28,6 +28,8 @@ import Ledger from './pages/Ledger.jsx';
 import Closing from './pages/Closing.jsx';
 import Settings from './pages/Settings.jsx';
 import AuditJournal from './pages/AuditJournal.jsx';
+import Suppliers from './pages/Suppliers.jsx';
+import Supplier from './pages/Supplier.jsx';
 import PublicTicket, { isPublicTicketHash } from './pages/PublicTicket.jsx';
 import { api, setUnauthorizedHandler } from './lib/api.js';
 import { isDemoSpace, leaveDemo } from './lib/space.js';
@@ -184,6 +186,8 @@ export default function App() {
             <Route path="cloture" element={<BossOnly><Closing /></BossOnly>} />
             <Route path="caisse/boutique" element={<BossOnly><ShopTab /></BossOnly>} />
             <Route path="journal" element={<BossOnly><AuditJournal /></BossOnly>} />
+            <Route path="fournisseurs" element={<BossOnly><Suppliers /></BossOnly>} />
+            <Route path="fournisseurs/:id" element={<BossOnly><Supplier /></BossOnly>} />
             <Route path="boutique" element={<Shop />} />
             <Route path="clients" element={<ClientsList />} />
             <Route path="parametres" element={<AdminOnly><Settings /></AdminOnly>} />

@@ -6,9 +6,10 @@
 import { AppError, invalid, forbidden, notFound, conflict } from './errors.js';
 import { searchable, smartFilter } from '../shared/search.js';
 import { text, int, toId, flag, frDate } from './validate.js';
-import { ledgerMethods, DEFAULT_CATEGORIES, OUTSIDE_MEAL_CATEGORY, CASH_GAP_CATEGORY } from './ledger.js';
+import { ledgerMethods, DEFAULT_CATEGORIES, OUTSIDE_MEAL_CATEGORY, CASH_GAP_CATEGORY, TRANSPORT_CATEGORY } from './ledger.js';
 import { shopMethods, buyerShown } from './shop.js';
 import { caisseMethods } from './caisses.js';
+import { supplierMethods } from './suppliers.js';
 import { creditMethods } from './credit.js';
 import { billedMethods, DRINK_PART_SQL } from './billed.js';
 import {
@@ -55,7 +56,7 @@ const WIPE_ORDER = [
   'idempotency_keys', 'wallet_movements', 'payment_allocations', 'refunds', 'stock_movements', 'credit_movements', 'charges',
   'ticket_events', 'payments', 'shop_sales',
   'reservation_attendees', 'reservations', 'cards', 'subscriptions', 'members', 'product_photos', 'products',
-  'ledger_entries', 'closed_periods', 'day_closings', 'audit_log',
+  'ledger_entries', 'supplier_purchases', 'suppliers', 'closed_periods', 'day_closings', 'audit_log',
 ];
 
 // The highest price the catalogue import takes, in whole francs: a typing slip, such as a price counted in
@@ -293,6 +294,14 @@ export class Club {
         if (!this.get('SELECT 1 AS x FROM categories WHERE kind = ? AND name = ?', kind, CASH_GAP_CATEGORY)) {
           this.run('INSERT INTO categories (kind, name, created_at) VALUES (?, ?, ?)', kind, CASH_GAP_CATEGORY, this.nowIso());
         }
+      }
+      // « Transport » (owner, 2026-11-07), added once to a club that already had its categories: deactivated or renamed
+      // later in Paramètres, it is not brought back.
+      if (!this.get("SELECT 1 AS x FROM meta WHERE key = 'transport_category'")) {
+        if (!this.get("SELECT 1 AS x FROM categories WHERE kind = 'depense' AND name = ?", TRANSPORT_CATEGORY)) {
+          this.run("INSERT INTO categories (kind, name, created_at) VALUES ('depense', ?, ?)", TRANSPORT_CATEGORY, this.nowIso());
+        }
+        this.run("INSERT INTO meta (key, value) VALUES ('transport_category', ?)", this.nowIso());
       }
       this.ensureCategoryCodes();
       this.run('DELETE FROM idempotency_keys WHERE created_at < ?', new Date(Date.now() - 7 * 86400000).toISOString());
@@ -3839,5 +3848,6 @@ export class Club {
 Object.assign(Club.prototype, ledgerMethods);
 Object.assign(Club.prototype, shopMethods);
 Object.assign(Club.prototype, caisseMethods);
+Object.assign(Club.prototype, supplierMethods);
 Object.assign(Club.prototype, creditMethods);
 Object.assign(Club.prototype, billedMethods);

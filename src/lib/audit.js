@@ -2,6 +2,7 @@
 import { RAYON_LABEL } from '../../shared/roles.js';
 import { money, fmtDuration, dayLabel, ACCOUNT_LABEL } from './format.js';
 import { CAISSE_LABEL } from '../../shared/caisses.js';
+import { formatForeign } from '../../shared/suppliers.js';
 
 export const ACTION_LABELS = {
   'cave.creer': 'Cave créée',
@@ -71,6 +72,10 @@ export const ACTION_LABELS = {
   'operation.annuler': 'Opération annulée',
   'caisse.compter': 'Caisse comptée',
   'caisse.benefices': 'Prise de bénéfices',
+  'fournisseur.creer': 'Fournisseur créé',
+  'fournisseur.modifier': 'Fournisseur modifié',
+  'fournisseur.achat': 'Achat fournisseur enregistré',
+  'fournisseur.achat_annuler': 'Achat fournisseur annulé',
   'caisse.fermer': 'Caisse du jour fermée',
   'caisse.rouvrir': 'Caisse du jour rouverte',
   'periode.cloturer': 'Mois clôturé',
@@ -145,7 +150,15 @@ export function auditSummary(a) {
     case 'stock.ajustement':
       return `${d.avant} → ${d.apres} — ${d.motif}`;
     case 'operation.creer':
-      return `${ENTRY_KIND[d.type] ?? ''} du ${dayLabel(d.date, 'short')} : ${d.libelle} (${money(d.montant)}, ${d.compte}${d.vers ? ` → ${d.vers}` : ''})`;
+      return `${ENTRY_KIND[d.type] ?? ''} du ${dayLabel(d.date, 'short')} : ${d.libelle} (${money(d.montant)}${d.montant_devise ? ` (${formatForeign(d.montant_devise, d.devise)})` : ''}, ${d.compte}${d.vers ? ` → ${d.vers}` : ''})${d.fournisseur ? ` ; fournisseur ${d.fournisseur}` : ''}`;
+    case 'fournisseur.creer':
+      return [d.nom, d.caisse, d.pays, d.devise].filter(Boolean).join(' · ');
+    case 'fournisseur.modifier':
+      return d.apres?.nom ?? '';
+    case 'fournisseur.achat':
+      return `${d.nom} · ${d.type} du ${dayLabel(d.date, 'short')} : ${money(d.montant)}${d.montant_devise ? ` (${formatForeign(d.montant_devise, d.devise)})` : ''}${d.reference ? ` · facture ${d.reference}` : ''}`;
+    case 'fournisseur.achat_annuler':
+      return `${d.nom} · ${d.type} de ${money(d.montant)} — ${d.motif}`;
     case 'caisse.benefices':
       return `${CAISSE_LABEL[d.caisse] ?? d.caisse} : ${money(d.montant)} (${d.compte})${d.parts ? `, soit ${money(d.parts.cigares)} chacun` : ''}`;
     case 'operation.annuler':

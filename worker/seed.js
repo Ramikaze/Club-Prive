@@ -251,6 +251,36 @@ function fill(club, { actor, catalogue }) {
   expense(27, 'Achats autres boissons', 30000, 'Virement', 'Commande de boissons (démo)');
   expense(12, 'Électricité et eau', 38000, 'MTN MoMo', 'Facture électricité (démo)');
   expense(5, 'Entretien et réparations', 15000, 'Espèces', 'Entretien de la climatisation (démo)');
+  // Two fictitious suppliers (spec comptes fournisseurs): a cigar one in Europe, paid in part, and a drinks one in
+  // Lebanon, not paid yet. A purchase moves no money; the payment is an expense of the Cigare caisse.
+  const onDay = (daysAgo) => {
+    const day = addDays(today, -daysAgo);
+    club.at = Math.min(realNow, startOf(day, '11:00'));
+    return day;
+  };
+  onDay(60);
+  const cigarSupplier = club.createSupplier(owner, { name: 'Maison Corona (démo)', account: 'cigares', country: 'Espagne', currency: 'EUR' }, { demo: true });
+  club.recordSupplierPurchase(owner, cigarSupplier.id, {
+    kind: 'report', biz_date: onDay(60), amount: 450000 * 100, foreign_amount: 685 * 100, foreign_currency: 'EUR',
+    label: 'Solde dû avant l’application (démo)',
+  }, { demo: true });
+  club.recordSupplierPurchase(owner, cigarSupplier.id, {
+    kind: 'achat', biz_date: onDay(20), amount: 300000 * 100, foreign_amount: 457 * 100, foreign_currency: 'EUR',
+    reference: 'FAC-2026-118', label: 'Robustos et coronas (démo)',
+  }, { demo: true });
+  const cigarPurchase = club.get("SELECT id FROM categories WHERE code = 'achat_cigares'")?.id;
+  if (cigarPurchase) {
+    club.createEntry(owner, {
+      kind: 'depense', biz_date: onDay(10), category_id: cigarPurchase, supplier_id: cigarSupplier.id, amount: 150000 * 100,
+      foreign_amount: 228 * 100, foreign_currency: 'EUR', method: method('Virement'), reference: 'VIR-0417',
+    }, { demo: true });
+  }
+  onDay(25);
+  const drinksSupplier = club.createSupplier(owner, { name: 'Beyrouth Boissons (démo)', account: 'alcool', country: 'Liban', currency: 'USD' }, { demo: true });
+  club.recordSupplierPurchase(owner, drinksSupplier.id, {
+    kind: 'achat', biz_date: onDay(25), amount: 520000 * 100, foreign_amount: 865 * 100, foreign_currency: 'USD',
+    reference: 'INV-3391', label: 'Champagne et arak (démo)',
+  }, { demo: true });
   // A profit taking by the cigars associé (fictitious): out of the till and out of the Cigare caisse, never an
   // expense. Made as the club (any associé may load the data set, whatever his rayon).
   club.at = Math.min(realNow, startOf(addDays(today, -3), '11:45'));

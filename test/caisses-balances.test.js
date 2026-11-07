@@ -137,6 +137,27 @@ test('données fictives : les tuiles s’additionnent et aucune caisse n’est s
   } finally { c.server.destroy(); }
 });
 
+test('données fictives : deux fournisseurs, dont un payé en partie depuis la caisse Cigare', async () => {
+  const c = await club('fictive-suppliers');
+  try {
+    ok(await c.admin.post('/api/admin/reset', { confirm: 'EFFACER' }));
+    const author = c.server.club.userRow(ok(await c.admin.get('/api/me')).user.id);
+    seedDemo(c.server.club, { actor: author });
+    const list = ok(await c.admin.get('/api/suppliers'));
+    assert.deepEqual(list.suppliers.map((s) => [s.account, s.currency]).sort(), [['alcool', 'USD'], ['cigares', 'EUR']]);
+    const corona = list.suppliers.find((s) => s.account === 'cigares');
+    const sheet = ok(await c.admin.get(`/api/suppliers/${corona.id}`));
+    assert.deepEqual(sheet.lines.map((l) => [l.kind, l.balance]), [
+      ['report', 450000 * UM], ['achat', 750000 * UM], ['paiement', 600000 * UM],
+    ]);
+    assert.equal(list.totals.cigares, 600000 * UM);
+    assert.equal(list.totals.alcool, 520000 * UM);
+    const b = await c.caisses();
+    assert.equal(tiles(b), b.till);
+    for (const k of ['reservations', 'alcool', 'cigares']) assert.ok(b.caisses[k].balance >= 0, `${k} : ${b.caisses[k].balance}`);
+  } finally { c.server.destroy(); }
+});
+
 test('un repas d’avant le fond ne s’annule plus : son argent est dans le fond', async () => {
   const c = await club('meal');
   try {
