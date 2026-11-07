@@ -19,6 +19,16 @@ export const CATEGORY_CODES = {
   apport: { kind: 'recette', name: 'Apport des associés', account: null },
 };
 
+// What a dialog says before money moves (spec: the window says which caisse the money leaves or enters, above all
+// when an associé acts on the other's): 'out' leaves the caisse, 'in' enters it, 'back' returns to it. No caisse is
+// Réservation de séance.
+export function caisseMoneyLine(direction, account) {
+  const name = CAISSE_LABEL[account ?? 'reservations'];
+  if (direction === 'in') return `L’argent entre dans la caisse « ${name} ».`;
+  if (direction === 'back') return `L’argent revient dans la caisse « ${name} ».`;
+  return `L’argent sort de la caisse « ${name} ».`;
+}
+
 // The caisse a purchase category pays from, or null for any other category.
 export const purchaseAccount = (code) => (code && CATEGORY_CODES[code]?.kind === 'depense' ? CATEGORY_CODES[code].account : null);
 

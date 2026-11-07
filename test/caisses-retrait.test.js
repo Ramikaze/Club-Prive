@@ -97,3 +97,10 @@ test('grand livre : une prise de bénéfices, jamais une dépense', async () => 
     assert.ok(r.out > 0);
   }
 });
+
+test('trésorerie et clôture : les bénéfices pris à part, hors résultat', async () => {
+  const t = ok(await admin.get(`/api/treasury?from=${today}`));
+  const taken = server.club.get("SELECT COALESCE(SUM(amount), 0) AS n FROM ledger_entries WHERE kind = 'retrait' AND status = 'active' AND biz_date = ?", today).n;
+  assert.ok(taken > 0);
+  assert.equal(t.result.taken, taken);
+});

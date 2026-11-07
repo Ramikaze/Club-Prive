@@ -93,3 +93,11 @@ test('comptage et fermeture : un manque plus grand que Réservation de séance e
     ok(await a.post('/api/treasury/count', { method: 'Espèces', counted: (await expected()) - 10000 * UM }));
   } finally { s.destroy(); }
 });
+
+test('le gérant refusé : on lui dit de demander à un associé, sans lui montrer le solde', async () => {
+  const left = (await caisses()).caisses.reservations.balance;
+  if (left > 0) ok(await cha.post('/api/caisses/retrait', { account: 'reservations', amount: left, method: 'Espèces' }));
+  const r = refused(await expense(ger, { category_id: cat(null, 'Divers'), amount: 1000 * UM }), 409, 'CAISSE_INSUFFISANTE');
+  assert.match(r.data.error.message, /Demandez à un associé/);
+  assert.equal(r.data.error.details?.balance, undefined);
+});

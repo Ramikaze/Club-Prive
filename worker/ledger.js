@@ -149,6 +149,9 @@ export const ledgerMethods = {
       }
       if (nameFree) this.run('INSERT INTO categories (kind, name, created_at, code) VALUES (?, ?, ?, ?)', c.kind, c.name, this.nowIso(), code);
     }
+    // The caisses' buttons open these categories: one deactivated before they carried a code is active again (a
+    // coded category can no longer be deactivated).
+    this.run('UPDATE categories SET active = 1 WHERE code IS NOT NULL AND active = 0');
     for (const [code, c] of Object.entries(CATEGORY_CODES)) {
       if (!c.account) continue;
       this.run(
@@ -255,7 +258,7 @@ export const ledgerMethods = {
     const label = text(input.label, 'Libellé', { max: 120 }) ?? (kind === 'transfert' ? `Transfert ${method} → ${toMethod}` : category.name);
     const reference = text(input.reference, 'Référence', { max: 80 });
     // No caisse ever goes below zero (owner's rule): an expense its caisse cannot cover is refused.
-    if (kind === 'depense') this.assertCaisseCovers(account ?? 'reservations', amount, 'Cette dépense');
+    if (kind === 'depense') this.assertCaisseCovers(account ?? 'reservations', amount, 'Cette dépense', actor);
     const id = this.insert(
       `INSERT INTO ledger_entries (kind, biz_date, category_id, account, method, to_method, amount, label, reference,
          status, is_demo, created_at, created_by)
@@ -285,7 +288,7 @@ export const ledgerMethods = {
     const reason = text(input.reason, "Motif d'annulation", { required: true, min: 3, max: 300 });
     // Cancelling a receipt takes its money back out of its caisse: refused once the caisse has spent it. Cancelling an
     // expense or a profit taking gives money back to its caisse, always allowed.
-    if (e.kind === 'recette') this.assertCaisseCovers(e.account ?? 'reservations', e.amount, 'Cette annulation');
+    if (e.kind === 'recette') this.assertCaisseCovers(e.account ?? 'reservations', e.amount, 'Cette annulation', actor);
     this.run(
       "UPDATE ledger_entries SET status = 'annulee', cancelled_at = ?, cancelled_by = ?, cancel_reason = ? WHERE id = ?",
       this.nowIso(), actor.id, reason, e.id,
@@ -400,9 +403,14 @@ export const ledgerMethods = {
       `SELECT COALESCE(SUM(amount), 0) AS other FROM ledger_entries
        WHERE status = 'active' AND kind = 'recette' AND biz_date >= ? AND biz_date <= ?`, from, to,
     );
+    // The profits taken: money out of the till, apart from the result like the other receipts.
+    const { taken } = this.get(
+      `SELECT COALESCE(SUM(amount), 0) AS taken FROM ledger_entries
+       WHERE status = 'active' AND kind = 'retrait' AND biz_date >= ? AND biz_date <= ?`, from, to,
+    );
     return {
       from, to,
-      revenue: sales.total.net, expenses, result: sales.total.net - expenses, other_receipts: other,
+      revenue: sales.total.net, expenses, result: sales.total.net - expenses, other_receipts: other, taken,
       accounts: sales.accounts.map((x) => ({
         account: x.account, label: x.label, net: x.net, expenses: byAccount[x.account], margin: x.net - byAccount[x.account],
       })),
@@ -468,7 +476,7 @@ export const ledgerMethods = {
   recordCashGap(actor, day, method, gap, reason) {
     if (gap === 0) return null;
     // A shortage comes out of Réservation de séance, which must hold it (owner's rule: no caisse below zero).
-    if (gap < 0) this.assertCaisseCovers('reservations', -gap, 'Ce manque de caisse');
+    if (gap < 0) this.assertCaisseCovers('reservations', -gap, 'Ce manque de caisse', actor);
     const kind = gap > 0 ? 'recette' : 'depense';
     const category = this.get('SELECT id FROM categories WHERE kind = ? AND name = ?', kind, CASH_GAP_CATEGORY);
     if (!category) throw conflict('CATEGORIE_ECART_ABSENTE', `La catégorie « ${CASH_GAP_CATEGORY} » est introuvable : contactez l'administrateur.`);

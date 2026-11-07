@@ -7,7 +7,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { CARD_METHOD } from '../shared/rules.js';
-import { expenseTotal, receiptSummary, tillFigures, transferTotals } from '../src/components/cash/flows.js';
+import { entryTicketRow, expenseTotal, receiptSummary, tillFigures, transferTotals } from '../src/components/cash/flows.js';
 import { Server, Client, ok, UM } from './harness.js';
 
 const server = new Server({});
@@ -166,4 +166,13 @@ test('tillFigures sépare les bénéfices pris des dépenses', () => {
   assert.equal(f.taken, 7000 * UM);
   assert.equal(f.out, 0);
   assert.equal(f.opening + f.in - f.out - f.taken + f.received - f.sent, f.closing);
+});
+
+test('fermeture de la caisse : une prise de bénéfices se lit comme de l’argent sorti', () => {
+  const row = entryTicketRow({ id: 9, kind: 'retrait', amount: 4000 * UM, method: 'Espèces', label: 'Prise de bénéfices — Cigare', created_at: '2026-11-07T10:00:00Z', created_by_name: 'Admin' });
+  assert.equal(row.key, 'E-9');
+  assert.equal(row.amount, -4000 * UM);
+  assert.equal(row.title, 'Prise de bénéfices : Prise de bénéfices — Cigare');
+  assert.equal(entryTicketRow({ id: 1, kind: 'depense', amount: 100, label: 'x' }).amount, -100);
+  assert.equal(entryTicketRow({ id: 2, kind: 'recette', amount: 100, label: 'x' }).title, 'Entrée diverse : x');
 });

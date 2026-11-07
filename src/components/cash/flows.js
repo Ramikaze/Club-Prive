@@ -108,6 +108,14 @@ export const expenseTotal = (entries, method = '') => entries
   .filter((e) => e.kind === 'depense' && e.status === 'active' && onAccount(method, e.method))
   .reduce((s, e) => s + e.amount, 0);
 
+// A ledger entry as a ticket of the day's closing (P- payments, R- refunds, E- entries): an expense and a profit
+// taking are money out, a receipt money in, a transfer shown at its amount.
+const ENTRY_TITLE = { depense: 'Dépense', recette: 'Entrée diverse', transfert: 'Transfert', retrait: 'Prise de bénéfices' };
+export const entryTicketRow = (e) => ({
+  key: `E-${e.id}`, at: e.created_at, amount: e.kind === 'depense' || e.kind === 'retrait' ? -e.amount : e.amount, method: e.method,
+  title: `${ENTRY_TITLE[e.kind] ?? 'Opération'} : ${e.label}`, who: e.created_by_name,
+});
+
 // The profits taken from the account shown (active ones only): money out of the till, never an expense.
 export const takenTotal = (entries, method = '') => entries
   .filter((e) => e.kind === 'retrait' && e.status === 'active' && onAccount(method, e.method))

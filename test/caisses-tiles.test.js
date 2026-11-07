@@ -74,3 +74,7 @@ test('le fond dit le crédit des cartes qu’il contenait déjà', () => {
   assert.ok(tile.hints.includes('au 01/11/2026'));
   assert.ok(tile.hints.includes('dont crédit des cartes déjà là : −40000'));
 });
+
+test('une période passée : pas de boutons, le solde montré n’est pas celui d’aujourd’hui', () => {
+  for (const t of caisseTiles(balances({ top: { to: '2026-11-06' } }), admin, fmt)) assert.deepEqual(t.actions, [], t.key);
+});

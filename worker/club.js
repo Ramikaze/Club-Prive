@@ -1593,6 +1593,12 @@ export class Club {
        WHERE c.name = ? AND e.reference = ? AND e.status = 'active'`, OUTSIDE_MEAL_CATEGORY, `ENC-${p.id}`,
     );
     if (expense) this.assertOpen(expense.biz_date, 'Cette annulation');
+    // A meal from before the cash fund is part of it: its courier's money and the member's are already in the fund,
+    // so cancelling it now would take money out of the till that the caisses never received.
+    const fundDate = this.settings().opening_balances.date;
+    if (fundDate && this.bizDayOf(Date.parse(p.paid_at)) < fundDate) {
+      throw conflict('REPAS_AVANT_FOND', "Ce repas date d'avant le fond de caisse : son argent est compté dans le fond, il ne s'annule plus.");
+    }
     this.tx(() => {
       if (p.card_amount > 0) this.walletMove(actor, p.member_id, 'remboursement', p.card_amount, { paymentId: p.id, reason });
       this.run(
@@ -2865,7 +2871,7 @@ export class Club {
   writeRefund(actor, c, payment, cardPart, { method, reference = null, reason, restock = false }) {
     this.assertOpen(this.bizToday(), 'Ce remboursement');
     // The whole line leaves the caisse of its sale (its card part goes back to the card): never below zero.
-    this.assertCaisseCovers(c.account, c.amount, 'Ce remboursement');
+    this.assertCaisseCovers(c.account, c.amount, 'Ce remboursement', actor);
     const refundId = this.insert(
       `INSERT INTO refunds (charge_id, payment_id, account, amount, method, reference, reason, restocked, created_at, created_by, card_amount)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,

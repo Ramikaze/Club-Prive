@@ -49,6 +49,7 @@ function CloseDialog({ close, month, onDone }) {
               <div><dt>Encaissé net</dt><dd>{money(t.result.revenue)}</dd></div>
               <div><dt>Dépenses</dt><dd>− {money(t.result.expenses)}</dd></div>
               <div className="total"><dt>Résultat du mois</dt><dd>{money(t.result.result)}</dd></div>
+              {t.result.taken > 0 && <div><dt>Bénéfices pris (hors résultat)</dt><dd>− {money(t.result.taken)}</dd></div>}
             </dl>
             <dl className="calc">
               {t.accounts.filter((a) => a.opening || a.in || a.out || a.closing).map((a) => (

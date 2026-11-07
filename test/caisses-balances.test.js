@@ -137,6 +137,23 @@ test('données fictives : les tuiles s’additionnent et aucune caisse n’est s
   } finally { c.server.destroy(); }
 });
 
+test('un repas d’avant le fond ne s’annule plus : son argent est dans le fond', async () => {
+  const c = await club('meal');
+  try {
+    const a = await c.member('Ana', '00 00 09 04', '06:00');
+    c.server.club.at = Date.now() - 24 * 3600 * 1000;
+    ok(await c.ger.post(`/api/members/${a.id}/wallet/recharge`, { amount: 3000 * UM, method: 'Espèces' }));
+    const meal = ok(await c.ger.post(`/api/members/${a.id}/outside-meal`, { amount: 8000 * UM, label: 'Pizzeria', rest_method: 'Espèces' })).payment;
+    c.server.club.at = null;
+    ok(await c.admin.post('/api/treasury/fund', { amounts: { 'Espèces': 100000 * UM } }));
+    const r = await c.admin.post(`/api/payments/${meal.id}/cancel-meal`, { reason: 'Commande annulée' });
+    assert.equal(r.status, 409, JSON.stringify(r.data));
+    assert.equal(r.data.error.code, 'REPAS_AVANT_FOND');
+    const b = await c.caisses();
+    assert.equal(tiles(b), b.till);
+  } finally { c.server.destroy(); }
+});
+
 test('le gérant ne lit pas les caisses', async () => {
   const c = await club('rights');
   try {

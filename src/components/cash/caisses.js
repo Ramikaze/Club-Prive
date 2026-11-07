@@ -8,23 +8,25 @@ import { CAISSE_LABEL } from '../../../shared/caisses.js';
 
 const line = (label, amount, out = false) => ({ label, amount: Math.abs(amount), sign: out || amount < 0 ? 'out' : 'in' });
 
-function actionsFor(me, key) {
+function actionsFor(me, key, past) {
   const boss = me?.role === 'admin' || me?.role === 'associe';
-  if (!boss) return [];
+  // On a past period the tiles show that day's balances, not today's: no button acts on them.
+  if (!boss || past) return [];
   const mayTake = me.role === 'admin' || key === 'reservations' || me.rayon === key;
   return [...(key !== 'reservations' ? ['fournisseur'] : []), ...(mayTake ? ['benefices'] : []), 'apport'];
 }
 
 export function caisseTiles(b, me, fmt) {
   if (!b.started) return null;
-  const end = b.to >= fmt.today ? 'à ce jour' : `au ${fmt.day(b.to)}`;
+  const past = b.to < fmt.today;
+  const end = past ? `au ${fmt.day(b.to)}` : 'à ce jour';
   const { reservations: r, alcool: a, cigares: c } = b.caisses;
   const caisse = (key, lines, extra = []) => {
     const balance = b.caisses[key].balance;
     return {
       key, title: CAISSE_LABEL[key], value: balance, negative: balance < 0, lines,
       hints: [...extra, ...(balance < 0 ? ['Remettez de l’argent dans cette caisse.'] : [])],
-      actions: actionsFor(me, key),
+      actions: actionsFor(me, key, past),
     };
   };
   const optional = (label, amount, out) => (amount !== 0 ? [line(label, amount, out)] : []);

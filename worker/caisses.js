@@ -110,7 +110,7 @@ export const caisseMethods = {
     const amount = int(input.amount, 'Montant', { min: 1, max: 1e13 });
     const method = this.treasuryAccount(input.method, 'Payé depuis');
     const label = text(input.label, 'Libellé', { max: 120 }) ?? `Prise de bénéfices — ${CAISSE_LABEL[account]}`;
-    this.assertCaisseCovers(account, amount, 'Cette prise de bénéfices');
+    this.assertCaisseCovers(account, amount, 'Cette prise de bénéfices', actor);
     const id = this.insert(
       `INSERT INTO ledger_entries (kind, biz_date, category_id, account, method, to_method, amount, label, reference,
          status, is_demo, created_at, created_by)
@@ -124,10 +124,18 @@ export const caisseMethods = {
   },
 
   // Refuses an operation that would take a caisse below zero (owner's rule: a caisse never goes negative). The
-  // balance is the caisse's today, every movement recorded so far included.
-  assertCaisseCovers(account, amount, what) {
+  // balance is the caisse's today, every movement recorded so far included. The manager, who neither sees the
+  // caisses nor makes an apport, is told whom to ask, without the balance.
+  assertCaisseCovers(account, amount, what, actor = null) {
     if (!CAISSES.includes(account)) throw invalid('Caisse invalide.');
     const balance = this.caisseBalances(this.bizToday()).caisses[account].balance;
+    if (balance < amount && actor && !isBoss(actor)) {
+      throw conflict(
+        'CAISSE_INSUFFISANTE',
+        `${what} n’est pas possible : la caisse « ${CAISSE_LABEL[account]} » ne contient pas assez d’argent. Demandez à un associé ou à l’administrateur d’y remettre de l’argent.`,
+        { account },
+      );
+    }
     if (balance < amount) {
       throw conflict(
         'CAISSE_INSUFFISANTE',

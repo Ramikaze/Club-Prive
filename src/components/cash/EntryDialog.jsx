@@ -11,7 +11,7 @@ import { api, newKey } from '../../lib/api.js';
 import { bizToday, dayLabel, parseMoney } from '../../lib/format.js';
 import { useSubmit } from '../../lib/hooks.js';
 import { useIsBoss, useStore } from '../../store/useStore.js';
-import { CAISSE_LABEL, purchaseAccount } from '../../../shared/caisses.js';
+import { CAISSE_LABEL, caisseMoneyLine, purchaseAccount } from '../../../shared/caisses.js';
 
 const TITLES = { depense: 'Nouvelle dépense', recette: 'Entrée diverse', transfert: 'Transfert entre comptes' };
 const DONE = { depense: 'Dépense enregistrée.', recette: 'Entrée enregistrée.', transfert: 'Transfert enregistré.' };
@@ -108,8 +108,8 @@ export default function EntryDialog({ close, kind, categories, onDone, categoryC
           {kind === 'depense' && !purchase && caisseSelect('Caisse qui paie')}
           {apport && caisseSelect('Caisse qui reçoit l’apport')}
         </div>
-        {kind === 'depense' && <p className="subtle">L’argent sort de la caisse « {CAISSE_LABEL[caisse]} ».</p>}
-        {apport && <p className="subtle">L’argent entre dans la caisse « {CAISSE_LABEL[caisse]} ».</p>}
+        {kind === 'depense' && <p className="subtle">{caisseMoneyLine('out', caisse)}</p>}
+        {apport && <p className="subtle">{caisseMoneyLine('in', caisse)}</p>}
         <label className="field"><span>Libellé</span>
           <input maxLength={120} placeholder={kind === 'transfert' ? 'Dépôt en banque' : (category?.name ?? '')} value={v.label} onChange={set('label')} />
           <span className="help">Facultatif : {kind === 'transfert' ? 'les deux comptes sont indiqués par défaut.' : 'le nom de la catégorie est utilisé par défaut.'}</span></label>

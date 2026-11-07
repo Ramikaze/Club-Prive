@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { Server, Client, ok } from './harness.js';
 import { MIGRATIONS, migrate } from '../worker/schema.js';
 import { nodeDb } from '../worker/db-node.js';
-import { splitHalves } from '../shared/caisses.js';
+import { splitHalves, caisseMoneyLine } from '../shared/caisses.js';
 
 const server = new Server({});
 let admin;
@@ -87,4 +87,16 @@ test('migration V20 : prise de bénéfices sans catégorie, jamais sans caisse',
 test('splitHalves partage à l’unité près', () => {
   assert.deepEqual(splitHalves(10001), { alcool: 5001, cigares: 5000 });
   assert.deepEqual(splitHalves(10000), { alcool: 5000, cigares: 5000 });
+});
+
+test('une catégorie des caisses désactivée avant la migration est réactivée', async () => {
+  server.club.run("UPDATE categories SET active = 0 WHERE code = 'achat_cigares'");
+  await server.restart();
+  assert.equal(server.club.get("SELECT active FROM categories WHERE code = 'achat_cigares'").active, 1);
+});
+
+test('caisseMoneyLine dit d’où sort et où entre l’argent', () => {
+  assert.equal(caisseMoneyLine('out', 'cigares'), 'L’argent sort de la caisse « Cigare ».');
+  assert.equal(caisseMoneyLine('in', 'alcool'), 'L’argent entre dans la caisse « Champagne et autres boissons ».');
+  assert.equal(caisseMoneyLine('back', null), 'L’argent revient dans la caisse « Réservation de séance ».');
 });
