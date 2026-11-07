@@ -186,9 +186,8 @@ export default function Dashboard() {
         const book = () => openBookingDialog({ date: d.biz_day }, () => reload());
         const newMember = () => openMemberDialog(null, (m) => navigate(`/membres/${m.id}`));
 
-        const humidorAlerts = (d.lounge?.summary?.alerts ?? 0) + (d.lounge?.summary?.checks_due ?? 0);
         const memberAlerts = d.expiring.length + d.expired.length;
-        const totalAlerts = d.to_close.length + humidorAlerts + d.stock_alerts.length + memberAlerts;
+        const totalAlerts = d.to_close.length + d.stock_alerts.length + memberAlerts;
 
         return (
           <>
@@ -275,15 +274,6 @@ export default function Dashboard() {
                         <span className="chip chip-danger">{count(d.stock_alerts.length, 'produit', 'produits')}</span><Go />
                       </Link>
                     )}
-                    {humidorAlerts > 0 && (
-                      <Link className="list-item" to="/lounge">
-                        <div className="grow">
-                          <div className="title">Caves à cigares (humidité / température)</div>
-                          <div className="meta">Contrôle ou ajustement requis</div>
-                        </div>
-                        <span className="chip chip-warn">{count(humidorAlerts, 'cave', 'caves')}</span><Go />
-                      </Link>
-                    )}
                     {memberAlerts > 0 && (
                       <Link className="list-item" to="/membres">
                         <div className="grow">
@@ -300,7 +290,7 @@ export default function Dashboard() {
                       <div className="list-item">
                         <div className="grow">
                           <div className="title">Aucune alerte en cours</div>
-                          <div className="meta">Salles, stocks des produits, caves et abonnements sont à jour.</div>
+                          <div className="meta">Salles, stocks des produits et abonnements sont à jour.</div>
                         </div>
                         <span className="chip chip-ok"><Icon name="check" /> Parfait</span>
                       </div>

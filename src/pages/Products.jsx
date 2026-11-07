@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
 import SmartSearch from '../components/ui/SmartSearch.jsx';
-import { DemoChip, Empty, FormError, Loaded, PageHead, ProductPhoto, Segmented, StocksTabs } from '../components/ui/ui.jsx';
+import { DemoChip, Empty, FormError, Loaded, PageHead, ProductPhoto, Segmented } from '../components/ui/ui.jsx';
 import { Modal, actionDialog, openDialog } from '../components/ui/Modal.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import { api, newKey } from '../lib/api.js';
@@ -315,7 +315,6 @@ export default function Products() {
         : inCategory;
       return (
         <>
-          <StocksTabs />
           <PageHead
             title="Catalogue & Stocks"
             lead="Cigares, champagne et autres boissons du club."

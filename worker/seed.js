@@ -246,20 +246,4 @@ function fill(club, { actor, catalogue }) {
   if (method('Espèces') !== method('Virement')) {
     entry(20, { kind: 'transfert', amount: 100000 * 100, method: method('Espèces'), to_method: method('Virement'), label: 'Dépôt en banque (démo)' });
   }
-
-  // Example thresholds and readings, explicitly fictitious; real thresholds are set by the club.
-  club.at = realNow - 5 * DAY;
-  const reserve = club.createHumidor(owner, {
-    name: 'La réserve (démo)', location: 'Arrière-salon', humidity_min: 65, humidity_max: 72,
-    temperature_min: 18, temperature_max: 22, reading_interval_hours: 24, notes: 'Seuils fictifs à adapter à votre cave.',
-  });
-  const salon = club.createHumidor(owner, {
-    name: 'Le cabinet du salon (démo)', location: 'Salon privé', humidity_min: 65, humidity_max: 72,
-    temperature_min: 18, temperature_max: 22, reading_interval_hours: 12, notes: 'Données de démonstration.',
-  });
-  for (let i = 5; i >= 0; i -= 1) {
-    club.at = realNow - i * DAY - HOUR;
-    club.recordHumidorReading(manager, reserve.id, { humidity: 68 + (i % 3) * 0.5, temperature: 20 + (i % 2) * 0.4, notes: 'Contrôle de démonstration' });
-    club.recordHumidorReading(manager, salon.id, { humidity: i === 0 ? 74 : 69, temperature: 21, notes: 'Contrôle de démonstration' });
-  }
 }

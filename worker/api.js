@@ -383,14 +383,6 @@ export function createApi({ db, env = {}, demo = false }) {
   add('DELETE', '/api/products/:id/photo', { ...CLUB, ...PHOTOS }, (ctx) => club.removeProductPhoto(ctx.user, ctx.params.id));
   add('GET', '/api/stock-movements', {}, (ctx) => club.stockMovements(ctx.query));
 
-  // Lounge: conservation checks of the humidors.
-  add('GET', '/api/lounge', {}, () => club.loungeOverview());
-  add('POST', '/api/humidors', CLUB, (ctx) => club.createHumidor(ctx.user, ctx.body));
-  add('GET', '/api/humidors/:id', {}, (ctx) => club.humidorDetail(ctx.params.id));
-  add('PUT', '/api/humidors/:id', CLUB, (ctx) => club.updateHumidor(ctx.user, ctx.params.id, ctx.body));
-  add('POST', '/api/humidors/:id/readings', {}, (ctx) => club.recordHumidorReading(ctx.user, ctx.params.id, ctx.body));
-  add('POST', '/api/humidor-readings/:id/void', CLUB, (ctx) => club.voidHumidorReading(ctx.user, ctx.params.id, ctx.body));
-
   function match(method, pathname) {
     let pathMatched = false;
     for (const r of routes) {

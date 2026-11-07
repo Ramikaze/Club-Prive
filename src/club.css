@@ -177,7 +177,7 @@ p { margin: 0; }
 
 :focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 6px; }
 /* On the charcoal areas the ring takes the bronze made for charcoal. */
-.sidebar, .topbar, .tabbar, .toast, .account-card.total, .lounge-overview {
+.sidebar, .topbar, .tabbar, .toast, .account-card.total {
   --focus-ring: 0 0 0 2px var(--charcoal), 0 0 0 4px var(--bronze-on-charcoal);
 }
 

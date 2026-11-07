@@ -1,7 +1,7 @@
 
 # Club Privé
 
-Gestion d’un cigar lounge privé : membres, abonnements, réservations de salle, conservation des cigares, stock, encaissements et suivi financier. Interface en français, adaptée aux mobiles, avec thèmes clair et sombre.
+Gestion d’un cigar lounge privé : membres, abonnements, réservations de salle, stock, encaissements et suivi financier. Interface en français, adaptée aux mobiles, avec thèmes clair et sombre.
 
 ## Démarrer en local
 
@@ -49,23 +49,10 @@ Ouvrir ensuite `http://localhost:5173`. Les appels `/api` sont transmis au serve
 - **Membres et cartes** : fiches, cartes physiques ou virtuelles avec QR code et logo The Limen, formules, renouvellements, crédit individuel et historique des séances dont il est le titulaire.
 - **Salles et salons** : capacités, disponibilités, participants, installation, consommations, fermeture temporaire et réouverture.
 - **Agenda** : vues jour, semaine et liste, devis, arrivées, prolongations, annulations et protection contre les chevauchements de salles et de membres.
-- **Cave** : plusieurs caves, seuils d’humidité et de température propres à chaque cave, fréquence des contrôles, relevés manuels horodatés, graphiques et journal exportable.
 - **Produits et caisse** : cigares et bouteilles, avec leur photo (les administrateurs l’ajoutent, la changent ou la retirent depuis la fiche du produit), entrées de stock, ventes liées aux réservations, encaissements, remboursements et ventilation par activité. Chaque encaissement donne un ticket de caisse (voir « Ticket de caisse »).
 - **Administration** : dépenses, trésorerie, grand livre, clôtures mensuelles, rôles, journal d’audit, paramètres et exports Excel.
 - **Carte de débit** : un crédit en FCFA approvisionné sur la carte du membre, qui paie les consommations, les salles et le renouvellement de l’abonnement (voir « Carte de débit »).
 - **Mode démo** : un espace d’entraînement qui part d’une base vide, séparé du vrai club.
-
-### Fonctionnement de la cave
-
-Les relevés sont **manuels** : aucun capteur connecté ni notification externe n’est configuré. Un relevé hors seuils déclenche une alerte dans l’application ; un relevé absent ou trop ancien déclenche une demande de contrôle. Les écrans du lounge et le tableau de bord se rafraîchissent chaque minute lorsque l’onglet est visible, ainsi qu’au retour dans l’onglet. Le bouton Actualiser permet un contrôle immédiat.
-
-Les seuils sont choisis par l’administrateur et sont obligatoires lors de la création d’une cave. Les valeurs des exemples sont fictives, à adapter au matériel et aux collections. Les graphiques utilisent les **seuils actuels** et les 30 derniers relevés valides parmi les 60 derniers contrôles affichés. L’annulation d’une saisie erronée exige un motif, conserve le relevé et réévalue la situation à partir du dernier contrôle valide.
-
-| Action sur le lounge | Gérant | Administrateur |
-| --- | --- | --- |
-| Consulter les caves et les relevés ; exporter | Oui | Oui |
-| Saisir un relevé | Oui | Oui |
-| Créer/configurer une cave, annuler un relevé | Non | Oui |
 
 ### Réservations et salles
 
@@ -127,9 +114,9 @@ Le mode démo est un espace d’entraînement intégré au site : on y apprend l
 
 React 18 + Vite, React Router et Zustand pour l’interface. L’API tourne dans un **Cloudflare Worker**, avec SQLite dans un **Durable Object** ; un second Durable Object, avec sa propre base, porte le mode démo. La même logique métier s’exécute dans les tests Node.
 
-- `worker/schema.js` : migrations transactionnelles et contraintes SQL. La v2 ajoute caves et relevés ; la v3 supprime les anciennes tables de casiers ; la v4 ajoute salles et participants ; la v5 conserve les salles retirées pour l’historique et met à niveau les premières bases v4 sans table de participants.
+- `worker/schema.js` : migrations transactionnelles et contraintes SQL. La v2 ajoutait les caves et leurs relevés (tables gardées en base, plus utilisées par l’application) ; la v3 supprime les anciennes tables de casiers ; la v4 ajoute salles et participants ; la v5 conserve les salles retirées pour l’historique et met à niveau les premières bases v4 sans table de participants.
 - `worker/api.js` : authentification, contrôle des rôles, vérification des origines et idempotence.
-- `worker/club.js`, `worker/ledger.js`, `worker/lounge.js` : règles métier côté serveur.
+- `worker/club.js`, `worker/ledger.js` : règles métier côté serveur.
 - `worker/space.js` : aiguille chaque requête vers le vrai club ou vers la démo (en-tête `X-Club-Espace`). La session reste celle du vrai club, qui garantit à la démo l’identité de la personne connectée ; la démo n’ouvre jamais de session.
 - `worker/seed.js` : jeu de données fictives (utilisé par les tests) et comptes du développement local.
 - `test/` : scénarios API, montants, crédits, concurrence, rôles, conservation, migration, redémarrage et isolation de la démo.
@@ -155,4 +142,4 @@ npx wrangler secret put SETUP_TOKEN
 
 Ouvrir l’application et créer le premier compte avec ce code. Le même code sert si l’identifiant ou le mot de passe est perdu : sur la page de connexion, « Identifiant ou mot de passe oublié ? » donne un nouvel identifiant et un nouveau mot de passe au compte du premier administrateur et ferme ses sessions ouvertes. Ce code doit donc rester secret. Valider ensuite les tarifs et les paramètres avant l’utilisation réelle : sur le vrai site, une vente fondée sur un tarif non validé ou sur un prix non défini est refusée par le serveur. Seul le mode démo, qui a sa propre base, les accepte.
 
-L’effacement des données depuis les paramètres inclut caves et relevés. Il conserve les utilisateurs, les paramètres, les formules et les catégories. Cette opération est définitive et ne remplace pas une sauvegarde. Elle ne concerne que le vrai club : l’espace démo a sa propre remise à neuf.
+L’effacement des données depuis les paramètres conserve les utilisateurs, les paramètres, les formules et les catégories. Cette opération est définitive et ne remplace pas une sauvegarde. Elle ne concerne que le vrai club : l’espace démo a sa propre remise à neuf.

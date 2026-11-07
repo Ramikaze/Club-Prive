@@ -7,7 +7,6 @@ import { AppError, invalid, forbidden, notFound, conflict } from './errors.js';
 import { searchable, smartFilter } from '../shared/search.js';
 import { text, int, toId, flag, frDate } from './validate.js';
 import { ledgerMethods, DEFAULT_CATEGORIES, OUTSIDE_MEAL_CATEGORY, CASH_GAP_CATEGORY } from './ledger.js';
-import { loungeMethods } from './lounge.js';
 import { shopMethods, buyerShown } from './shop.js';
 import { billedMethods, DRINK_PART_SQL } from './billed.js';
 import {
@@ -49,6 +48,7 @@ const SESSION_DAYS = 14;
 // Business data removed by a reset, children before parents. Users, settings, plans and
 // categories are kept.
 const WIPE_ORDER = [
+  // Tables of the former cigar-cave tracking, no longer in the app: kept in the database, still cleared by a reset.
   'humidor_readings', 'humidors',
   'idempotency_keys', 'wallet_movements', 'payment_allocations', 'refunds', 'stock_movements', 'credit_movements', 'charges',
   'ticket_events', 'payments', 'shop_sales',
@@ -300,7 +300,7 @@ export class Club {
   }
 
   isEmpty() {
-    return !['members', 'products', 'reservations', 'ledger_entries', 'humidors'].some((t) => this.get(`SELECT 1 AS x FROM ${t} LIMIT 1`));
+    return !['members', 'products', 'reservations', 'ledger_entries'].some((t) => this.get(`SELECT 1 AS x FROM ${t} LIMIT 1`));
   }
 
   // Removes every business record (members, bookings, money, stock, history) so the club can start
@@ -3387,7 +3387,6 @@ export class Club {
       today: todayList, current, upcoming, to_close: toClose,
       expiring, expired, renewal_alerts: renewalAlerts, stock_alerts: stockAlerts, outstanding_total: due,
       cash_today: this.financeSummary(today, today),
-      lounge: this.loungeOverview(),
     };
     // The Champagne / Autres boissons split is the administrators' Caisse view: the manager's day keeps his old figures.
     if (!isBoss(actor)) {
@@ -3808,6 +3807,5 @@ export class Club {
 }
 
 Object.assign(Club.prototype, ledgerMethods);
-Object.assign(Club.prototype, loungeMethods);
 Object.assign(Club.prototype, shopMethods);
 Object.assign(Club.prototype, billedMethods);
