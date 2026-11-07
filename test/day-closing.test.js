@@ -3,7 +3,7 @@
 // administrator reopens it. The manager closes too; only an administrator reopens.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { Server, Client, ok, UM } from './harness.js';
+import { Server, Client, ok, UM, fundCaisse } from './harness.js';
 
 const server = new Server({});
 let admin;
@@ -23,12 +23,17 @@ before(async () => {
   manager = new Client(server);
   today = (await admin.login('admin', 'day-closing-admin-password')).biz_today;
   await manager.login('gerant', 'day-closing-manager-password');
-  ok(await admin.post('/api/treasury/fund', { amounts: { 'Espèces': 50000 * UM } }));
+  // Yesterday: the cash fund, then the associés' 50 000 into Réservation de séance, which pays the day's expenses and
+  // shortages (no caisse below zero). Today the till opens with 50 000 and no ticket of yesterday's.
+  server.club.at = Date.now() - 24 * 3600 * 1000;
+  ok(await admin.post('/api/treasury/fund', { amounts: { 'Espèces': 0 } }));
+  await fundCaisse(admin, 'reservations', 50000 * UM);
+  server.club.at = null;
 });
 after(() => server.destroy());
 
 const expenseCategory = async () => ok(await admin.get('/api/ledger/categories'))
-  .find((c) => c.kind === 'depense' && c.active && c.name !== 'Écart de caisse' && c.name !== 'Avance repas client');
+  .find((c) => c.kind === 'depense' && c.active && !c.code && c.name !== 'Écart de caisse' && c.name !== 'Avance repas client');
 
 test('la fermeture exige un motif pour les tickets non pointés et pour un écart', async () => {
   const cat = await expenseCategory();
@@ -87,5 +92,6 @@ test('l’effacement des données rouvre aussi les journées fermées', async ()
   ok(await admin.post('/api/admin/reset', { confirm: 'EFFACER' }));
   assert.equal(ok(await admin.get(`/api/day-closing?day=${today}`)).closed, null);
   const cat = await expenseCategory();
+  await fundCaisse(admin, 'reservations', 1000 * UM); // the reset emptied the caisses too
   ok(await admin.post('/api/ledger/entries', { kind: 'depense', category_id: cat.id, amount: 1000 * UM, method: 'Espèces' }));
 });

@@ -97,7 +97,8 @@ test('recettes, dépenses et soldes racontent la même histoire : l’argent re�
   // An other receipt, an expense and a transfer.
   const categories = ok(await admin.get('/api/ledger/categories'));
   const income = categories.find((c) => c.kind === 'recette' && c.active);
-  const spend = categories.find((c) => c.kind === 'depense' && c.active && c.name !== 'Avance repas client');
+  // An overhead (no purchase category): it comes out of Réservation de séance, which the receipt above fills.
+  const spend = categories.find((c) => c.kind === 'depense' && c.active && !c.code && c.name !== 'Avance repas client');
   ok(await admin.post('/api/ledger/entries', { kind: 'recette', category_id: income.id, amount: 30000 * UM, method: wire }));
   ok(await admin.post('/api/ledger/entries', { kind: 'depense', category_id: spend.id, amount: 2500 * UM, method: cash }));
   ok(await admin.post('/api/ledger/entries', { kind: 'transfert', amount: 10000 * UM, method: cash, to_method: wire }));

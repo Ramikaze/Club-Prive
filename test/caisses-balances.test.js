@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { addDays } from '../shared/time.js';
-import { Server, Client, ok, UM } from './harness.js';
+import { Server, Client, ok, UM, fundCaisse } from './harness.js';
 
 const tiles = (b) => b.fund.amount + b.cards + b.caisses.reservations.balance + b.caisses.alcool.balance + b.caisses.cigares.balance;
 
@@ -63,6 +63,8 @@ test('les six tuiles s’additionnent au franc près', async () => {
     ok(await admin.post(`/api/payments/${top.id}/cancel-recharge`, { reason: 'Erreur de saisie' }));
     await step('approvisionnement annulé');
     const categories = ok(await admin.get('/api/ledger/categories'));
+    // The rent comes out of Réservation de séance, which holds nothing yet: the associés put money in first.
+    await fundCaisse(admin, 'reservations', 20000 * UM);
     const cat = (code, name) => categories.find((x) => (code ? x.code === code : x.name === name)).id;
     ok(await admin.post('/api/ledger/entries', { kind: 'depense', category_id: cat('achat_champagne'), account: 'alcool', amount: 12000 * UM, method: 'Espèces' }));
     ok(await admin.post('/api/ledger/entries', { kind: 'depense', category_id: cat(null, 'Loyer'), amount: 15000 * UM, method: 'Espèces' }));
@@ -77,7 +79,7 @@ test('les six tuiles s’additionnent au franc près', async () => {
     assert.equal(end.caisses.cigares.sold, 5000 * UM);
     assert.equal(end.caisses.alcool.purchases_champagne, 12000 * UM);
     assert.equal(end.caisses.reservations.expenses, 15000 * UM);
-    assert.equal(end.caisses.reservations.apports, 1000 * UM);
+    assert.equal(end.caisses.reservations.apports, 21000 * UM);
     assert.equal(end.caisses.alcool.balance, 18000 * UM);
     assert.equal(end.caisses.cigares.balance, 5000 * UM);
     assert.equal(end.cards, 30000 * UM);

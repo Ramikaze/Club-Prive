@@ -8,7 +8,7 @@ import { text, int, toId, flag } from './validate.js';
 import { addDays, addMonths, isValidDate, localParts } from '../shared/time.js';
 import { ACCOUNTS, ACCOUNT_LABELS, CARD_METHOD } from '../shared/rules.js';
 import { isBoss } from '../shared/roles.js';
-import { CATEGORY_CODES, CAISSE_LABEL } from '../shared/caisses.js';
+import { CATEGORY_CODES, CAISSE_LABEL, CAISSES, purchaseAccount } from '../shared/caisses.js';
 import { buyerShown } from './shop.js';
 
 // The largest expense a manager may record alone, in hundredths (5 000 FCFA); above it, an administrator records it.
@@ -238,13 +238,24 @@ export const ledgerMethods = {
       if (kind === 'depense' && category.name === OUTSIDE_MEAL_CATEGORY) {
         throw invalid(`La catégorie « ${OUTSIDE_MEAL_CATEGORY} » est réservée aux repas commandés à l'extérieur.`);
       }
-      if (kind === 'depense' && input.account) {
-        if (!ACCOUNTS.includes(input.account)) throw invalid('Sous-compte invalide.');
+      // The caisse: a purchase always pays from the caisse of its category, whatever was asked; another expense from
+      // the caisse chosen, Réservation de séance by default. An apport goes into the caisse chosen (Réservation de
+      // séance by default); any other receipt belongs to Réservation de séance.
+      if (kind === 'depense') {
+        account = purchaseAccount(category.code);
+        if (!account && input.account) {
+          if (!ACCOUNTS.includes(input.account)) throw invalid('Sous-compte invalide.');
+          account = input.account;
+        }
+      } else if (category.code === 'apport' && input.account) {
+        if (!CAISSES.includes(input.account)) throw invalid('Caisse invalide.');
         account = input.account;
       }
     }
     const label = text(input.label, 'Libellé', { max: 120 }) ?? (kind === 'transfert' ? `Transfert ${method} → ${toMethod}` : category.name);
     const reference = text(input.reference, 'Référence', { max: 80 });
+    // No caisse ever goes below zero (owner's rule): an expense its caisse cannot cover is refused.
+    if (kind === 'depense') this.assertCaisseCovers(account ?? 'reservations', amount, 'Cette dépense');
     const id = this.insert(
       `INSERT INTO ledger_entries (kind, biz_date, category_id, account, method, to_method, amount, label, reference,
          status, is_demo, created_at, created_by)
@@ -272,6 +283,9 @@ export const ledgerMethods = {
     }
     this.assertOpen(e.biz_date, 'Cette opération');
     const reason = text(input.reason, "Motif d'annulation", { required: true, min: 3, max: 300 });
+    // Cancelling a receipt takes its money back out of its caisse: refused once the caisse has spent it. Cancelling an
+    // expense or a profit taking gives money back to its caisse, always allowed.
+    if (e.kind === 'recette') this.assertCaisseCovers(e.account ?? 'reservations', e.amount, 'Cette annulation');
     this.run(
       "UPDATE ledger_entries SET status = 'annulee', cancelled_at = ?, cancelled_by = ?, cancel_reason = ? WHERE id = ?",
       this.nowIso(), actor.id, reason, e.id,
@@ -453,6 +467,8 @@ export const ledgerMethods = {
   // too, above his own limits: it is the till's correction, not an expense of his. No gap, no entry.
   recordCashGap(actor, day, method, gap, reason) {
     if (gap === 0) return null;
+    // A shortage comes out of Réservation de séance, which must hold it (owner's rule: no caisse below zero).
+    if (gap < 0) this.assertCaisseCovers('reservations', -gap, 'Ce manque de caisse');
     const kind = gap > 0 ? 'recette' : 'depense';
     const category = this.get('SELECT id FROM categories WHERE kind = ? AND name = ?', kind, CASH_GAP_CATEGORY);
     if (!category) throw conflict('CATEGORIE_ECART_ABSENTE', `La catégorie « ${CASH_GAP_CATEGORY} » est introuvable : contactez l'administrateur.`);

@@ -15,7 +15,7 @@ import { dateTime, dayLabel, money, paymentMethodText } from '../../lib/format.j
 import { useLoad } from '../../lib/hooks.js';
 import { useMe } from '../../store/useStore.js';
 import { CARD_METHOD } from '../../../shared/rules.js';
-import { RAYONS, RAYON_LABEL, ownsAccount } from '../../../shared/roles.js';
+import { RAYONS, RAYON_LABEL, isBoss } from '../../../shared/roles.js';
 
 const BUYERS = [['journalier', 'Clients journaliers'], ['client', 'Clients réguliers'], ['membre', 'Membres']];
 const BUYER_TYPE = { client: 'client régulier', membre: 'membre' };
@@ -135,7 +135,7 @@ export default function ShopTab() {
         <div className="cash-page">
           <div className="cash-columns">
             <div className="cash-columns-inner">
-              {RAYONS.map((a) => <Column key={a} col={d.accounts[a]} canCancel={ownsAccount(me, a)} onDone={state.reload} />)}
+              {RAYONS.map((a) => <Column key={a} col={d.accounts[a]} canCancel={isBoss(me)} onDone={state.reload} />)}
             </div>
           </div>
           <p className="subtle cash-note">

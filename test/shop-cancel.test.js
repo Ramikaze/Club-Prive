@@ -77,14 +77,16 @@ test('l’associé du rayon annule : stock, argent et carte reviennent', async (
   assert.equal(j.refunds[0].shop_sale_id, r.sale.id);
 });
 
-test('ni le gérant ni l’autre associé n’annulent', async () => {
+test('le gérant n’annule pas ; l’autre associé annule en l’absence du premier', async () => {
   const r = ok(await sale(ger, { account: 'alcool', buyer: { kind: 'journalier' }, lines: [{ product_id: BTL, quantity: 1 }], method: 'Espèces' }));
   refused(await cancel(ger, r.sale.id), 403);
-  refused(await cancel(cig, r.sale.id), 403);
   assert.equal(stockOf(BTL), 4);
   assert.equal(server.club.get('SELECT cancelled_at FROM shop_sales WHERE id = ?', r.sale.id).cancelled_at, null);
-  ok(await admin.post(`/api/shop/sales/${r.sale.id}/cancel`, { reason: 'Contrôle admin' }));
+  // The champagne associé is away: the cigars associé cancels his sale (spec, decision 8), and the journal says who.
+  ok(await cancel(cig, r.sale.id));
   assert.equal(stockOf(BTL), 5);
+  const by = server.club.get("SELECT user_id FROM audit_log WHERE action = 'boutique.vente.annuler' ORDER BY id DESC LIMIT 1").user_id;
+  assert.equal(by, server.club.get("SELECT id FROM users WHERE login = 'cig'").id);
 });
 
 test('une vente s’annule une seule fois et jamais ligne par ligne', async () => {

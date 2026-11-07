@@ -2864,6 +2864,8 @@ export class Club {
   // Refunds a paid line in full: `cardPart` back onto the card, the rest out of the till through `method`.
   writeRefund(actor, c, payment, cardPart, { method, reference = null, reason, restock = false }) {
     this.assertOpen(this.bizToday(), 'Ce remboursement');
+    // The whole line leaves the caisse of its sale (its card part goes back to the card): never below zero.
+    this.assertCaisseCovers(c.account, c.amount, 'Ce remboursement');
     const refundId = this.insert(
       `INSERT INTO refunds (charge_id, payment_id, account, amount, method, reference, reason, restocked, created_at, created_by, card_amount)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
