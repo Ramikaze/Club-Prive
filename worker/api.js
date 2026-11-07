@@ -362,6 +362,7 @@ export function createApi({ db, env = {}, demo = false }) {
   add('GET', '/api/treasury', CLUB, (ctx) => club.treasury(ctx.query.from, ctx.query.to ?? ctx.query.from));
   // The associés' caisses: the six tiles of « Soldes » at the end of a business day (today by default).
   add('GET', '/api/caisses', CLUB, (ctx) => club.caisseBalances(ctx.query.to || undefined));
+  add('POST', '/api/caisses/retrait', CLUB, (ctx) => club.takeProfits(ctx.user, ctx.body));
   // The cash page's « Compter la caisse »: the first cash fund (the settings change, so the bundle comes back), then counts.
   add('POST', '/api/treasury/fund', ADMIN, (ctx) => ({ treasury: club.setCashFund(ctx.user, ctx.body), bundle: club.bundle(ctx.user) }));
   add('POST', '/api/treasury/count', CLUB, (ctx) => club.countCash(ctx.user, ctx.body));

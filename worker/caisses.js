@@ -4,8 +4,10 @@
 // two associés' common money), Champagne et autres boissons and Cigare (each associé's). With the cash fund and the
 // money waiting on the members' cards they add up to the till, to the unit, at every date: every movement of the
 // till lands in exactly one of them, or cancels out with another (money passing through, as an outside meal).
-import { invalid, conflict } from './errors.js';
+import { invalid, forbidden, conflict } from './errors.js';
+import { int, text } from './validate.js';
 import { addDays, isValidDate } from '../shared/time.js';
+import { isBoss } from '../shared/roles.js';
 import { CAISSES, CAISSE_LABEL, splitHalves } from '../shared/caisses.js';
 import { OUTSIDE_MEAL_CATEGORY } from './ledger.js';
 import { DRINK_PART_SQL } from './billed.js';
@@ -87,6 +89,38 @@ export const caisseMethods = {
       caisses,
       till: this.treasuryBalances(to, to).total.closing,
     };
+  },
+
+  // « Prendre des bénéfices »: an associé takes his money out of the till and out of a caisse. It is no expense and no
+  // cut in the club's result (owner's rule, 2026-11-07), but the till holds less. An associé takes from his own caisse
+  // or from the common one, whose amount is shared in two halves, one per associé; the administrator takes from any.
+  // Never more than the caisse holds. Cancelled like any entry (POST /api/ledger/entries/:id/cancel).
+  takeProfits(actor, input) {
+    if (!isBoss(actor)) throw forbidden('Seuls l’administrateur et les associés prennent des bénéfices.');
+    const account = input?.account;
+    if (!CAISSES.includes(account)) throw invalid('Caisse invalide.');
+    if (actor.role === 'associe' && account !== 'reservations' && account !== actor.rayon) {
+      throw forbidden('Un associé ne prend des bénéfices que dans sa propre caisse ou dans la caisse commune.');
+    }
+    const today = this.bizToday();
+    const date = input.biz_date === undefined || input.biz_date === null || input.biz_date === '' ? today : input.biz_date;
+    if (!isValidDate(date)) throw invalid('Date invalide.');
+    if (date > today) throw invalid('La date ne peut pas être dans le futur.');
+    this.assertOpen(date, 'Cette prise de bénéfices');
+    const amount = int(input.amount, 'Montant', { min: 1, max: 1e13 });
+    const method = this.treasuryAccount(input.method, 'Payé depuis');
+    const label = text(input.label, 'Libellé', { max: 120 }) ?? `Prise de bénéfices — ${CAISSE_LABEL[account]}`;
+    this.assertCaisseCovers(account, amount, 'Cette prise de bénéfices');
+    const id = this.insert(
+      `INSERT INTO ledger_entries (kind, biz_date, category_id, account, method, to_method, amount, label, reference,
+         status, is_demo, created_at, created_by)
+       VALUES ('retrait', ?, NULL, ?, ?, NULL, ?, ?, NULL, 'active', 0, ?, ?)`,
+      date, account, method, amount, label, this.nowIso(), actor.id,
+    );
+    this.audit(actor, 'caisse.benefices', 'ledger', id, {
+      caisse: account, montant: amount, compte: method, date, ...(account === 'reservations' ? { parts: splitHalves(amount) } : {}),
+    });
+    return { entry: this.entryRows('e.id = ?', id)[0], caisses: this.caisseBalances(today) };
   },
 
   // Refuses an operation that would take a caisse below zero (owner's rule: a caisse never goes negative). The

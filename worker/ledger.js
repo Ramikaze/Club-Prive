@@ -8,7 +8,7 @@ import { text, int, toId, flag } from './validate.js';
 import { addDays, addMonths, isValidDate, localParts } from '../shared/time.js';
 import { ACCOUNTS, ACCOUNT_LABELS, CARD_METHOD } from '../shared/rules.js';
 import { isBoss } from '../shared/roles.js';
-import { CATEGORY_CODES } from '../shared/caisses.js';
+import { CATEGORY_CODES, CAISSE_LABEL } from '../shared/caisses.js';
 import { buyerShown } from './shop.js';
 
 // The largest expense a manager may record alone, in hundredths (5 000 FCFA); above it, an administrator records it.
@@ -17,12 +17,12 @@ export const MANAGER_EXPENSE_MAX = 5000 * 100;
 export const OUTSIDE_MEAL_CATEGORY = 'Avance repas client';
 // The category of the gaps found when counting the till, in both kinds: a surplus is an other receipt, a shortage an expense.
 export const CASH_GAP_CATEGORY = 'Écart de caisse';
-export const ENTRY_KIND = { depense: 'Dépense', recette: 'Entrée diverse', transfert: 'Transfert' };
+export const ENTRY_KIND = { depense: 'Dépense', recette: 'Entrée diverse', transfert: 'Transfert', retrait: 'Prise de bénéfices' };
 export const ENTRY_STATUS = { active: 'Enregistrée', annulee: 'Annulée' };
 const CATEGORY_KIND = { depense: 'Dépense', recette: 'Entrée diverse' };
 const MOVEMENT_KIND = {
   ouverture: "Solde d'ouverture", encaissement: 'Encaissement', remboursement: 'Remboursement',
-  depense: 'Dépense', recette: 'Entrée diverse', transfert: 'Transfert',
+  depense: 'Dépense', recette: 'Entrée diverse', transfert: 'Transfert', retrait: 'Prise de bénéfices',
   recharge: 'Approvisionnement de carte', annulation_recharge: 'Annulation d’approvisionnement', annulation_repas: 'Annulation de repas',
 };
 
@@ -207,7 +207,8 @@ export const ledgerMethods = {
 
   createEntry(actor, input, { demo = false } = {}) {
     const kind = input.kind;
-    if (!ENTRY_KIND[kind]) throw invalid("Type d'opération invalide.");
+    // A profit taking has its own door (takeProfits), with its own rules.
+    if (!ENTRY_KIND[kind] || kind === 'retrait') throw invalid("Type d'opération invalide.");
     const isAdmin = isBoss(actor);
     if (!isAdmin && kind !== 'depense') {
       throw forbidden('Seul un administrateur ou un associé peut enregistrer une entrée diverse ou un transfert.');
@@ -329,7 +330,8 @@ export const ledgerMethods = {
       `SELECT kind, method, to_method, SUM(amount) AS total FROM ledger_entries
        WHERE status = 'active' AND biz_date >= ? AND biz_date <= ? GROUP BY kind, method, to_method`, from, to,
     )) {
-      if (r.kind === 'depense') add(r.method, 'out', r.total);
+      // A profit taking leaves the till like an expense, without being one.
+      if (r.kind === 'depense' || r.kind === 'retrait') add(r.method, 'out', r.total);
       else if (r.kind === 'recette') add(r.method, 'in', r.total);
       else {
         add(r.method, 'out', r.total);
@@ -634,7 +636,12 @@ export const ledgerMethods = {
       const created = when(e.created_at);
       const at = created.biz_day === e.biz_date ? created : { at: this.dayStartIso(e.biz_date), biz_day: e.biz_date, time: '' };
       const base = { ...at, ref: `OP-${e.id}`, label: e.label, reference: e.reference, account: e.account };
-      if (e.kind === 'transfert') {
+      if (e.kind === 'retrait') {
+        rows.push({
+          ...base, key: `B-${e.id}`, type: 'retrait', label: `Prise de bénéfices — ${CAISSE_LABEL[e.account]}`, detail: e.label,
+          method: e.method, in: 0, out: e.amount,
+        });
+      } else if (e.kind === 'transfert') {
         rows.push({ ...base, key: `T-${e.id}-out`, type: 'transfert', detail: `Vers ${e.to_method}`, method: e.method, in: 0, out: e.amount });
         rows.push({ ...base, key: `T-${e.id}-in`, type: 'transfert', detail: `Depuis ${e.method}`, method: e.to_method, in: e.amount, out: 0 });
       } else {
