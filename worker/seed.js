@@ -240,7 +240,7 @@ function fill(club, { actor, catalogue }) {
   expense(60, 'Loyer', 250000, 'Virement', 'Loyer du salon (démo)');
   expense(45, 'Achats cigares', 90000, 'Espèces', 'Réassort cigares (démo)', 'cigares');
   expense(30, 'Loyer', 250000, 'Virement', 'Loyer du salon (démo)');
-  expense(28, 'Achats boissons', 120000, 'Virement', 'Commande de bouteilles (démo)', 'alcool');
+  expense(28, 'Achats champagne', 120000, 'Virement', 'Commande de bouteilles (démo)', 'alcool');
   expense(12, 'Électricité et eau', 38000, 'MTN MoMo', 'Facture électricité (démo)');
   expense(5, 'Entretien et réparations', 15000, 'Espèces', 'Entretien de la climatisation (démo)');
   if (method('Espèces') !== method('Virement')) {

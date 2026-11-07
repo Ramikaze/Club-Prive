@@ -8,6 +8,7 @@ import { text, int, toId, flag } from './validate.js';
 import { addDays, addMonths, isValidDate, localParts } from '../shared/time.js';
 import { ACCOUNTS, ACCOUNT_LABELS, CARD_METHOD } from '../shared/rules.js';
 import { isBoss } from '../shared/roles.js';
+import { CATEGORY_CODES } from '../shared/caisses.js';
 import { buyerShown } from './shop.js';
 
 // The largest expense a manager may record alone, in hundredths (5 000 FCFA); above it, an administrator records it.
@@ -27,7 +28,7 @@ const MOVEMENT_KIND = {
 
 export const DEFAULT_CATEGORIES = {
   depense: [
-    'Loyer', 'Électricité et eau', 'Salaires', 'Achats cigares', 'Achats boissons', 'Entretien et réparations',
+    'Loyer', 'Électricité et eau', 'Salaires', 'Achats cigares', 'Achats champagne', 'Achats autres boissons', 'Entretien et réparations',
     'Communication', 'Frais bancaires', 'Divers',
   ],
   recette: ['Apport des associés', 'Autre entrée'],
@@ -82,7 +83,7 @@ export const ledgerMethods = {
   // ---------------------------------------------------------------- categories
 
   categoryDTO(c) {
-    return { id: c.id, kind: c.kind, kind_label: CATEGORY_KIND[c.kind], name: c.name, active: !!c.active };
+    return { id: c.id, kind: c.kind, kind_label: CATEGORY_KIND[c.kind], name: c.name, active: !!c.active, code: c.code ?? null };
   },
 
   listCategories() {
@@ -113,6 +114,9 @@ export const ledgerMethods = {
     if (c.name === CASH_GAP_CATEGORY && (name !== c.name || !active)) {
       throw conflict('CATEGORIE_PROTEGEE', `La catégorie « ${CASH_GAP_CATEGORY} » sert au comptage de la caisse : elle ne se renomme ni ne se désactive.`);
     }
+    if (c.code && !active) {
+      throw conflict('CATEGORIE_PROTEGEE', `La catégorie « ${c.name} » sert aux caisses des associés : elle peut être renommée, pas désactivée.`);
+    }
     if (this.get('SELECT 1 AS x FROM categories WHERE kind = ? AND name = ? AND id <> ?', c.kind, name, c.id)) {
       throw conflict('CATEGORIE_EXISTANTE', 'Cette catégorie existe déjà.');
     }
@@ -121,6 +125,37 @@ export const ledgerMethods = {
       avant: { nom: c.name, active: !!c.active }, apres: { nom: name, active },
     });
     return this.listCategories();
+  },
+
+  // The categories the caisses rely on, found by code and never by name (an administrator may rename them). Run at
+  // every boot, after the default categories are in: a code already given is left alone; else the category of that
+  // name takes it; else « Achats boissons » becomes « Achats champagne », when that name is free (a name already
+  // taken is never overwritten); else the category is created. Then every purchase recorded without a caisse goes
+  // to the caisse of its category.
+  ensureCategoryCodes() {
+    for (const [code, c] of Object.entries(CATEGORY_CODES)) {
+      if (this.get('SELECT 1 AS x FROM categories WHERE code = ?', code)) continue;
+      const named = this.get('SELECT id FROM categories WHERE kind = ? AND name = ? AND code IS NULL', c.kind, c.name);
+      if (named) {
+        this.run('UPDATE categories SET code = ? WHERE id = ?', code, named.id);
+        continue;
+      }
+      const nameFree = !this.get('SELECT 1 AS x FROM categories WHERE kind = ? AND name = ?', c.kind, c.name);
+      const legacy = c.legacy && nameFree
+        && this.get('SELECT id FROM categories WHERE kind = ? AND name = ? AND code IS NULL', c.kind, c.legacy);
+      if (legacy) {
+        this.run('UPDATE categories SET name = ?, code = ? WHERE id = ?', c.name, code, legacy.id);
+        continue;
+      }
+      if (nameFree) this.run('INSERT INTO categories (kind, name, created_at, code) VALUES (?, ?, ?, ?)', c.kind, c.name, this.nowIso(), code);
+    }
+    for (const [code, c] of Object.entries(CATEGORY_CODES)) {
+      if (!c.account) continue;
+      this.run(
+        `UPDATE ledger_entries SET account = ? WHERE kind = 'depense' AND account IS NULL
+         AND category_id = (SELECT id FROM categories WHERE code = ?)`, c.account, code,
+      );
+    }
   },
 
   // ---------------------------------------------------------------- manual entries

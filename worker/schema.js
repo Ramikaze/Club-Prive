@@ -742,7 +742,50 @@ const V19 = [
   'CREATE INDEX charges_product ON charges(product_id)',
 ];
 
-export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19];
+// The associés' caisses (2026-11-07). Every category the caisses rely on carries a stable code (its name may change
+// in Paramètres); the codes are set at boot by ensureCategoryCodes, since a fresh database gets its categories only
+// after the migrations, so no row moves here. The ledger learns a fourth kind, the profit taking (« retrait »):
+// money out of the till and out of one caisse, never an expense, with no category but always its caisse. The ledger
+// is rebuilt as in V19: the rows wait in a plain copy while the table is dropped and created again (never renamed),
+// and come back with their ids. No table cites a ledger entry.
+const V20 = [
+  'ALTER TABLE categories ADD COLUMN code TEXT',
+  'CREATE UNIQUE INDEX categories_code ON categories(code) WHERE code IS NOT NULL',
+  'PRAGMA defer_foreign_keys = ON',
+  'CREATE TABLE ledger_entries_v19 AS SELECT * FROM ledger_entries',
+  'DROP TABLE ledger_entries',
+  `CREATE TABLE ledger_entries (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('depense', 'recette', 'transfert', 'retrait')),
+    biz_date TEXT NOT NULL,
+    category_id INTEGER REFERENCES categories(id),
+    account TEXT CHECK (account IS NULL OR account IN ('reservations', 'alcool', 'cigares')),
+    method TEXT NOT NULL,
+    to_method TEXT,
+    amount INTEGER NOT NULL CHECK (amount > 0),
+    label TEXT NOT NULL,
+    reference TEXT,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'annulee')),
+    is_demo INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    cancelled_at TEXT,
+    cancelled_by INTEGER REFERENCES users(id),
+    cancel_reason TEXT,
+    CHECK ((kind = 'transfert') = (to_method IS NOT NULL)),
+    CHECK (kind IN ('transfert', 'retrait') OR category_id IS NOT NULL),
+    CHECK (kind <> 'retrait' OR account IS NOT NULL),
+    CHECK (to_method IS NULL OR to_method <> method)
+  )`,
+  `INSERT INTO ledger_entries (id, kind, biz_date, category_id, account, method, to_method, amount, label, reference, status,
+     is_demo, created_at, created_by, cancelled_at, cancelled_by, cancel_reason)
+   SELECT id, kind, biz_date, category_id, account, method, to_method, amount, label, reference, status,
+     is_demo, created_at, created_by, cancelled_at, cancelled_by, cancel_reason FROM ledger_entries_v19`,
+  'DROP TABLE ledger_entries_v19',
+  'CREATE INDEX ledger_entries_date ON ledger_entries(biz_date)',
+];
+
+export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20];
 
 export function migrate(db) {
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');

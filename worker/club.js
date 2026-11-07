@@ -289,6 +289,7 @@ export class Club {
           this.run('INSERT INTO categories (kind, name, created_at) VALUES (?, ?, ?)', kind, CASH_GAP_CATEGORY, this.nowIso());
         }
       }
+      this.ensureCategoryCodes();
       this.run('DELETE FROM idempotency_keys WHERE created_at < ?', new Date(Date.now() - 7 * 86400000).toISOString());
       this.run('DELETE FROM sessions WHERE expires_at < ?', new Date().toISOString());
     });
