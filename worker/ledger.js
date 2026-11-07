@@ -8,6 +8,7 @@ import { text, int, toId, flag } from './validate.js';
 import { addDays, addMonths, isValidDate, localParts } from '../shared/time.js';
 import { ACCOUNTS, ACCOUNT_LABELS, CARD_METHOD } from '../shared/rules.js';
 import { isBoss } from '../shared/roles.js';
+import { CATEGORY_CODES, CAISSE_LABEL, CAISSES, purchaseAccount } from '../shared/caisses.js';
 import { buyerShown } from './shop.js';
 
 // The largest expense a manager may record alone, in hundredths (5 000 FCFA); above it, an administrator records it.
@@ -16,18 +17,18 @@ export const MANAGER_EXPENSE_MAX = 5000 * 100;
 export const OUTSIDE_MEAL_CATEGORY = 'Avance repas client';
 // The category of the gaps found when counting the till, in both kinds: a surplus is an other receipt, a shortage an expense.
 export const CASH_GAP_CATEGORY = 'Écart de caisse';
-export const ENTRY_KIND = { depense: 'Dépense', recette: 'Entrée diverse', transfert: 'Transfert' };
+export const ENTRY_KIND = { depense: 'Dépense', recette: 'Entrée diverse', transfert: 'Transfert', retrait: 'Prise de bénéfices' };
 export const ENTRY_STATUS = { active: 'Enregistrée', annulee: 'Annulée' };
 const CATEGORY_KIND = { depense: 'Dépense', recette: 'Entrée diverse' };
 const MOVEMENT_KIND = {
   ouverture: "Solde d'ouverture", encaissement: 'Encaissement', remboursement: 'Remboursement',
-  depense: 'Dépense', recette: 'Entrée diverse', transfert: 'Transfert',
+  depense: 'Dépense', recette: 'Entrée diverse', transfert: 'Transfert', retrait: 'Prise de bénéfices',
   recharge: 'Approvisionnement de carte', annulation_recharge: 'Annulation d’approvisionnement', annulation_repas: 'Annulation de repas',
 };
 
 export const DEFAULT_CATEGORIES = {
   depense: [
-    'Loyer', 'Électricité et eau', 'Salaires', 'Achats cigares', 'Achats boissons', 'Entretien et réparations',
+    'Loyer', 'Électricité et eau', 'Salaires', 'Achats cigares', 'Achats champagne', 'Achats autres boissons', 'Entretien et réparations',
     'Communication', 'Frais bancaires', 'Divers',
   ],
   recette: ['Apport des associés', 'Autre entrée'],
@@ -82,7 +83,7 @@ export const ledgerMethods = {
   // ---------------------------------------------------------------- categories
 
   categoryDTO(c) {
-    return { id: c.id, kind: c.kind, kind_label: CATEGORY_KIND[c.kind], name: c.name, active: !!c.active };
+    return { id: c.id, kind: c.kind, kind_label: CATEGORY_KIND[c.kind], name: c.name, active: !!c.active, code: c.code ?? null };
   },
 
   listCategories() {
@@ -113,6 +114,9 @@ export const ledgerMethods = {
     if (c.name === CASH_GAP_CATEGORY && (name !== c.name || !active)) {
       throw conflict('CATEGORIE_PROTEGEE', `La catégorie « ${CASH_GAP_CATEGORY} » sert au comptage de la caisse : elle ne se renomme ni ne se désactive.`);
     }
+    if (c.code && !active) {
+      throw conflict('CATEGORIE_PROTEGEE', `La catégorie « ${c.name} » sert aux caisses des associés : elle peut être renommée, pas désactivée.`);
+    }
     if (this.get('SELECT 1 AS x FROM categories WHERE kind = ? AND name = ? AND id <> ?', c.kind, name, c.id)) {
       throw conflict('CATEGORIE_EXISTANTE', 'Cette catégorie existe déjà.');
     }
@@ -121,6 +125,40 @@ export const ledgerMethods = {
       avant: { nom: c.name, active: !!c.active }, apres: { nom: name, active },
     });
     return this.listCategories();
+  },
+
+  // The categories the caisses rely on, found by code and never by name (an administrator may rename them). Run at
+  // every boot, after the default categories are in: a code already given is left alone; else the category of that
+  // name takes it; else « Achats boissons » becomes « Achats champagne », when that name is free (a name already
+  // taken is never overwritten); else the category is created. Then every purchase recorded without a caisse goes
+  // to the caisse of its category.
+  ensureCategoryCodes() {
+    for (const [code, c] of Object.entries(CATEGORY_CODES)) {
+      if (this.get('SELECT 1 AS x FROM categories WHERE code = ?', code)) continue;
+      const named = this.get('SELECT id FROM categories WHERE kind = ? AND name = ? AND code IS NULL', c.kind, c.name);
+      if (named) {
+        this.run('UPDATE categories SET code = ? WHERE id = ?', code, named.id);
+        continue;
+      }
+      const nameFree = !this.get('SELECT 1 AS x FROM categories WHERE kind = ? AND name = ?', c.kind, c.name);
+      const legacy = c.legacy && nameFree
+        && this.get('SELECT id FROM categories WHERE kind = ? AND name = ? AND code IS NULL', c.kind, c.legacy);
+      if (legacy) {
+        this.run('UPDATE categories SET name = ?, code = ? WHERE id = ?', c.name, code, legacy.id);
+        continue;
+      }
+      if (nameFree) this.run('INSERT INTO categories (kind, name, created_at, code) VALUES (?, ?, ?, ?)', c.kind, c.name, this.nowIso(), code);
+    }
+    // The caisses' buttons open these categories: one deactivated before they carried a code is active again (a
+    // coded category can no longer be deactivated).
+    this.run('UPDATE categories SET active = 1 WHERE code IS NOT NULL AND active = 0');
+    for (const [code, c] of Object.entries(CATEGORY_CODES)) {
+      if (!c.account) continue;
+      this.run(
+        `UPDATE ledger_entries SET account = ? WHERE kind = 'depense' AND account IS NULL
+         AND category_id = (SELECT id FROM categories WHERE code = ?)`, c.account, code,
+      );
+    }
   },
 
   // ---------------------------------------------------------------- manual entries
@@ -172,7 +210,8 @@ export const ledgerMethods = {
 
   createEntry(actor, input, { demo = false } = {}) {
     const kind = input.kind;
-    if (!ENTRY_KIND[kind]) throw invalid("Type d'opération invalide.");
+    // A profit taking has its own door (takeProfits), with its own rules.
+    if (!ENTRY_KIND[kind] || kind === 'retrait') throw invalid("Type d'opération invalide.");
     const isAdmin = isBoss(actor);
     if (!isAdmin && kind !== 'depense') {
       throw forbidden('Seul un administrateur ou un associé peut enregistrer une entrée diverse ou un transfert.');
@@ -202,13 +241,24 @@ export const ledgerMethods = {
       if (kind === 'depense' && category.name === OUTSIDE_MEAL_CATEGORY) {
         throw invalid(`La catégorie « ${OUTSIDE_MEAL_CATEGORY} » est réservée aux repas commandés à l'extérieur.`);
       }
-      if (kind === 'depense' && input.account) {
-        if (!ACCOUNTS.includes(input.account)) throw invalid('Sous-compte invalide.');
+      // The caisse: a purchase always pays from the caisse of its category, whatever was asked; another expense from
+      // the caisse chosen, Réservation de séance by default. An apport goes into the caisse chosen (Réservation de
+      // séance by default); any other receipt belongs to Réservation de séance.
+      if (kind === 'depense') {
+        account = purchaseAccount(category.code);
+        if (!account && input.account) {
+          if (!ACCOUNTS.includes(input.account)) throw invalid('Sous-compte invalide.');
+          account = input.account;
+        }
+      } else if (category.code === 'apport' && input.account) {
+        if (!CAISSES.includes(input.account)) throw invalid('Caisse invalide.');
         account = input.account;
       }
     }
     const label = text(input.label, 'Libellé', { max: 120 }) ?? (kind === 'transfert' ? `Transfert ${method} → ${toMethod}` : category.name);
     const reference = text(input.reference, 'Référence', { max: 80 });
+    // No caisse ever goes below zero (owner's rule): an expense its caisse cannot cover is refused.
+    if (kind === 'depense') this.assertCaisseCovers(account ?? 'reservations', amount, 'Cette dépense', actor);
     const id = this.insert(
       `INSERT INTO ledger_entries (kind, biz_date, category_id, account, method, to_method, amount, label, reference,
          status, is_demo, created_at, created_by)
@@ -236,6 +286,9 @@ export const ledgerMethods = {
     }
     this.assertOpen(e.biz_date, 'Cette opération');
     const reason = text(input.reason, "Motif d'annulation", { required: true, min: 3, max: 300 });
+    // Cancelling a receipt takes its money back out of its caisse: refused once the caisse has spent it. Cancelling an
+    // expense or a profit taking gives money back to its caisse, always allowed.
+    if (e.kind === 'recette') this.assertCaisseCovers(e.account ?? 'reservations', e.amount, 'Cette annulation', actor);
     this.run(
       "UPDATE ledger_entries SET status = 'annulee', cancelled_at = ?, cancelled_by = ?, cancel_reason = ? WHERE id = ?",
       this.nowIso(), actor.id, reason, e.id,
@@ -294,7 +347,8 @@ export const ledgerMethods = {
       `SELECT kind, method, to_method, SUM(amount) AS total FROM ledger_entries
        WHERE status = 'active' AND biz_date >= ? AND biz_date <= ? GROUP BY kind, method, to_method`, from, to,
     )) {
-      if (r.kind === 'depense') add(r.method, 'out', r.total);
+      // A profit taking leaves the till like an expense, without being one.
+      if (r.kind === 'depense' || r.kind === 'retrait') add(r.method, 'out', r.total);
       else if (r.kind === 'recette') add(r.method, 'in', r.total);
       else {
         add(r.method, 'out', r.total);
@@ -349,9 +403,14 @@ export const ledgerMethods = {
       `SELECT COALESCE(SUM(amount), 0) AS other FROM ledger_entries
        WHERE status = 'active' AND kind = 'recette' AND biz_date >= ? AND biz_date <= ?`, from, to,
     );
+    // The profits taken: money out of the till, apart from the result like the other receipts.
+    const { taken } = this.get(
+      `SELECT COALESCE(SUM(amount), 0) AS taken FROM ledger_entries
+       WHERE status = 'active' AND kind = 'retrait' AND biz_date >= ? AND biz_date <= ?`, from, to,
+    );
     return {
       from, to,
-      revenue: sales.total.net, expenses, result: sales.total.net - expenses, other_receipts: other,
+      revenue: sales.total.net, expenses, result: sales.total.net - expenses, other_receipts: other, taken,
       accounts: sales.accounts.map((x) => ({
         account: x.account, label: x.label, net: x.net, expenses: byAccount[x.account], margin: x.net - byAccount[x.account],
       })),
@@ -416,6 +475,8 @@ export const ledgerMethods = {
   // too, above his own limits: it is the till's correction, not an expense of his. No gap, no entry.
   recordCashGap(actor, day, method, gap, reason) {
     if (gap === 0) return null;
+    // A shortage comes out of Réservation de séance, which must hold it (owner's rule: no caisse below zero).
+    if (gap < 0) this.assertCaisseCovers('reservations', -gap, 'Ce manque de caisse', actor);
     const kind = gap > 0 ? 'recette' : 'depense';
     const category = this.get('SELECT id FROM categories WHERE kind = ? AND name = ?', kind, CASH_GAP_CATEGORY);
     if (!category) throw conflict('CATEGORIE_ECART_ABSENTE', `La catégorie « ${CASH_GAP_CATEGORY} » est introuvable : contactez l'administrateur.`);
@@ -599,7 +660,12 @@ export const ledgerMethods = {
       const created = when(e.created_at);
       const at = created.biz_day === e.biz_date ? created : { at: this.dayStartIso(e.biz_date), biz_day: e.biz_date, time: '' };
       const base = { ...at, ref: `OP-${e.id}`, label: e.label, reference: e.reference, account: e.account };
-      if (e.kind === 'transfert') {
+      if (e.kind === 'retrait') {
+        rows.push({
+          ...base, key: `B-${e.id}`, type: 'retrait', label: `Prise de bénéfices — ${CAISSE_LABEL[e.account]}`, detail: e.label,
+          method: e.method, in: 0, out: e.amount,
+        });
+      } else if (e.kind === 'transfert') {
         rows.push({ ...base, key: `T-${e.id}-out`, type: 'transfert', detail: `Vers ${e.to_method}`, method: e.method, in: 0, out: e.amount });
         rows.push({ ...base, key: `T-${e.id}-in`, type: 'transfert', detail: `Depuis ${e.method}`, method: e.to_method, in: e.amount, out: 0 });
       } else {

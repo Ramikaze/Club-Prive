@@ -2,7 +2,7 @@
 // writes run inside the API transaction, including audit and idempotency.
 import { conflict, invalid, forbidden, notFound } from './errors.js';
 import { toId, flag, text } from './validate.js';
-import { SHOP, canSellIn, ownsAccount } from '../shared/roles.js';
+import { SHOP, canSellIn, isBoss } from '../shared/roles.js';
 import { formatTicketNumber } from '../shared/ticket.js';
 import { CARD_METHOD } from '../shared/rules.js';
 
@@ -141,12 +141,14 @@ export const shopMethods = {
   },
 
   // Cancels a whole sale: every line is refunded by the method it was paid with (the card part back onto the
-  // card), the goods go back to stock. Only the boss of the rayon or the admin; money moves today, so a closed day
+  // card), the goods go back to stock. Any associé or the admin; money moves today, so a closed day
   // refuses it (inside writeRefund) and the transaction leaves nothing behind.
   cancelShopSale(actor, saleId, input) {
     const sale = this.get('SELECT * FROM shop_sales WHERE id = ?', toId(saleId, 'Vente'));
     if (!sale) throw notFound('Vente');
-    if (!ownsAccount(actor, sale.account)) throw forbidden('Seul l’associé du rayon ou l’administrateur annule une vente Boutique.');
+    // Any associé, the administrator too: when the associé of the rayon is away, the other acts for him (owner's rule,
+    // 2026-11-07); the journal keeps who did it.
+    if (!isBoss(actor)) throw forbidden('Seul un administrateur ou un associé annule une vente Boutique.');
     const reason = text(input?.reason, 'Motif d’annulation', { required: true, min: 3, max: 300 });
     if (sale.cancelled_at) throw conflict('DEJA_ANNULEE', 'Cette vente est déjà annulée.');
     const lines = this.all("SELECT * FROM charges WHERE shop_sale_id = ? AND status = 'payee' ORDER BY id", sale.id);

@@ -4,6 +4,7 @@ import { actionDialog } from '../ui/Modal.jsx';
 import { toast } from '../ui/toast.jsx';
 import { api } from '../../lib/api.js';
 import { dayLabel, money } from '../../lib/format.js';
+import { caisseMoneyLine } from '../../../shared/caisses.js';
 
 // sign: '+' money in, '−' money out, '' neither (a transfer). A cancelled row is struck through, without colour; a
 // quiet amount (paid with the member's card) is muted: it is listed but adds nothing.
@@ -31,11 +32,14 @@ export function TotalLine({ label, amount, sign = '' }) {
   return <dl className="calc section-gap"><div className="total"><dt>{label}</dt><dd>{sign}{money(amount)}</dd></div></dl>;
 }
 
-// Administrators cancel a ledger entry with a reason; it stays listed, struck through.
+// Administrators cancel a ledger entry with a reason; it stays listed, struck through. The dialog names the caisse
+// the money returns to (an expense, a profit taking) or leaves (a receipt); a transfer touches no caisse.
 export function cancelEntry(e, onDone) {
+  const move = e.kind === 'recette' ? caisseMoneyLine('out', e.account)
+    : e.kind === 'depense' || e.kind === 'retrait' ? caisseMoneyLine('back', e.account) : '';
   return actionDialog({
     title: 'Annuler cette opération',
-    message: `${e.label} — ${money(e.amount)}, ${dayLabel(e.biz_date, 'short')}. L’opération reste visible, barrée, avec le motif.`,
+    message: `${e.label} — ${money(e.amount)}, ${dayLabel(e.biz_date, 'short')}. ${move ? `${move} ` : ''}L’opération reste visible, barrée, avec le motif.`,
     reasonLabel: 'Motif de l’annulation',
     confirmLabel: 'Annuler l’opération',
     danger: true,

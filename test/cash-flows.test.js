@@ -7,7 +7,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { CARD_METHOD } from '../shared/rules.js';
-import { expenseTotal, receiptSummary, tillFigures, transferTotals } from '../src/components/cash/flows.js';
+import { entryTicketRow, expenseTotal, receiptSummary, tillFigures, transferTotals } from '../src/components/cash/flows.js';
 import { Server, Client, ok, UM } from './harness.js';
 
 const server = new Server({});
@@ -59,7 +59,7 @@ function assertOneStory(data) {
     const at = method || 'toutes';
     assert.equal(f.receipts.total, f.till.in, `recettes (${at})`);
     assert.equal(f.expenses, f.till.out, `dépenses (${at})`);
-    assert.equal(f.till.opening + f.till.in - f.till.out + f.till.received - f.till.sent, f.till.closing, `solde (${at})`);
+    assert.equal(f.till.opening + f.till.in - f.till.out - f.till.taken + f.till.received - f.till.sent, f.till.closing, `solde (${at})`);
     if (!method) assert.equal(f.till.received, f.till.sent);
   }
 }
@@ -97,7 +97,8 @@ test('recettes, dépenses et soldes racontent la même histoire : l’argent re�
   // An other receipt, an expense and a transfer.
   const categories = ok(await admin.get('/api/ledger/categories'));
   const income = categories.find((c) => c.kind === 'recette' && c.active);
-  const spend = categories.find((c) => c.kind === 'depense' && c.active && c.name !== 'Avance repas client');
+  // An overhead (no purchase category): it comes out of Réservation de séance, which the receipt above fills.
+  const spend = categories.find((c) => c.kind === 'depense' && c.active && !c.code && c.name !== 'Avance repas client');
   ok(await admin.post('/api/ledger/entries', { kind: 'recette', category_id: income.id, amount: 30000 * UM, method: wire }));
   ok(await admin.post('/api/ledger/entries', { kind: 'depense', category_id: spend.id, amount: 2500 * UM, method: cash }));
   ok(await admin.post('/api/ledger/entries', { kind: 'transfert', amount: 10000 * UM, method: cash, to_method: wire }));
@@ -156,4 +157,22 @@ test('recettes : la Boutique est comptée et montrée à part', async () => {
   assert.equal(after.receipts.total - before.receipts.total, 17000 * UM); // Boutique and séance together
   assert.equal(figures(data, cash).receipts.boutique, 10000 * UM);
   assert.equal(figures(data, 'MTN MoMo').receipts.boutique, 0);
+});
+
+test('tillFigures sépare les bénéfices pris des dépenses', () => {
+  const t = { from: '2026-11-07', to: '2026-11-07', accounts: [{ method: 'Espèces', opening: 10000 * UM, in: 0, out: 7000 * UM, closing: 3000 * UM }] };
+  const entries = [{ kind: 'retrait', status: 'active', method: 'Espèces', amount: 7000 * UM }];
+  const f = tillFigures(t, 'Espèces', { entries, journal: { payments: [], refunds: [] }, openingBalances: null, dayOf: (iso) => iso.slice(0, 10) });
+  assert.equal(f.taken, 7000 * UM);
+  assert.equal(f.out, 0);
+  assert.equal(f.opening + f.in - f.out - f.taken + f.received - f.sent, f.closing);
+});
+
+test('fermeture de la caisse : une prise de bénéfices se lit comme de l’argent sorti', () => {
+  const row = entryTicketRow({ id: 9, kind: 'retrait', amount: 4000 * UM, method: 'Espèces', label: 'Prise de bénéfices — Cigare', created_at: '2026-11-07T10:00:00Z', created_by_name: 'Admin' });
+  assert.equal(row.key, 'E-9');
+  assert.equal(row.amount, -4000 * UM);
+  assert.equal(row.title, 'Prise de bénéfices : Prise de bénéfices — Cigare');
+  assert.equal(entryTicketRow({ id: 1, kind: 'depense', amount: 100, label: 'x' }).amount, -100);
+  assert.equal(entryTicketRow({ id: 2, kind: 'recette', amount: 100, label: 'x' }).title, 'Entrée diverse : x');
 });

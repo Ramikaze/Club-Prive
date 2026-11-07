@@ -12,6 +12,14 @@ import { routeApi } from '../worker/space.js';
 export const UM = 100; // amounts are stored in hundredths
 export const ORIGIN = 'http://club.test';
 
+// Money put into one of the associés' caisses (an « Apport des associés » receipt), so that a test may spend from
+// it: no caisse ever goes below zero. Returns the ledger entry.
+export async function fundCaisse(client, account, amount, method = 'Espèces') {
+  const categories = ok(await client.get('/api/ledger/categories'));
+  const apport = categories.find((c) => c.code === 'apport');
+  return ok(await client.post('/api/ledger/entries', { kind: 'recette', category_id: apport.id, account, amount, method }));
+}
+
 export class Server {
   // `demo`: the club runs as the demo space. `lenientTariffs`: see start().
   constructor(env = {}, { demo = false, lenientTariffs = false } = {}) {

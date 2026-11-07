@@ -334,6 +334,29 @@ main:focus { outline: none; }
 .section-gap-bottom { margin-bottom: 16px; }
 .kpis.cash-balance { margin-bottom: 0; grid-template-columns: repeat(4, minmax(0, 1fr)); }
 @media (max-width: 899px) { .kpis.cash-balance { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* « Soldes » on all accounts: the six tiles of the associés' caisses, in the owner's order, the Champagne one twice as
+   wide (its two halves). They stack on a narrow card; « Par catégorie » aligns its columns on the same grid. An amount
+   never wraps; a title may. */
+.cash-balance-card, .cat-columns { container-type: inline-size; }
+.caisses-grid { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); }
+@container (min-width: 560px) { .caisses-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* Six in a row only where a 1fr tile still holds « 12 345 678 FCFA » on one line: the figure's size follows the card's
+   width (cqi), so a tile of 1/7 of it always fits about fifteen characters. */
+@container (min-width: 1000px) {
+  .caisses-grid { grid-template-columns: 1fr 1fr 1fr 2fr 1fr 1fr; }
+  .caisses-grid .kpi .value { font-size: clamp(0.8rem, calc(1.6cqi - 3px), 1.05rem); }
+}
+.caisse-tile { display: flex; flex-direction: column; padding: 10px; }
+.caisses-grid .kpi .label { font-size: 0.68rem; line-height: 1.3; }
+.caisses-grid .kpi .value { font-size: 1.05rem; white-space: nowrap; }
+.caisses-grid .kpi .hint { font-size: 0.75rem; }
+.caisse-lines { margin: 8px 0 2px; padding-top: 6px; border-top: 1px solid var(--border); font-size: 0.75rem; line-height: 1.6; }
+/* A label and its amount side by side; on a tile too narrow for both, the amount goes under, to the right. */
+.caisse-lines > div { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; column-gap: 6px; }
+.caisse-lines dt { color: var(--text-2); }
+.caisse-lines dd { margin: 0 0 0 auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.caisse-actions { margin-top: auto; padding-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+.caisse-actions .btn { white-space: normal; text-align: left; line-height: 1.25; }
 @media (max-width: 499px) {
   .cash-balance-card { padding: 14px; }
   .kpis.cash-balance .kpi .value { font-size: 1rem; }
@@ -1103,6 +1126,15 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
   .cat-columns-inner { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr); }
   .cat-col-boisson .cat-parts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+/* « Par catégorie » under « Soldes »: on all accounts each column under its tile (spec, decision 6), on the tiles'
+   grid and from the same width; the spacers stand for the fund, the card credit and the till. */
+.cat-spacer { display: none; }
+@container (min-width: 1000px) {
+  .cat-columns-inner.aligned { grid-template-columns: 1fr 1fr 1fr 2fr 1fr 1fr; gap: 10px; }
+  .cat-columns-inner.aligned .cat-spacer { display: block; }
+  .cat-columns-inner.aligned .cat-col { padding: 10px; }
+}
+
 .cash-block .card-head h2, .cash-balance-card .card-head h2 { display: inline-flex; align-items: center; gap: 8px; }
 .cash-block .card-head h2 svg, .cash-balance-card .card-head h2 svg { width: 20px; height: 20px; color: var(--text-3); }
 .cash-balance-card .segmented { flex-wrap: wrap; max-width: 100%; }

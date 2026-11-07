@@ -1,5 +1,5 @@
-// « Par catégorie »: the Caisse in three columns (Réservation séance, Boisson with its Champagne and Autres
-// boissons halves, Cigare), each with its net at the top and, under it, what was billed in the period. Their sum is
+// « Par catégorie »: the Caisse in three columns (Réservation de séance, Champagne et autres boissons with its
+// Champagne and Autres boissons halves, Cigare), each under its tile of « Soldes » on all accounts (same grid), each with its net at the top and, under it, what was billed in the period. Their sum is
 // « Recette du jour » (owner's rule, 2026-11-07: the recette is these three columns and nothing else), and one line
 // under them goes from it to « Argent encaissé », the box of « Soldes ».
 import { Link } from 'react-router-dom';
@@ -83,7 +83,10 @@ export default function CategoryColumns({ sum, billed, method, oneDay, journal, 
       </div>
       {!billed ? <p className="subtle">Les lignes facturées n’ont pas pu être chargées. Rechargez la page.</p> : (
       <div className="cat-columns">
-        <div className="cat-columns-inner">
+        {/* On all accounts, the columns sit on the six tiles' grid, each under its own: nothing under the fund nor the
+            card credit, nothing under the till. */}
+        <div className={`cat-columns-inner${method ? '' : ' aligned'}`}>
+          {!method && <><div className="cat-spacer" aria-hidden="true" /><div className="cat-spacer" aria-hidden="true" /></>}
           {categoryColumns(sum, billed).map((c) => (
             <div key={c.key} className={`cat-col cat-col-${c.key}`}>
               <div className="cat-col-head">
@@ -93,6 +96,7 @@ export default function CategoryColumns({ sum, billed, method, oneDay, journal, 
               <div className="cat-parts">{c.parts.map((p) => <Part key={p.key} p={p} />)}</div>
             </div>
           ))}
+          {!method && <div className="cat-spacer" aria-hidden="true" />}
         </div>
       </div>
       )}

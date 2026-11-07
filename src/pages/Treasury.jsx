@@ -87,6 +87,11 @@ export default function Treasury() {
                       Entrées diverses : {money(r.other_receipts)}. Elles alimentent la trésorerie sans compter dans le résultat (apports des associés, par exemple).
                     </p>
                   )}
+                  {r.taken > 0 && (
+                    <p className="subtle section-gap">
+                      Bénéfices pris : −{money(r.taken)}. Ils sortent de la trésorerie sans être des dépenses : le résultat n’en tient pas compte.
+                    </p>
+                  )}
                 </div>
                 <div className="card">
                   <div className="card-head"><h2>Par sous-compte</h2></div>

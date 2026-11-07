@@ -1,7 +1,8 @@
 // Caisse › Boutique (administrator and associés): the counter sales of the period in two columns, Boutique Cigares
 // and Boutique Champagne. Each column has its total and count, the totals by kind of buyer and by payment method
 // (the member's card apart), the period's sales (a cancelled one struck through) and its cancellations as
-// negative lines. The administrator and the rayon's associé cancel a whole sale, with a reason.
+// negative lines. The administrator and either associé (the other one when the rayon's is away) cancel a whole
+// sale, with a reason; the dialog names the caisse the money leaves.
 import { Link } from 'react-router-dom';
 import Icon from '../ui/Icon.jsx';
 import { actionDialog } from '../ui/Modal.jsx';
@@ -15,7 +16,8 @@ import { dateTime, dayLabel, money, paymentMethodText } from '../../lib/format.j
 import { useLoad } from '../../lib/hooks.js';
 import { useMe } from '../../store/useStore.js';
 import { CARD_METHOD } from '../../../shared/rules.js';
-import { RAYONS, RAYON_LABEL, ownsAccount } from '../../../shared/roles.js';
+import { RAYONS, RAYON_LABEL, isBoss } from '../../../shared/roles.js';
+import { caisseMoneyLine } from '../../../shared/caisses.js';
 
 const BUYERS = [['journalier', 'Clients journaliers'], ['client', 'Clients réguliers'], ['membre', 'Membres']];
 const BUYER_TYPE = { client: 'client régulier', membre: 'membre' };
@@ -36,7 +38,7 @@ function cancelSale(sale, onDone) {
   const key = newKey();
   return actionDialog({
     title: 'Annuler cette vente',
-    message: `Vente ${sale.ticket_number ?? ''} de ${money(sale.amount)}. Toute la vente est annulée : les produits reviennent en stock, l’argent est rendu par le moyen utilisé (la part payée par carte revient sur la carte du membre). La vente reste visible, barrée, avec le motif.`,
+    message: `Vente ${sale.ticket_number ?? ''} de ${money(sale.amount)}. Toute la vente est annulée : les produits reviennent en stock, l’argent est rendu par le moyen utilisé (la part payée par carte revient sur la carte du membre). ${caisseMoneyLine('out', sale.account)} La vente reste visible, barrée, avec le motif.`,
     reasonLabel: 'Motif de l’annulation',
     confirmLabel: 'Annuler la vente',
     danger: true,
@@ -135,7 +137,7 @@ export default function ShopTab() {
         <div className="cash-page">
           <div className="cash-columns">
             <div className="cash-columns-inner">
-              {RAYONS.map((a) => <Column key={a} col={d.accounts[a]} canCancel={ownsAccount(me, a)} onDone={state.reload} />)}
+              {RAYONS.map((a) => <Column key={a} col={d.accounts[a]} canCancel={isBoss(me)} onDone={state.reload} />)}
             </div>
           </div>
           <p className="subtle cash-note">

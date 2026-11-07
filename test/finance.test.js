@@ -78,6 +78,8 @@ test('16. dépenses, entrées et transferts : droits et contrôles', async () =>
   ok(await manager.post('/api/payments', { charge_ids: [sub.charge_id], method: 'Espèces' }));
 
   // The manager records expenses of 5 000 FCFA at most; above it, an administrator records them.
+  // The associés' money into the Cigare caisse, which pays the cigars' purchases (no caisse below zero).
+  ok(await admin.post('/api/ledger/entries', { kind: 'recette', category_id: cat('Apport des associés'), account: 'cigares', amount: 20000 * UM, method: 'Virement' }));
   const robustos = { kind: 'depense', category_id: cat('Achats cigares'), amount: 20000 * UM, method: 'Espèces', account: 'cigares', label: 'Boîte de robustos' };
   assert.equal((await manager.post('/api/ledger/entries', robustos)).status, 403);
   assert.equal((await manager.post('/api/ledger/entries', { ...robustos, amount: 5000 * UM + 1 })).status, 403);
@@ -97,7 +99,6 @@ test('16. dépenses, entrées et transferts : droits et contrôles', async () =>
   assert.equal((await manager.post(`/api/ledger/entries/${expense.id}/cancel`, { reason: 'Erreur' })).status, 403);
 
   ok(await admin.post('/api/ledger/entries', { kind: 'transfert', amount: 30000 * UM, method: 'Espèces', to_method: 'Virement' }));
-  ok(await admin.post('/api/ledger/entries', { kind: 'recette', category_id: cat('Apport des associés'), amount: 10000 * UM, method: 'Virement' }));
   const bad = [
     { kind: 'transfert', amount: 100, method: 'Espèces', to_method: 'Espèces' },
     { kind: 'depense', category_id: cat('Divers'), amount: 100, method: 'Espèces', biz_date: '2999-01-01' },
@@ -121,12 +122,12 @@ test('17. trésorerie et grand livre concordent', async () => {
   const t = ok(await admin.get(`/api/treasury?from=${today}&to=${today}`));
   const acc = (m) => t.accounts.find((a) => a.method === m);
   assert.deepEqual(acc('Espèces'), { method: 'Espèces', opening: 100000 * UM, in: 50000 * UM, out: 50000 * UM, closing: 100000 * UM });
-  assert.deepEqual(acc('Virement'), { method: 'Virement', opening: 0, in: 40000 * UM, out: 0, closing: 40000 * UM });
-  assert.equal(t.total.closing, 140000 * UM);
+  assert.deepEqual(acc('Virement'), { method: 'Virement', opening: 0, in: 50000 * UM, out: 0, closing: 50000 * UM });
+  assert.equal(t.total.closing, 150000 * UM);
   assert.equal(t.result.revenue, 50000 * UM);
   assert.equal(t.result.expenses, 20000 * UM);
   assert.equal(t.result.result, 30000 * UM);
-  assert.equal(t.result.other_receipts, 10000 * UM);
+  assert.equal(t.result.other_receipts, 20000 * UM);
   assert.equal(t.result.accounts.find((a) => a.account === 'cigares').margin, -20000 * UM);
 
   const book = ok(await admin.get(`/api/ledger/book?from=${today}&to=${today}`));
@@ -136,9 +137,9 @@ test('17. trésorerie et grand livre concordent', async () => {
   assert.equal(book.rows.at(-1).balance, book.closing);
   const bank = ok(await admin.get(`/api/ledger/book?from=${today}&method=${encodeURIComponent('Virement')}`));
   assert.equal(bank.opening, 0);
-  assert.equal(bank.closing, 40000 * UM);
+  assert.equal(bank.closing, 50000 * UM);
   const cigars = ok(await admin.get(`/api/ledger/book?from=${today}&account=cigares`));
-  assert.equal(cigars.rows.length, 1);
+  assert.equal(cigars.rows.length, 2); // the apport into the Cigare caisse, then the robustos
   assert.equal(cigars.rows[0].balance, null);
 
   const sheet = ok(await admin.get(`/api/export/grand-livre?from=${today}&to=${today}&format=json`));

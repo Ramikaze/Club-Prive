@@ -50,6 +50,11 @@ export default function CashBalance({ t, method, entries, journal, openingBalanc
           Transferts : +{money(f.received)} reçus, −{money(f.sent)} envoyés. Ils ne sont ni des recettes ni des dépenses ; le solde en caisse en tient compte.
         </p>
       )}
+      {f.taken > 0 && (
+        <p className="subtle cash-note">
+          Bénéfices pris : −{money(f.taken)}. Ils ne sont pas des dépenses ; le solde en caisse en tient compte.
+        </p>
+      )}
     </section>
   );
 }

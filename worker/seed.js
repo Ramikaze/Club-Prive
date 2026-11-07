@@ -237,12 +237,24 @@ function fill(club, { actor, catalogue }) {
     const id = categoryId(category);
     if (id) entry(daysAgo, { kind: 'depense', category_id: id, amount: amount * 100, method: method(payMethod), label, account });
   };
+  // The associés' money put into their caisses before the first expense: no caisse ever goes below zero.
+  const apport = club.get("SELECT id FROM categories WHERE code = 'apport'")?.id;
+  if (apport) {
+    for (const [account, amount] of [['reservations', 1500000], ['alcool', 400000], ['cigares', 300000]]) {
+      entry(70, { kind: 'recette', category_id: apport, account, amount: amount * 100, method: method('Espèces'), label: 'Apport des associés (démo)' });
+    }
+  }
   expense(60, 'Loyer', 250000, 'Virement', 'Loyer du salon (démo)');
   expense(45, 'Achats cigares', 90000, 'Espèces', 'Réassort cigares (démo)', 'cigares');
   expense(30, 'Loyer', 250000, 'Virement', 'Loyer du salon (démo)');
-  expense(28, 'Achats boissons', 120000, 'Virement', 'Commande de bouteilles (démo)', 'alcool');
+  expense(28, 'Achats champagne', 90000, 'Virement', 'Commande de champagne (démo)');
+  expense(27, 'Achats autres boissons', 30000, 'Virement', 'Commande de boissons (démo)');
   expense(12, 'Électricité et eau', 38000, 'MTN MoMo', 'Facture électricité (démo)');
   expense(5, 'Entretien et réparations', 15000, 'Espèces', 'Entretien de la climatisation (démo)');
+  // A profit taking by the cigars associé (fictitious): out of the till and out of the Cigare caisse, never an
+  // expense. Made as the club (any associé may load the data set, whatever his rayon).
+  club.at = Math.min(realNow, startOf(addDays(today, -3), '11:45'));
+  club.takeProfits({ ...owner, role: 'admin' }, { account: 'cigares', amount: 20000 * 100, method: method('Espèces'), label: 'Prise de bénéfices (démo)' });
   if (method('Espèces') !== method('Virement')) {
     entry(20, { kind: 'transfert', amount: 100000 * 100, method: method('Espèces'), to_method: method('Virement'), label: 'Dépôt en banque (démo)' });
   }

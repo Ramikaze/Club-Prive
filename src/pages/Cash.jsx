@@ -13,9 +13,11 @@ import PeriodPicker, { usePeriod } from '../components/ui/PeriodPicker.jsx';
 import EntryDialog, { MANAGER_CAP_TEXT } from '../components/cash/EntryDialog.jsx';
 import CashTabs from '../components/cash/CashTabs.jsx';
 import CashBalance from '../components/cash/CashBalance.jsx';
+import CaissesBalance, { SupplierChoice } from '../components/cash/CaissesBalance.jsx';
+import ProfitDialog from '../components/cash/ProfitDialog.jsx';
 import CountDialog from '../components/cash/CountDialog.jsx';
 import ReceiptsBlock from '../components/cash/ReceiptsBlock.jsx';
-import ExpensesBlock, { TransfersBlock } from '../components/cash/ExpensesBlock.jsx';
+import ExpensesBlock, { ProfitsBlock, TransfersBlock } from '../components/cash/ExpensesBlock.jsx';
 import CategoryColumns from '../components/cash/CategoryColumns.jsx';
 import { Details, OpenNotes } from '../components/cash/CashDetails.jsx';
 import { DayClosingBar } from '../components/cash/CloseDay.jsx';
@@ -74,7 +76,7 @@ function AdminCash() {
   const period = useCashPeriod();
   const { from, to } = period;
   const state = useLoad(async () => {
-    const [sum, billed, journal, open, ledger, categories, treasury] = await Promise.all([
+    const [sum, billed, journal, open, ledger, categories, treasury, caisses] = await Promise.all([
       api.get(`/api/finance/summary${qs({ from, to })}`),
       // A failure of the billed lines must not take the whole page down: the block says so instead.
       api.get(`/api/finance/billed${qs({ from, to })}`).catch(() => null),
@@ -83,8 +85,9 @@ function AdminCash() {
       api.get(`/api/ledger/entries${qs({ from, to })}`),
       api.get('/api/ledger/categories'),
       api.get(`/api/treasury${qs({ from, to })}`),
+      api.get(`/api/caisses${qs({ to })}`),
     ]);
-    return { sum, billed, journal, open, entries: ledger.entries, categories, treasury };
+    return { sum, billed, journal, open, entries: ledger.entries, categories, treasury, caisses };
   }, [from, to]);
   useScrollToBlock(period.params.get('type'), !!state.data);
 
@@ -95,6 +98,24 @@ function AdminCash() {
 
   const add = (kind) => openDialog(EntryDialog, { kind, categories: state.data?.categories ?? [], onDone: state.reload });
   const count = () => openDialog(CountDialog, { method, onDone: state.reload });
+  // The buttons of the caisse tiles: a supplier paid from the caisse (the Champagne one asks which purchase), profits
+  // taken, money put in.
+  const onCaisse = (action, account) => {
+    const d = state.data;
+    if (!d) return;
+    const pay = (code) => openDialog(EntryDialog, { kind: 'depense', categoryCode: code, title: 'Payer un fournisseur', categories: d.categories, onDone: state.reload });
+    if (action === 'fournisseur') {
+      if (account === 'cigares') pay('achat_cigares');
+      else openDialog(SupplierChoice, { onChoose: pay });
+    } else if (action === 'benefices') {
+      openDialog(ProfitDialog, { account, balance: d.caisses.caisses[account].balance, onDone: state.reload });
+    } else {
+      openDialog(EntryDialog, {
+        kind: 'recette', categoryCode: 'apport', account: account === 'reservations' ? '' : account, title: 'Faire un apport',
+        categories: d.categories, onDone: state.reload,
+      });
+    }
+  };
   const oneDay = from === to;
 
   return (
@@ -128,7 +149,10 @@ function AdminCash() {
       <Loaded state={state}>{(d) => (
         <div className="cash-page">
           <DayClosingBar isAdmin onChange={state.reload} />
-          <CashBalance t={d.treasury} method={method} entries={d.entries} journal={d.journal} openingBalances={settings.opening_balances} onCount={count} />
+          {/* On all accounts, the associés' caisses (six tiles); on one account, its four figures. */}
+          {method
+            ? <CashBalance t={d.treasury} method={method} entries={d.entries} journal={d.journal} openingBalances={settings.opening_balances} onCount={count} />
+            : <CaissesBalance b={d.caisses} onCount={count} onAction={onCaisse} />}
           <CategoryColumns
             sum={d.sum} billed={d.billed} method={method} oneDay={oneDay}
             journal={d.journal} entries={d.entries} t={d.treasury} openingBalances={settings.opening_balances}
@@ -145,6 +169,7 @@ function AdminCash() {
           </div>
           <OpenNotes groups={d.open} onDone={state.reload} allPeriods />
           <TransfersBlock entries={d.entries} method={method} oneDay={oneDay} isAdmin onChange={state.reload} />
+          <ProfitsBlock entries={d.entries} method={method} oneDay={oneDay} isAdmin onChange={state.reload} />
           <Details sum={d.sum} />
         </div>
       )}</Loaded>

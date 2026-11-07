@@ -8,6 +8,7 @@ import { searchable, smartFilter } from '../shared/search.js';
 import { text, int, toId, flag, frDate } from './validate.js';
 import { ledgerMethods, DEFAULT_CATEGORIES, OUTSIDE_MEAL_CATEGORY, CASH_GAP_CATEGORY } from './ledger.js';
 import { shopMethods, buyerShown } from './shop.js';
+import { caisseMethods } from './caisses.js';
 import { billedMethods, DRINK_PART_SQL } from './billed.js';
 import {
   newTicketCode, formatTicketNumber, normalizeTicketCode, memberInitials, paymentLines, TICKET_CODE_LENGTH,
@@ -289,6 +290,7 @@ export class Club {
           this.run('INSERT INTO categories (kind, name, created_at) VALUES (?, ?, ?)', kind, CASH_GAP_CATEGORY, this.nowIso());
         }
       }
+      this.ensureCategoryCodes();
       this.run('DELETE FROM idempotency_keys WHERE created_at < ?', new Date(Date.now() - 7 * 86400000).toISOString());
       this.run('DELETE FROM sessions WHERE expires_at < ?', new Date().toISOString());
     });
@@ -1591,6 +1593,12 @@ export class Club {
        WHERE c.name = ? AND e.reference = ? AND e.status = 'active'`, OUTSIDE_MEAL_CATEGORY, `ENC-${p.id}`,
     );
     if (expense) this.assertOpen(expense.biz_date, 'Cette annulation');
+    // A meal from before the cash fund is part of it: its courier's money and the member's are already in the fund,
+    // so cancelling it now would take money out of the till that the caisses never received.
+    const fundDate = this.settings().opening_balances.date;
+    if (fundDate && this.bizDayOf(Date.parse(p.paid_at)) < fundDate) {
+      throw conflict('REPAS_AVANT_FOND', "Ce repas date d'avant le fond de caisse : son argent est compté dans le fond, il ne s'annule plus.");
+    }
     this.tx(() => {
       if (p.card_amount > 0) this.walletMove(actor, p.member_id, 'remboursement', p.card_amount, { paymentId: p.id, reason });
       this.run(
@@ -2862,6 +2870,8 @@ export class Club {
   // Refunds a paid line in full: `cardPart` back onto the card, the rest out of the till through `method`.
   writeRefund(actor, c, payment, cardPart, { method, reference = null, reason, restock = false }) {
     this.assertOpen(this.bizToday(), 'Ce remboursement');
+    // The whole line leaves the caisse of its sale (its card part goes back to the card): never below zero.
+    this.assertCaisseCovers(c.account, c.amount, 'Ce remboursement', actor);
     const refundId = this.insert(
       `INSERT INTO refunds (charge_id, payment_id, account, amount, method, reference, reason, restocked, created_at, created_by, card_amount)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -3808,4 +3818,5 @@ export class Club {
 
 Object.assign(Club.prototype, ledgerMethods);
 Object.assign(Club.prototype, shopMethods);
+Object.assign(Club.prototype, caisseMethods);
 Object.assign(Club.prototype, billedMethods);

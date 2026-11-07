@@ -1,6 +1,7 @@
 // Human-readable history lines for the audit log (reservation history, settings > journal).
 import { RAYON_LABEL } from '../../shared/roles.js';
 import { money, fmtDuration, dayLabel, ACCOUNT_LABEL } from './format.js';
+import { CAISSE_LABEL } from '../../shared/caisses.js';
 
 export const ACTION_LABELS = {
   'cave.creer': 'Cave créée',
@@ -69,6 +70,7 @@ export const ACTION_LABELS = {
   'operation.creer': 'Opération de trésorerie',
   'operation.annuler': 'Opération annulée',
   'caisse.compter': 'Caisse comptée',
+  'caisse.benefices': 'Prise de bénéfices',
   'caisse.fermer': 'Caisse du jour fermée',
   'caisse.rouvrir': 'Caisse du jour rouverte',
   'periode.cloturer': 'Mois clôturé',
@@ -79,7 +81,7 @@ export const ACTION_LABELS = {
 
 const BUYER_LABEL = { journalier: 'client journalier', client: 'client régulier', membre: 'membre' };
 
-const ENTRY_KIND = { depense: 'Dépense', recette: 'Entrée diverse', transfert: 'Transfert' };
+const ENTRY_KIND = { depense: 'Dépense', recette: 'Entrée diverse', transfert: 'Transfert', retrait: 'Prise de bénéfices' };
 
 export function auditSummary(a) {
   const d = a.details ?? {};
@@ -144,6 +146,8 @@ export function auditSummary(a) {
       return `${d.avant} → ${d.apres} — ${d.motif}`;
     case 'operation.creer':
       return `${ENTRY_KIND[d.type] ?? ''} du ${dayLabel(d.date, 'short')} : ${d.libelle} (${money(d.montant)}, ${d.compte}${d.vers ? ` → ${d.vers}` : ''})`;
+    case 'caisse.benefices':
+      return `${CAISSE_LABEL[d.caisse] ?? d.caisse} : ${money(d.montant)} (${d.compte})${d.parts ? `, soit ${money(d.parts.cigares)} chacun` : ''}`;
     case 'operation.annuler':
       return `${ENTRY_KIND[d.type] ?? ''} de ${money(d.montant)} — ${d.motif}`;
     case 'periode.cloturer':

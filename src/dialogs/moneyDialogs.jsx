@@ -13,6 +13,7 @@ import { useLoad, useSubmit } from '../lib/hooks.js';
 import Icon from '../components/ui/Icon.jsx';
 import { CARD_METHOD } from '../../shared/rules.js';
 import { renewalWhatsAppText } from '../../shared/wallet.js';
+import { caisseMoneyLine } from '../../shared/caisses.js';
 import { sendWhatsAppText } from './reservationDialogs.jsx';
 
 // ---------------------------------------------------------------- payment (full payment of selected lines)
@@ -163,6 +164,7 @@ function RefundDialog({ close, charge, onDone }) {
           <div><dt>Sous-compte</dt><dd><AccountTag account={charge.account} /></dd></div>
           <div className="total"><dt>Montant remboursé</dt><dd>{money(charge.amount)}</dd></div>
         </dl>
+        <p className="subtle">{caisseMoneyLine('out', charge.account)} La part payée par carte revient sur la carte du membre.</p>
         <p className="subtle">Version 1 : remboursement intégral de la ligne. Les règles de remboursement restent à valider.</p>
         <label className="field"><span>Motif</span>
           <textarea name="reason" required minLength={3} maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)} /></label>

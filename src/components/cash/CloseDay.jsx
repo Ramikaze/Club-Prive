@@ -12,6 +12,7 @@ import { api, newKey, qs } from '../../lib/api.js';
 import { bizToday, dateTime, dayLabel, money, parseMoney, paymentPurpose } from '../../lib/format.js';
 import { useLoad, useSubmit } from '../../lib/hooks.js';
 import { formatTicketNumber } from '../../../shared/ticket.js';
+import { entryTicketRow } from './flows.js';
 
 // The notes counted one by one in the cash till; the coins are typed as one amount.
 const NOTES = [10000, 5000, 2000, 1000, 500];
@@ -26,10 +27,7 @@ function dayTickets(journal, entries) {
       who: p.member_name,
     })),
     ...journal.refunds.map((r) => ({ key: `R-${r.id}`, at: r.created_at, amount: -r.amount, method: r.method, title: `Remboursement : ${r.label}`, who: r.member_name })),
-    ...entries.filter((e) => e.status === 'active').map((e) => ({
-      key: `E-${e.id}`, at: e.created_at, amount: e.kind === 'depense' ? -e.amount : e.amount, method: e.method,
-      title: `${e.kind === 'depense' ? 'Dépense' : e.kind === 'transfert' ? 'Transfert' : 'Entrée diverse'} : ${e.label}`, who: e.created_by_name,
-    })),
+    ...entries.filter((e) => e.status === 'active').map(entryTicketRow),
   ];
   return rows.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
 }

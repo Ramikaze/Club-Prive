@@ -2,7 +2,7 @@
 // l'application » stays the administrator's, and product files, photos and stock follow his rayon.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { Server, Client, ok, UM } from './harness.js';
+import { Server, Client, ok, UM, fundCaisse } from './harness.js';
 
 const server = new Server({});
 let admin;
@@ -104,7 +104,8 @@ test('le stock et la photo suivent le rayon, en hausse comme en baisse', async (
 
 test('l’associé enregistre une dépense sans plafond ni date imposée', async () => {
   const cat = ok(await cig.get('/api/ledger/categories'))
-    .find((c) => c.kind === 'depense' && c.active && c.name !== 'Écart de caisse' && c.name !== 'Avance repas client');
+    .find((c) => c.kind === 'depense' && c.active && !c.code && c.name !== 'Écart de caisse' && c.name !== 'Avance repas client');
+  await fundCaisse(admin, 'reservations', 20000 * UM);
   const body = { kind: 'depense', category_id: cat.id, method: 'Espèces', amount: 20000 * UM, biz_date: yesterday };
   ok(await cig.post('/api/ledger/entries', body));
   // The manager is held to the cap and to the day, as before.
