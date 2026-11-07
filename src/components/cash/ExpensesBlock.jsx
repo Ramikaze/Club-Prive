@@ -7,6 +7,12 @@ import { byCategory, expenseTotal, onAccount } from './flows.js';
 import { entryWhen } from './when.js';
 import { money } from '../../lib/format.js';
 import { CAISSE_LABEL } from '../../../shared/caisses.js';
+import { formatForeign } from '../../../shared/suppliers.js';
+
+// A tracked supplier's payment names its supplier, with the amount in euros or dollars between brackets.
+const supplierPart = (e) => (e.supplier_name
+  ? `${e.supplier_name}${e.foreign_amount ? ` (${formatForeign(e.foreign_amount, e.foreign_currency)})` : ''}`
+  : null);
 
 function EntryTitle({ e }) {
   return (
@@ -50,7 +56,7 @@ export default function ExpensesBlock({ entries, method = '', oneDay, isAdmin, o
               <CashRow
                 key={e.id}
                 title={<EntryTitle e={e} />}
-                meta={metaLine(w.text, e.category_name, e.method, e.account && <AccountTag account={e.account} />, e.reference,
+                meta={metaLine(w.text, e.category_name, supplierPart(e), e.method, e.account && <AccountTag account={e.account} />, e.reference,
                   e.created_by_name && `par ${e.created_by_name}`)}
                 note={cancelNote(e)}
                 amount={e.amount} sign="−" cancelled={e.status !== 'active'}

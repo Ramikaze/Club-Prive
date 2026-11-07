@@ -17,6 +17,8 @@ export const MANAGER_EXPENSE_MAX = 5000 * 100;
 export const OUTSIDE_MEAL_CATEGORY = 'Avance repas client';
 // The category of the gaps found when counting the till, in both kinds: a surplus is an other receipt, a shortage an expense.
 export const CASH_GAP_CATEGORY = 'Écart de caisse';
+// The transport of the goods, asked by the owner on 2026-11-07; like the upkeep, paid from the caisse chosen.
+export const TRANSPORT_CATEGORY = 'Transport';
 export const ENTRY_KIND = { depense: 'Dépense', recette: 'Entrée diverse', transfert: 'Transfert', retrait: 'Prise de bénéfices' };
 export const ENTRY_STATUS = { active: 'Enregistrée', annulee: 'Annulée' };
 const CATEGORY_KIND = { depense: 'Dépense', recette: 'Entrée diverse' };
@@ -29,7 +31,7 @@ const MOVEMENT_KIND = {
 export const DEFAULT_CATEGORIES = {
   depense: [
     'Loyer', 'Électricité et eau', 'Salaires', 'Achats cigares', 'Achats champagne', 'Achats autres boissons', 'Entretien et réparations',
-    'Communication', 'Frais bancaires', 'Divers',
+    'Transport', 'Communication', 'Frais bancaires', 'Divers',
   ],
   recette: ['Apport des associés', 'Autre entrée'],
 };
@@ -173,15 +175,18 @@ export const ledgerMethods = {
       created_at: e.created_at, created_by_name: e.created_by_name ?? null,
       cancelled_at: e.cancelled_at, cancelled_by_name: e.cancelled_by_name ?? null, cancel_reason: e.cancel_reason,
       period_closed: !!e.period_closed,
+      supplier_id: e.supplier_id ?? null, supplier_name: e.supplier_name ?? null,
+      foreign_amount: e.foreign_amount ?? null, foreign_currency: e.foreign_currency ?? null,
     };
   },
 
   entryRows(where, ...params) {
     return this.all(
-      `SELECT e.*, c.name AS category_name, u.name AS created_by_name, cu.name AS cancelled_by_name,
+      `SELECT e.*, c.name AS category_name, u.name AS created_by_name, cu.name AS cancelled_by_name, s.name AS supplier_name,
          EXISTS (SELECT 1 FROM closed_periods cp WHERE cp.month = substr(e.biz_date, 1, 7)) AS period_closed
        FROM ledger_entries e
        LEFT JOIN categories c ON c.id = e.category_id
+       LEFT JOIN suppliers s ON s.id = e.supplier_id
        LEFT JOIN users u ON u.id = e.created_by
        LEFT JOIN users cu ON cu.id = e.cancelled_by
        WHERE ${where} ORDER BY e.biz_date DESC, e.id DESC`,
@@ -228,7 +233,7 @@ export const ledgerMethods = {
     if (!isAdmin && amount > MANAGER_EXPENSE_MAX) {
       throw forbidden("Le gérant enregistre des dépenses de 5 000 FCFA au plus. Au-delà, adressez-vous à un administrateur ou à un associé.");
     }
-    const method = this.treasuryAccount(input.method, kind === 'transfert' ? 'Compte de départ' : kind === 'depense' ? 'Payé depuis' : 'Reçu sur');
+    const method = this.treasuryAccount(input.method, kind === 'transfert' ? 'Compte de départ' : kind === 'depense' ? 'Mode de paiement' : 'Reçu sur');
     let toMethod = null;
     let category = null;
     let account = null;
@@ -255,19 +260,24 @@ export const ledgerMethods = {
         account = input.account;
       }
     }
-    const label = text(input.label, 'Libellé', { max: 120 }) ?? (kind === 'transfert' ? `Transfert ${method} → ${toMethod}` : category.name);
+    // A tracked supplier's payment (spec comptes fournisseurs): only from its caisse, never more than the club owes it.
+    const paid = this.supplierPayment(actor, input, { kind, category, amount });
+    const label = text(input.label, 'Libellé', { max: 120 })
+      ?? (paid ? `Paiement — ${paid.supplier.name}` : kind === 'transfert' ? `Transfert ${method} → ${toMethod}` : category.name);
     const reference = text(input.reference, 'Référence', { max: 80 });
     // No caisse ever goes below zero (owner's rule): an expense its caisse cannot cover is refused.
     if (kind === 'depense') this.assertCaisseCovers(account ?? 'reservations', amount, 'Cette dépense', actor);
     const id = this.insert(
       `INSERT INTO ledger_entries (kind, biz_date, category_id, account, method, to_method, amount, label, reference,
-         status, is_demo, created_at, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
+         status, is_demo, created_at, created_by, supplier_id, foreign_amount, foreign_currency)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)`,
       kind, date, category?.id ?? null, account, method, toMethod, amount, label, reference, demo ? 1 : 0, this.nowIso(), actor.id,
+      paid?.supplier.id ?? null, paid?.foreign_amount ?? null, paid?.foreign_currency ?? null,
     );
     this.audit(actor, 'operation.creer', 'ledger', id, {
       type: kind, date, montant: amount, compte: method, vers: toMethod, categorie: category?.name ?? null,
       sous_compte: account, libelle: label,
+      ...(paid ? { fournisseur: paid.supplier.name, montant_devise: paid.foreign_amount, devise: paid.foreign_currency } : {}),
     });
     return this.entryRows('e.id = ?', id)[0];
   },

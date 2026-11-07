@@ -363,6 +363,14 @@ export function createApi({ db, env = {}, demo = false }) {
   // The associés' caisses: the six tiles of « Soldes » at the end of a business day (today by default).
   add('GET', '/api/caisses', CLUB, (ctx) => club.caisseBalances(ctx.query.to || undefined));
   add('POST', '/api/caisses/retrait', CLUB, (ctx) => club.takeProfits(ctx.user, ctx.body));
+  // Supplier accounts: what the club owes each supplier, its credit purchases and the balances carried over (a payment
+  // is an expense: POST /api/ledger/entries with supplier_id).
+  add('GET', '/api/suppliers', CLUB, () => club.listSuppliers());
+  add('POST', '/api/suppliers', CLUB, (ctx) => club.createSupplier(ctx.user, ctx.body));
+  add('GET', '/api/suppliers/:id', CLUB, (ctx) => club.supplierSheet(ctx.params.id));
+  add('PUT', '/api/suppliers/:id', CLUB, (ctx) => club.updateSupplier(ctx.user, ctx.params.id, ctx.body));
+  add('POST', '/api/suppliers/:id/purchases', CLUB, (ctx) => club.recordSupplierPurchase(ctx.user, ctx.params.id, ctx.body));
+  add('POST', '/api/suppliers/purchases/:id/cancel', CLUB, (ctx) => club.cancelSupplierPurchase(ctx.user, ctx.params.id, ctx.body));
   // The cash page's « Compter la caisse »: the first cash fund (the settings change, so the bundle comes back), then counts.
   add('POST', '/api/treasury/fund', ADMIN, (ctx) => ({ treasury: club.setCashFund(ctx.user, ctx.body), bundle: club.bundle(ctx.user) }));
   add('POST', '/api/treasury/count', CLUB, (ctx) => club.countCash(ctx.user, ctx.body));

@@ -785,7 +785,55 @@ const V20 = [
   'CREATE INDEX ledger_entries_date ON ledger_entries(biz_date)',
 ];
 
-export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20];
+// Supplier accounts (2026-11-07, spec docs/superpowers/specs/2026-11-07-comptes-fournisseurs-design.md): what the club
+// owes each supplier. A supplier belongs to one associé's caisse. Its credit purchases and the balances carried over
+// from before the application wait in supplier_purchases (no money moves); a payment is an expense of the ledger that
+// names its supplier. An amount in euros or dollars may ride along, for information only (cents, like the FCFA).
+// No table is rebuilt: the ledger only gains three columns. If the branch feat/credit-clients (its own V21) is merged
+// first, this migration becomes V22, appended after it.
+const V21 = [
+  `CREATE TABLE suppliers (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    account TEXT NOT NULL CHECK (account IN ('alcool', 'cigares')),
+    country TEXT,
+    currency TEXT CHECK (currency IS NULL OR currency IN ('EUR', 'USD')),
+    contact TEXT,
+    notes TEXT,
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    is_demo INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    updated_at TEXT,
+    updated_by INTEGER REFERENCES users(id)
+  )`,
+  `CREATE TABLE supplier_purchases (
+    id INTEGER PRIMARY KEY,
+    supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
+    kind TEXT NOT NULL CHECK (kind IN ('achat', 'report')),
+    biz_date TEXT NOT NULL,
+    amount INTEGER NOT NULL CHECK (amount > 0),
+    foreign_amount INTEGER CHECK (foreign_amount IS NULL OR foreign_amount > 0),
+    foreign_currency TEXT CHECK (foreign_currency IS NULL OR foreign_currency IN ('EUR', 'USD')),
+    reference TEXT,
+    label TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'annulee')),
+    is_demo INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    cancelled_at TEXT,
+    cancelled_by INTEGER REFERENCES users(id),
+    cancel_reason TEXT,
+    CHECK ((foreign_amount IS NULL) = (foreign_currency IS NULL))
+  )`,
+  'CREATE INDEX supplier_purchases_supplier ON supplier_purchases(supplier_id)',
+  'ALTER TABLE ledger_entries ADD COLUMN supplier_id INTEGER REFERENCES suppliers(id)',
+  'ALTER TABLE ledger_entries ADD COLUMN foreign_amount INTEGER',
+  'ALTER TABLE ledger_entries ADD COLUMN foreign_currency TEXT',
+  'CREATE INDEX ledger_entries_supplier ON ledger_entries(supplier_id)',
+];
+
+export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21];
 
 export function migrate(db) {
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');

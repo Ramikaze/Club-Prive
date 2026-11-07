@@ -25,6 +25,9 @@ export const NAV = [
   { path: '/boutique', label: 'Boutique', short: 'Boutique', icon: 'shop' },
   { path: '/produits', label: 'Stocks', short: 'Stocks', icon: 'box' },
   { path: '/caisse', label: 'Caisse', short: 'Caisse', icon: 'wallet', tab: true },
+  // Supplier accounts (owner, 2026-11-07: « Les fournisseurs s'afficheront ici. Ils auront leur icône. »): the
+  // administrator and the associés only.
+  { path: '/fournisseurs', label: 'Fournisseurs', short: 'Fournisseurs', icon: 'truck', boss: true },
   { group: 'Administration', admin: true },
   { path: '/parametres', label: 'Administration', short: 'Admin', icon: 'settings', admin: true, also: ['/tresorerie', '/grand-livre', '/cloture', '/journal'] },
 ];
@@ -95,7 +98,7 @@ function AccountMenu({ close, onTour }) {
     <Modal title={me.name} onClose={close}>
       <div className="menu-list">
         <p className="muted">{ROLE_LABEL[me.role]}{!demo && ` · identifiant ${me.login}`}</p>
-        {NAV.filter((n) => n.path && !n.tab && (!n.admin || isAdmin)).map((n) => (
+        {NAV.filter((n) => n.path && !n.tab && (!n.admin || isAdmin) && (!n.boss || isBoss(me))).map((n) => (
           <button key={n.path} type="button" className="btn btn-block" onClick={() => go(n.path)}><Icon name={n.icon} /> {n.label}</button>
         ))}
         <hr />
@@ -173,7 +176,7 @@ export default function AppShell() {
           </button>
         </div>
         <nav className="side-nav" id="side-nav" data-tour="nav">
-          {NAV.filter((n) => !n.admin || isAdmin).map((n) => (n.group
+          {NAV.filter((n) => (!n.admin || isAdmin) && (!n.boss || isBoss(me))).map((n) => (n.group
             ? <div key={n.group} className="side-nav-label">{n.group}</div>
             : <Link key={n.path} to={n.path} aria-current={aria(n.path)} title={tip(n.label)}><Icon name={n.icon} /><span className="side-label">{n.label}</span></Link>))}
         </nav>
