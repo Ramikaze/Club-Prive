@@ -59,7 +59,7 @@ function assertOneStory(data) {
     const at = method || 'toutes';
     assert.equal(f.receipts.total, f.till.in, `recettes (${at})`);
     assert.equal(f.expenses, f.till.out, `dépenses (${at})`);
-    assert.equal(f.till.opening + f.till.in - f.till.out + f.till.received - f.till.sent, f.till.closing, `solde (${at})`);
+    assert.equal(f.till.opening + f.till.in - f.till.out - f.till.taken + f.till.received - f.till.sent, f.till.closing, `solde (${at})`);
     if (!method) assert.equal(f.till.received, f.till.sent);
   }
 }
@@ -157,4 +157,13 @@ test('recettes : la Boutique est comptée et montrée à part', async () => {
   assert.equal(after.receipts.total - before.receipts.total, 17000 * UM); // Boutique and séance together
   assert.equal(figures(data, cash).receipts.boutique, 10000 * UM);
   assert.equal(figures(data, 'MTN MoMo').receipts.boutique, 0);
+});
+
+test('tillFigures sépare les bénéfices pris des dépenses', () => {
+  const t = { from: '2026-11-07', to: '2026-11-07', accounts: [{ method: 'Espèces', opening: 10000 * UM, in: 0, out: 7000 * UM, closing: 3000 * UM }] };
+  const entries = [{ kind: 'retrait', status: 'active', method: 'Espèces', amount: 7000 * UM }];
+  const f = tillFigures(t, 'Espèces', { entries, journal: { payments: [], refunds: [] }, openingBalances: null, dayOf: (iso) => iso.slice(0, 10) });
+  assert.equal(f.taken, 7000 * UM);
+  assert.equal(f.out, 0);
+  assert.equal(f.opening + f.in - f.out - f.taken + f.received - f.sent, f.closing);
 });

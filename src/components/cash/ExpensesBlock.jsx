@@ -6,6 +6,7 @@ import { CashRow, EntryCancel, TotalLine, metaLine } from './CashRow.jsx';
 import { byCategory, expenseTotal, onAccount } from './flows.js';
 import { entryWhen } from './when.js';
 import { money } from '../../lib/format.js';
+import { CAISSE_LABEL } from '../../../shared/caisses.js';
 
 function EntryTitle({ e }) {
   return (
@@ -76,6 +77,30 @@ export function TransfersBlock({ entries, method = '', oneDay, isAdmin, onChange
             key={e.id}
             title={<EntryTitle e={e} />}
             meta={metaLine(w.text, `${e.method} → ${e.to_method}`, e.reference, e.created_by_name && `par ${e.created_by_name}`)}
+            note={cancelNote(e)}
+            amount={e.amount} cancelled={e.status !== 'active'}
+            action={<EntryCancel e={e} isAdmin={isAdmin} onDone={onChange} />}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// The profits taken in the period (« Prendre des bénéfices »): money out of the till and out of a caisse, never an
+// expense. Cancelled like any entry, with a reason.
+export function ProfitsBlock({ entries, method = '', oneDay, isAdmin, onChange }) {
+  const list = entries.filter((e) => e.kind === 'retrait' && onAccount(method, e.method));
+  if (!list.length) return null;
+  return (
+    <section className="card cash-block" id="caisse-benefices">
+      <div className="card-head"><h2><Icon name="wallet" /> Bénéfices pris</h2><span className="subtle">hors dépenses</span></div>
+      <div className="list">
+        {newestFirst(list, oneDay).map(({ e, w }) => (
+          <CashRow
+            key={e.id}
+            title={<EntryTitle e={e} />}
+            meta={metaLine(w.text, `Caisse « ${CAISSE_LABEL[e.account]} »`, e.method, e.created_by_name && `par ${e.created_by_name}`)}
             note={cancelNote(e)}
             amount={e.amount} cancelled={e.status !== 'active'}
             action={<EntryCancel e={e} isAdmin={isAdmin} onDone={onChange} />}

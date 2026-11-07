@@ -108,6 +108,11 @@ export const expenseTotal = (entries, method = '') => entries
   .filter((e) => e.kind === 'depense' && e.status === 'active' && onAccount(method, e.method))
   .reduce((s, e) => s + e.amount, 0);
 
+// The profits taken from the account shown (active ones only): money out of the till, never an expense.
+export const takenTotal = (entries, method = '') => entries
+  .filter((e) => e.kind === 'retrait' && e.status === 'active' && onAccount(method, e.method))
+  .reduce((s, e) => s + e.amount, 0);
+
 // Transfers received and sent by the account shown; on all accounts, both are the sum of the transfers.
 export function transferTotals(entries, method = '') {
   let received = 0;
@@ -133,8 +138,9 @@ export function byCategory(entries) {
 // « Soldes » from the treasury (GET /api/treasury): the cash fund, the recettes and dépenses as the blocks read
 // them, and the closing balance. The treasury counts a transfer in and out, a refund or a cancelled recharge or
 // meal out, and the opening balances, when set within the period, in or out: here the transfers are shown apart,
-// what was given back comes off the recettes, and the opening balances are the cash fund. So, on all accounts,
-// fund + recettes − dépenses = closing; on one account, plus the transfers received, less those sent.
+// what was given back comes off the recettes, the profits taken are shown apart (`taken`: out of the till, never an
+// expense), and the opening balances are the cash fund. So, on all accounts, fund + recettes − dépenses − profits
+// taken = closing; on one account, plus the transfers received, less those sent.
 export function tillFigures(t, method, { entries, journal, openingBalances, dayOf }) {
   const shown = method ? t.accounts.filter((x) => x.method === method) : t.accounts;
   let opening = 0;
@@ -160,5 +166,6 @@ export function tillFigures(t, method, { entries, journal, openingBalances, dayO
     if (!isSale(p) && cancelledBy(p, t.to, dayOf) && onAccount(method, p.method)) given += cashOf(p);
   }
   const closing = shown.reduce((s, x) => s + x.closing, 0);
-  return { opening, in: inflow - received - given, out: outflow - sent - given, received, sent, closing };
+  const taken = takenTotal(entries, method);
+  return { opening, in: inflow - received - given, out: outflow - sent - given - taken, taken, received, sent, closing };
 }
