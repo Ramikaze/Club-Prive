@@ -17,7 +17,7 @@ export const TOUR_DEMO_DONE_KEY = 'club-tour-demo-done';
 const STEPS = [
   {
     route: '/', targets: ['[data-tour="nav"]', '[data-tour="nav-mobile"]'], icon: 'menu', title: 'Le menu du club',
-    body: 'Les rubriques suivent la soirée : Accueil, Salles, Agenda, Membres / Clients, Boutique, Stocks & Cave, Caisse. Administration n’apparaît qu’à l’administrateur.',
+    body: 'Les rubriques suivent la soirée : Accueil, Salles, Agenda, Membres / Clients, Boutique, Stocks, Caisse. Administration n’apparaît qu’à l’administrateur.',
     features: ['Sur téléphone : rubriques principales en bas de l’écran, les autres dans le menu en haut à droite', 'Les onglets en tête de page passent d’une sous-rubrique à l’autre'],
   },
   {
@@ -73,11 +73,7 @@ const STEPS = [
   {
     route: '/produits', targets: ['[data-tour="products"]'], icon: 'box', title: 'Catalogue & stocks',
     body: 'Cigares, champagne et autres boissons (vendus entiers uniquement) avec leur stock. Entrées et ajustements avec motif ; chaque mouvement reste dans l’historique du produit.',
-    features: ['Filtres Tous, Cigares, Champagne, Autres boissons', 'Alerte quand un stock passe sous son seuil', 'Onglet Cave pour la conservation'],
-  },
-  {
-    route: '/lounge', targets: ['.humidor-card', '[data-tour="lounge"]'], icon: 'humidor', title: 'Cave à cigares',
-    body: 'Relevés manuels d’humidité et de température, seuils propres à chaque cave. Un relevé hors seuils déclenche une alerte ; un contrôle en retard est signalé.',
+    features: ['Filtres Tous, Cigares, Champagne, Autres boissons', 'Alerte quand un stock passe sous son seuil'],
   },
   {
     route: '/caisse', targets: ['#caisse-recettes', '[data-tour="cash"]'], icon: 'wallet', title: 'Caisse',
@@ -134,7 +130,7 @@ const WELCOME_FEATURES = [
   ['receipt', 'Consommations de la séance'],
   ['calendar', 'Agenda jour, semaine, liste'],
   ['users', 'Membres, cartes, crédits'],
-  ['box', 'Stocks & cave à cigares'],
+  ['box', 'Stocks des produits'],
   ['wallet', 'Caisse, dépenses, comptabilité'],
 ];
 

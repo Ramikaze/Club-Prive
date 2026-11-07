@@ -5,11 +5,7 @@ import { MIGRATIONS, migrate } from '../worker/schema.js';
 import { nodeDb } from '../worker/db-node.js';
 import { encodeQrMatrix, qrSvgPath } from '../src/lib/qrcode.js';
 
-let server, admin, manager, cave;
-const thresholds = {
-  name: 'Réserve', location: 'Salon', humidity_min: 65, humidity_max: 72,
-  temperature_min: 18, temperature_max: 22, reading_interval_hours: 24,
-};
+let server, admin, manager;
 
 beforeEach(async () => {
   server = new Server({ SETUP_TOKEN: 'installation-lounge' }, { lenientTariffs: true });
@@ -19,78 +15,8 @@ beforeEach(async () => {
   ok(await admin.post('/api/users', { login: 'gerant', name: 'Gérant test', role: 'gerant', password: 'test-lounge-manager' }));
   manager = new Client(server);
   await manager.login('gerant', 'test-lounge-manager');
-  cave = ok(await admin.post('/api/humidors', thresholds));
 });
 afterEach(() => server.destroy());
-
-test('caves : authentification et rôles contrôlés par le serveur', async () => {
-  const anonymous = new Client(server);
-  assert.equal((await anonymous.get('/api/lounge')).status, 401);
-  assert.equal((await manager.post('/api/humidors', { ...thresholds, name: 'Autre' })).status, 403);
-  assert.equal((await manager.put(`/api/humidors/${cave.id}`, thresholds)).status, 403);
-  const detail = ok(await manager.post(`/api/humidors/${cave.id}/readings`, { humidity: 68, temperature: 20 }));
-  assert.equal((await manager.post(`/api/humidor-readings/${detail.latest.id}/void`, { reason: 'Erreur de saisie' })).status, 403);
-  assert.equal(detail.latest.created_by_name, 'Gérant test');
-});
-
-test('caves : seuils et relevés validés, zéro et décimales acceptés sans coercition de champs vides', async () => {
-  for (const patch of [{ humidity_min: 72 }, { temperature_max: 18 }, { humidity_max: 101 }, { reading_interval_hours: 0 }]) {
-    assert.equal((await admin.put(`/api/humidors/${cave.id}`, { ...thresholds, ...patch })).status, 400);
-  }
-  for (const value of ['', ' ', null, true, [], 'NaN', 100.1, -1, 65.55]) {
-    assert.equal((await manager.post(`/api/humidors/${cave.id}/readings`, { humidity: value, temperature: 20 })).status, 400, String(value));
-  }
-  assert.equal((await admin.post('/api/humidors', { ...thresholds, name: 'réserve' })).status, 409);
-  const detail = ok(await manager.post(`/api/humidors/${cave.id}/readings`, { humidity: '68,5', temperature: 0 }));
-  assert.equal(detail.latest.humidity, 68.5);
-  assert.equal(detail.latest.temperature, 0);
-  assert.equal(detail.status, 'alerte');
-});
-
-test('caves : contrôle manquant, conforme, périmé, hors seuil et annulation tracée', async () => {
-  assert.equal(cave.status, 'a_controler');
-  const now = Date.now();
-  server.club.at = now;
-  const first = ok(await manager.post(`/api/humidors/${cave.id}/readings`, { humidity: 65, temperature: 22 }));
-  assert.equal(first.status, 'conforme');
-  server.club.at = now + 24 * 3600000;
-  assert.equal(ok(await admin.get(`/api/humidors/${cave.id}`)).status, 'a_controler');
-  const bad = ok(await manager.post(`/api/humidors/${cave.id}/readings`, { humidity: 73, temperature: 23 }));
-  assert.equal(bad.status, 'alerte');
-  const corrected = ok(await admin.post(`/api/humidor-readings/${bad.latest.id}/void`, { reason: 'Erreur de lecture' }));
-  assert.equal(corrected.latest.id, first.latest.id);
-  assert.equal(corrected.status, 'a_controler');
-  assert.equal(corrected.readings[0].void_reason, 'Erreur de lecture');
-  assert.equal(corrected.readings[0].voided_by_name, 'Admin test');
-  ok(await admin.post(`/api/humidor-readings/${first.latest.id}/void`, { reason: 'Appareil défectueux' }));
-  assert.equal(ok(await admin.get(`/api/humidors/${cave.id}`)).latest, null);
-  const audit = server.club.get("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'cave.releve_annuler'");
-  assert.equal(audit.n, 2);
-});
-
-test('caves : relevé rejoué une seule fois et changement de seuil appliqué au dernier relevé', async () => {
-  const body = { humidity: 73, temperature: 20 };
-  const key = { 'idempotency-key': 'reading-once-123' };
-  const first = ok(await manager.post(`/api/humidors/${cave.id}/readings`, body, key));
-  const again = await manager.post(`/api/humidors/${cave.id}/readings`, body, key);
-  assert.equal(ok(again).latest.id, first.latest.id);
-  assert.equal(again.headers.get('Idempotent-Replayed'), 'true');
-  assert.equal(ok(await admin.get(`/api/humidors/${cave.id}`)).readings.length, 1);
-  assert.equal(ok(await admin.put(`/api/humidors/${cave.id}`, { ...thresholds, humidity_max: 75 })).status, 'conforme');
-});
-
-test('lounge : indicateurs cohérents, persistance et effacement dans le bon ordre', async () => {
-  ok(await manager.post(`/api/humidors/${cave.id}/readings`, { humidity: 80, temperature: 20 }));
-  const before = ok(await manager.get('/api/lounge'));
-  assert.deepEqual(before.summary, { humidors: 1, alerts: 1, checks_due: 0 });
-  assert.deepEqual(ok(await manager.get('/api/dashboard')).lounge.summary, before.summary);
-  await server.restart();
-  assert.deepEqual(ok(await manager.get('/api/lounge')).summary, before.summary);
-  ok(await admin.post('/api/admin/reset', { confirm: 'EFFACER' }));
-  const after = ok(await admin.get('/api/lounge'));
-  assert.equal(after.humidors.length, 0);
-  assert.equal(after.summary.humidors, 0);
-});
 
 test('migration v1 vers v5 : membres et données existants conservés, migration rejouable', () => {
   const db = nodeDb(':memory:');

@@ -32,7 +32,7 @@ const safeSheetName = (name, used) => {
 
 // In the demo space a file name starts with DEMO_, so nobody takes the file for the club's own. Every
 // workbook is saved from here: the server already names its own exports that way (such a name is kept
-// as is), and this covers the names the pages choose themselves (closing, treasury, humidor journal).
+// as is), and this covers the names the pages choose themselves (closing, treasury).
 // The space is the server's answer (store.demo), the same signal as the demo frame.
 const workbookName = (fileName) => {
   const name = fileName.endsWith('.xlsx') ? fileName : `${fileName}.xlsx`;

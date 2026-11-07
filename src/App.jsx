@@ -19,7 +19,6 @@ import Reservation from './pages/Reservation.jsx';
 import BookingConfirmation from './pages/BookingConfirmation.jsx';
 import Products from './pages/Products.jsx';
 import Shop from './pages/Shop.jsx';
-import Lounge, { HumidorPage } from './pages/Lounge.jsx';
 import Cash from './pages/Cash.jsx';
 import ShopTab from './components/cash/ShopTab.jsx';
 import Ticket from './pages/Ticket.jsx';
@@ -175,8 +174,7 @@ export default function App() {
             <Route path="reservations/:id" element={<Reservation />} />
             <Route path="reservations/:id/confirmation" element={<BookingConfirmation />} />
             <Route path="produits" element={<Products />} />
-            <Route path="lounge" element={<Lounge />} />
-            <Route path="lounge/caves/:id" element={<HumidorPage />} />
+            <Route path="lounge/*" element={<Navigate to="/produits" replace />} />
             <Route path="caisse" element={<Cash />} />
             <Route path="caisse/ticket/:id" element={<Ticket />} />
             <Route path="caisse/historique-tickets" element={<BossOnly><TicketHistory /></BossOnly>} />

@@ -165,7 +165,7 @@ function ResetDialog({ close, onDone }) {
         <Notice kind="danger">Opération définitive : les données effacées ne peuvent pas être récupérées. Utilisez-la pour repartir d’un club vide.</Notice>
         <dl className="kv">
           <dt>Supprimés</dt>
-          <dd>membres, cartes, abonnements, réservations, encaissements, remboursements, produits, stocks, caves et relevés, dépenses, clôtures, historique et soldes d’ouverture.</dd>
+          <dd>membres, cartes, abonnements, réservations, encaissements, remboursements, produits, stocks, dépenses, clôtures, historique et soldes d’ouverture.</dd>
           <dt>Conservés</dt>
           <dd>comptes utilisateurs, paramètres, formules, catégories.</dd>
         </dl>

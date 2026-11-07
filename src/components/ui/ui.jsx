@@ -176,18 +176,6 @@ export function RouteTabs({ items, label }) {
   );
 }
 
-export function StocksTabs() {
-  return (
-    <RouteTabs
-      label="Rubriques Stocks et Cave"
-      items={[
-        ['/produits', 'Catalogue & Stocks', 'box'],
-        ['/lounge', 'Cave (conservation)', 'humidor'],
-      ]}
-    />
-  );
-}
-
 export function AdminTabs() {
   const isAdmin = useIsAdmin();
   return (

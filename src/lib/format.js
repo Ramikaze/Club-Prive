@@ -81,7 +81,6 @@ export const relLabel = (rel) => `${pad2(Math.floor(rel / 60) % 24)}:${pad2(rel 
 export { ROLE_LABEL } from '../../shared/roles.js';
 
 export const STATUS = {
-  humidor: { conforme: ['Dans les seuils', 'ok'], alerte: ['Hors seuils', 'danger'], a_controler: ['À contrôler', 'warn'] },
   res: { reservee: ['Réservée', 'info'], en_cours: ['En cours', 'ok'], terminee: ['Terminée', 'neutral'], annulee: ['Annulée', 'danger'] },
   charge: { due: ['À encaisser', 'warn'], payee: ['Encaissée', 'ok'], annulee: ['Annulée', 'neutral'], remboursee: ['Remboursée', 'danger'] },
   sub: {

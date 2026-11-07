@@ -23,7 +23,7 @@ export const NAV = [
   { path: '/agenda', label: 'Agenda', short: 'Agenda', icon: 'calendar', tab: true, also: ['/reservations'] },
   { path: '/membres', label: 'Membres / Clients', short: 'Membres', icon: 'users', tab: true, also: ['/clients', '/cartes'] },
   { path: '/boutique', label: 'Boutique', short: 'Boutique', icon: 'shop' },
-  { path: '/produits', label: 'Stocks & Cave', short: 'Stocks', icon: 'box', also: ['/lounge'] },
+  { path: '/produits', label: 'Stocks', short: 'Stocks', icon: 'box' },
   { path: '/caisse', label: 'Caisse', short: 'Caisse', icon: 'wallet', tab: true },
   { group: 'Administration', admin: true },
   { path: '/parametres', label: 'Administration', short: 'Admin', icon: 'settings', admin: true, also: ['/tresorerie', '/grand-livre', '/cloture', '/journal'] },
