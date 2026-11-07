@@ -785,13 +785,62 @@ const V20 = [
   'CREATE INDEX ledger_entries_date ON ledger_entries(biz_date)',
 ];
 
+// V21: regular clients buy on credit (spec docs/superpowers/specs/2026-11-07-credit-clients-design.md). A client has a
+// credit limit (0: no credit); a Boutique sale may be left unpaid (`on_credit`); a line keeps what is already paid of
+// it (`settled`), since a settlement (`payments.settlement`) may pay a line in part. So a line may now be collected by
+// several payments, and refunded more than once (a cancelled settlement, then the sale's own cancellation): the
+// allocations and refunds lose their one-per-line uniqueness.
+const V21 = [
+  'ALTER TABLE members ADD COLUMN credit_limit INTEGER NOT NULL DEFAULT 0 CHECK (credit_limit >= 0)',
+  'ALTER TABLE shop_sales ADD COLUMN on_credit INTEGER NOT NULL DEFAULT 0 CHECK (on_credit IN (0, 1))',
+  'ALTER TABLE charges ADD COLUMN settled INTEGER NOT NULL DEFAULT 0 CHECK (settled >= 0)',
+  "UPDATE charges SET settled = amount WHERE status IN ('payee', 'remboursee')",
+  'ALTER TABLE payments ADD COLUMN settlement INTEGER NOT NULL DEFAULT 0 CHECK (settlement IN (0, 1))',
+  'PRAGMA defer_foreign_keys = ON',
+  'CREATE TABLE payment_allocations_v20 AS SELECT * FROM payment_allocations',
+  'DROP TABLE payment_allocations',
+  `CREATE TABLE payment_allocations (
+    id INTEGER PRIMARY KEY,
+    payment_id INTEGER NOT NULL REFERENCES payments(id),
+    charge_id INTEGER NOT NULL REFERENCES charges(id),
+    account TEXT NOT NULL CHECK (account IN ('reservations', 'alcool', 'cigares')),
+    amount INTEGER NOT NULL CHECK (amount > 0)
+  )`,
+  `INSERT INTO payment_allocations (id, payment_id, charge_id, account, amount)
+   SELECT id, payment_id, charge_id, account, amount FROM payment_allocations_v20`,
+  'DROP TABLE payment_allocations_v20',
+  'CREATE INDEX payment_allocations_charge ON payment_allocations(charge_id)',
+  'CREATE INDEX payment_allocations_payment ON payment_allocations(payment_id)',
+  'CREATE TABLE refunds_v20 AS SELECT * FROM refunds',
+  'DROP TABLE refunds',
+  `CREATE TABLE refunds (
+    id INTEGER PRIMARY KEY,
+    charge_id INTEGER NOT NULL REFERENCES charges(id),
+    payment_id INTEGER NOT NULL REFERENCES payments(id),
+    account TEXT NOT NULL CHECK (account IN ('reservations', 'alcool', 'cigares')),
+    amount INTEGER NOT NULL CHECK (amount > 0),
+    method TEXT NOT NULL,
+    reference TEXT,
+    reason TEXT NOT NULL,
+    restocked INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    card_amount INTEGER NOT NULL DEFAULT 0 CHECK (card_amount >= 0)
+  )`,
+  `INSERT INTO refunds (id, charge_id, payment_id, account, amount, method, reference, reason, restocked, created_at, created_by, card_amount)
+   SELECT id, charge_id, payment_id, account, amount, method, reference, reason, restocked, created_at, created_by, card_amount FROM refunds_v20`,
+  'DROP TABLE refunds_v20',
+  'CREATE INDEX refunds_charge ON refunds(charge_id)',
+  'CREATE INDEX refunds_payment ON refunds(payment_id)',
+  'CREATE INDEX refunds_created ON refunds(created_at)',
+];
+
 // Supplier accounts (2026-11-07, spec docs/superpowers/specs/2026-11-07-comptes-fournisseurs-design.md): what the club
 // owes each supplier. A supplier belongs to one associé's caisse. Its credit purchases and the balances carried over
 // from before the application wait in supplier_purchases (no money moves); a payment is an expense of the ledger that
 // names its supplier. An amount in euros or dollars may ride along, for information only (cents, like the FCFA).
-// No table is rebuilt: the ledger only gains three columns. If the branch feat/credit-clients (its own V21) is merged
-// first, this migration becomes V22, appended after it.
-const V21 = [
+// No table is rebuilt: the ledger only gains three columns. It comes after the regular clients' credit (V21).
+const V22 = [
   `CREATE TABLE suppliers (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -833,7 +882,7 @@ const V21 = [
   'CREATE INDEX ledger_entries_supplier ON ledger_entries(supplier_id)',
 ];
 
-export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21];
+export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22];
 
 export function migrate(db) {
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');

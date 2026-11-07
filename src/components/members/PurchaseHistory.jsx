@@ -12,6 +12,8 @@ const FILTERS = [['tout', 'Tout'], ['boutique', 'Boutique'], ['seance', 'Séance
 
 // card_amount is the whole payment's card part, so it only tells that the card took part, never an amount per line.
 const methodText = (l) => {
+  // A credit purchase not paid in full yet waits on the client's account.
+  if (l.on_credit && l.status === 'due') return l.settled ? `À crédit (réglé ${money(l.settled)})` : 'À crédit';
   if (!l.method) return '—';
   return l.card_amount && l.method !== CARD_METHOD ? `${CARD_METHOD} + ${l.method}` : l.method;
 };
@@ -24,7 +26,8 @@ function Lines({ lines }) {
         <tr key={l.charge_id} className={l.status === 'annulee' || l.status === 'remboursee' ? 'is-muted' : ''}>
           <td data-label="Date" className="nowrap">{dateTime(l.at)}</td>
           <td data-label="Produit"><span>{l.label}{l.quantity > 1 ? ` × ${l.quantity}` : ''}
-            {l.status !== 'payee' ? <> <Chip group="charge" value={l.status} /></> : null}
+            {l.on_credit && l.status === 'due' ? <> <span className="chip chip-warn">à crédit</span></>
+              : l.status !== 'payee' ? <> <Chip group="charge" value={l.status} /></> : null}
             {l.as_client ? <> <span className="chip" title="Achat fait avant le passage en membre">en tant que client régulier</span></> : null}</span></td>
           <td data-label="Montant" className="num">{money(l.amount)}</td>
           <td data-label="Origine">{l.origin === 'boutique' ? 'Boutique' : <Link to={`/reservations/${l.reservation_id}`}>Séance n° {l.reservation_id}</Link>}</td>

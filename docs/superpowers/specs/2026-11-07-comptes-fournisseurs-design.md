@@ -118,8 +118,7 @@ caisse du fournisseur. La règle centrale des caisses (fond + cartes + trois cai
 
 ## Construction (choix du constructeur)
 
-- **Migration V21** (à renuméroter V22 si la branche `feat/credit-clients`, qui ajoute aussi une V21, est fusionnée
-  avant) : table `suppliers`, table `supplier_purchases` (achats et soldes reportés), et trois colonnes ajoutées à
+- **Migration V22** (la V21 est celle du crédit des clients réguliers, fusionnée avant) : table `suppliers`, table `supplier_purchases` (achats et soldes reportés), et trois colonnes ajoutées à
   `ledger_entries` : `supplier_id`, `foreign_amount`, `foreign_currency`. Aucune table existante n'est reconstruite.
   Les montants en devise sont des entiers en centimes, comme les montants en FCFA.
 - **Un paiement est une dépense** (`ledger_entries`, kind `depense`, `supplier_id` renseigné) : caisses, trésorerie,

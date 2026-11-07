@@ -19,7 +19,7 @@
 - No caisse below zero: a payment goes through `assertCaisseCovers` (already called by `createEntry`).
 - Roles: administrator and associés (`isBoss`) do everything on both caisses; the gérant sees nothing and pays no tracked supplier.
 - Screen text in French, one sentence per idea; a money amount never wraps.
-- Migration is V21 on this branch; if `feat/credit-clients` (its own V21) merges first, renumber to V22 (append after it).
+- Migration is V22, after the regular clients' credit (V21, merged into main first).
 - Every commit waits for the user's explicit yes.
 
 ## Review Focus
@@ -35,7 +35,7 @@
 ### Task 1: Tables, supplier sheet and purchases (server)
 
 **Files:**
-- Modify: `worker/schema.js` (new `V21`, appended to `MIGRATIONS`)
+- Modify: `worker/schema.js` (new `V22`, appended to `MIGRATIONS` after the credit V21)
 - Create: `shared/suppliers.js`
 - Create: `worker/suppliers.js`
 - Modify: `worker/club.js` (import + `Object.assign(Club.prototype, supplierMethods)`; `WIPE_ORDER` gets `'supplier_purchases', 'suppliers'` right after `'ledger_entries'`)
@@ -69,7 +69,7 @@
 Run: `node --test test/suppliers.test.js`
 Expected: FAIL (404 on `/api/suppliers`).
 
-- [ ] **Step 3: Add `V21` to `worker/schema.js`**
+- [ ] **Step 3: Add `V22` to `worker/schema.js`**
 
 ```sql
 CREATE TABLE suppliers (

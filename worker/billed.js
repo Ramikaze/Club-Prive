@@ -32,7 +32,7 @@ export const billedMethods = {
            LEFT JOIN rooms ro ON ro.id = r.room_id
            LEFT JOIN subscriptions su ON su.id = c.subscription_id
            LEFT JOIN shop_sales s ON s.id = c.shop_sale_id
-           LEFT JOIN payment_allocations pa ON pa.charge_id = c.id
+           LEFT JOIN payment_allocations pa ON pa.id = (SELECT MAX(x.id) FROM payment_allocations x WHERE x.charge_id = c.id)
            WHERE c.created_at >= ? AND c.created_at < ?
          )
        ) WHERE rn <= ${LINES_PER_COLUMN} ORDER BY col, rn`, a, b,
