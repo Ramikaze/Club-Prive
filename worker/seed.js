@@ -251,6 +251,10 @@ function fill(club, { actor, catalogue }) {
   expense(27, 'Achats autres boissons', 30000, 'Virement', 'Commande de boissons (démo)');
   expense(12, 'Électricité et eau', 38000, 'MTN MoMo', 'Facture électricité (démo)');
   expense(5, 'Entretien et réparations', 15000, 'Espèces', 'Entretien de la climatisation (démo)');
+  // A profit taking by the cigars associé (fictitious): out of the till and out of the Cigare caisse, never an
+  // expense. Made as the club (any associé may load the data set, whatever his rayon).
+  club.at = Math.min(realNow, startOf(addDays(today, -3), '11:45'));
+  club.takeProfits({ ...owner, role: 'admin' }, { account: 'cigares', amount: 20000 * 100, method: method('Espèces'), label: 'Prise de bénéfices (démo)' });
   if (method('Espèces') !== method('Virement')) {
     entry(20, { kind: 'transfert', amount: 100000 * 100, method: method('Espèces'), to_method: method('Virement'), label: 'Dépôt en banque (démo)' });
   }

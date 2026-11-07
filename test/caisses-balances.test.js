@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { addDays } from '../shared/time.js';
 import { Server, Client, ok, UM, fundCaisse } from './harness.js';
+import { seedDemo } from '../worker/seed.js';
 
 const tiles = (b) => b.fund.amount + b.cards + b.caisses.reservations.balance + b.caisses.alcool.balance + b.caisses.cigares.balance;
 
@@ -119,6 +120,20 @@ test('une caisse se lit en négatif sans planter', async () => {
     const b = await c.caisses();
     assert.equal(b.caisses.reservations.balance, -5000 * UM);
     assert.equal(tiles(b), b.till);
+  } finally { c.server.destroy(); }
+});
+
+test('données fictives : les tuiles s’additionnent et aucune caisse n’est sous zéro', async () => {
+  const c = await club('fictive');
+  try {
+    ok(await c.admin.post('/api/admin/reset', { confirm: 'EFFACER' }));
+    const author = c.server.club.userRow(ok(await c.admin.get('/api/me')).user.id);
+    seedDemo(c.server.club, { actor: author });
+    const b = await c.caisses();
+    assert.equal(tiles(b), b.till);
+    for (const k of ['reservations', 'alcool', 'cigares']) assert.ok(b.caisses[k].balance >= 0, `${k} : ${b.caisses[k].balance}`);
+    assert.equal(b.caisses.cigares.taken, 20000 * UM);
+    assert.ok(b.caisses.alcool.purchases_autres > 0);
   } finally { c.server.destroy(); }
 });
 
