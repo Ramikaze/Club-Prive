@@ -13,9 +13,9 @@ export function categoryColumns(sum, billed) {
   const account = (k) => sum.accounts.find((a) => a.account === k);
   const alcool = account('alcool');
   return [
-    { key: 'reservations', title: 'Réservation séance', icon: 'rooms', net: account('reservations').net, parts: [part('reservations', null, account('reservations').net, billed)] },
+    { key: 'reservations', title: 'Réservation de séance', icon: 'rooms', net: account('reservations').net, parts: [part('reservations', null, account('reservations').net, billed)] },
     {
-      key: 'boisson', title: 'Boisson', icon: 'bottle', net: alcool.net,
+      key: 'boisson', title: 'Champagne et autres boissons', icon: 'bottle', net: alcool.net,
       parts: [
         { ...part('champagne', CATEGORY_PLURAL.bouteille, alcool.champagne.net, billed), icon: 'bottle' },
         { ...part('autres_boissons', CATEGORY_PLURAL.boisson, alcool.autres_boissons.net, billed), icon: 'drink' },

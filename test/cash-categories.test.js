@@ -47,7 +47,7 @@ after(() => server.destroy());
 test('trois colonnes ; Boisson = Champagne + Autres boissons ; la somme = le total', async () => {
   const sum = await summary(); const b = await billed();
   const cols = categoryColumns(sum, b);
-  assert.deepEqual(cols.map((c) => c.title), ['Réservation séance', 'Boisson', 'Cigare']);
+  assert.deepEqual(cols.map((c) => c.title), ['Réservation de séance', 'Champagne et autres boissons', 'Cigare']);
   assert.deepEqual(cols[1].parts.map((p) => p.title), ['Champagne', 'Autres boissons']);
   // Each column is pinned to its own account, not just to the sum.
   const acc = (k) => sum.accounts.find((a) => a.account === k);
