@@ -11,6 +11,7 @@ import { money, fmtDuration, dayLabel, dateTime, dayMonth, paidForLabel, payment
 import { useLoad } from '../lib/hooks.js';
 import { useIsBoss } from '../store/useStore.js';
 import PurchaseHistory from '../components/members/PurchaseHistory.jsx';
+import ClientAccount from '../components/members/ClientAccount.jsx';
 import {
   openClientDialog, openConvertClientDialog, openDeactivateClientDialog, openReactivateClientDialog,
 } from '../dialogs/clientDialogs.jsx';
@@ -256,6 +257,7 @@ function ClientDetail({ m, reload }) {
             <dt>Client depuis</dt><dd>{dateTime(m.created_at)}</dd>
           </dl>
         </section>
+        <ClientAccount clientId={m.id} file={m} onChanged={reload} />
         <PurchaseHistory memberId={m.id} file={m} />
       </div>
     </>

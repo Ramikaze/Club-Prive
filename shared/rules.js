@@ -8,6 +8,10 @@ export const ACCOUNT_LABELS = { reservations: 'Réservations', alcool: 'Alcool',
 // money came into the till when the card was recharged, so a payment by card is no cash inflow.
 export const CARD_METHOD = 'Carte membre';
 
+// How a regular client's credit sale shows where a means of payment is expected (Caisse › Boutique): no money came in,
+// the lines wait on the client's account until a settlement pays them. Never a configured payment method.
+export const CREDIT_LABEL = 'À crédit';
+
 // A subscription renews itself from the card's CFA credit. The member is warned this many days before its end
 // when the credit will not cover the price, and a recharge still renews it up to this many days after the end.
 export const RENEWAL_WARNING_DAYS = 3;

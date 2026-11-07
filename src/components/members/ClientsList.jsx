@@ -19,7 +19,7 @@ function ClientsTable({ items, statut, onConvert, onReactivate }) {
   }
   return (
     <section className="card clients-card"><div className="table-wrap"><table className="table stack-sm">
-      <thead><tr><th>Client</th><th>Téléphone</th><th className="num">Achats</th><th className="num">Total</th><th>Dernier achat</th><th><span className="sr-only">Actions</span></th></tr></thead>
+      <thead><tr><th>Client</th><th>Téléphone</th><th className="num">Achats</th><th className="num">Total</th><th className="num">Doit</th><th>Dernier achat</th><th><span className="sr-only">Actions</span></th></tr></thead>
       <tbody>{items.map((c) => (
         <tr key={c.id}>
           <td data-label="Client"><Link to={`/membres/${c.id}`}><strong>{c.name}</strong></Link> <span className="subtle">{c.member_no}</span>
@@ -27,6 +27,7 @@ function ClientsTable({ items, statut, onConvert, onReactivate }) {
           <td data-label="Téléphone" className="nowrap">{c.phone}</td>
           <td data-label="Achats" className="num">{c.purchases_count}</td>
           <td data-label="Total" className="num">{money(c.purchases_total)}</td>
+          <td data-label="Doit" className="num">{c.owed ? <strong>{money(c.owed)}</strong> : '—'}</td>
           <td data-label="Dernier achat" className="nowrap nowrap-date">{c.last_purchase_at ? dateTime(c.last_purchase_at) : '—'}</td>
           <td className="actions"><span className="row-actions">
             <Link className="btn btn-sm btn-ghost" to={`/membres/${c.id}`}>Fiche</Link>
@@ -79,11 +80,13 @@ export default function ClientsList() {
   return (
     <Loaded state={state}>{(list) => {
       const items = found ? found.items : list;
+      // What the listed clients owe on credit (their « Compte client »).
+      const owedTotal = items.reduce((n, c) => n + (c.owed ?? 0), 0);
       return (
         <>
           <PageHead
             title="Membres / Clients"
-            lead={`${items.length} ${items.length > 1 ? 'clients réguliers' : 'client régulier'}`}
+            lead={`${items.length} ${items.length > 1 ? 'clients réguliers' : 'client régulier'}${owedTotal ? ` · créances : ${money(owedTotal)}` : ''}`}
             actions={<button type="button" className="btn btn-primary" onClick={() => openClientDialog(null, (c) => navigate(`/membres/${c.id}`))}><Icon name="plus" /> Nouveau client régulier</button>}
           />
           <MembersTabs />

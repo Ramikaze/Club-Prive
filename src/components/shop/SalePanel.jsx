@@ -1,5 +1,6 @@
 // The sale panel of one tab: title and account, buyer, lines, total, payment, « Encaisser » and the ticket line.
 // The card of a member pays first and what it cannot pay is asked for by another method, as in the payment dialog.
+// A regular client with a credit limit may buy « À crédit »: nothing is paid, the sale waits on his account.
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from '../ui/Icon.jsx';
@@ -10,7 +11,7 @@ import { api } from '../../lib/api.js';
 import { money } from '../../lib/format.js';
 import { useLoad, useSubmit } from '../../lib/hooks.js';
 import { useSettings } from '../../store/useStore.js';
-import { CARD_METHOD } from '../../../shared/rules.js';
+import { CARD_METHOD, CREDIT_LABEL } from '../../../shared/rules.js';
 import { SHOP } from '../../../shared/roles.js';
 
 const methodIcon = (m) => (/esp[eè]ce/i.test(m) ? 'cash' : /virement|banque/i.test(m) ? 'bank' : 'wallet');
@@ -34,8 +35,19 @@ export default function SalePanel({ account, products, cart, setCart, onSold, on
   const balance = isMember ? (wallet.data?.wallet?.balance ?? 0) : 0;
   // The card only counts for a member who holds money: a choice made for a previous buyer falls back to the default.
   const cardUsable = isMember && balance > 0;
-  const method = (picked === CARD_METHOD && !cardUsable ? null : picked) ?? (cardUsable ? CARD_METHOD : (methods[0] ?? ''));
+  // A regular client's account: his limit and what he may still owe (worker/credit.js).
+  const clientId = buyer.kind === 'client' && buyer.person !== null ? buyer.person.id : null;
+  const credit = useLoad(() => (clientId ? api.get(`/api/clients/${clientId}/account`) : Promise.resolve(null)), [clientId]);
+  const loadingCredit = clientId !== null && credit.data === undefined && !credit.error;
+  const creditAvailable = clientId ? (credit.data?.available ?? 0) : 0;
+  const creditUsable = clientId !== null && (credit.data?.credit_limit ?? 0) > 0 && creditAvailable >= total;
+  // « À crédit » stays chosen while the buyer is a regular client, even when the cart grows past what he may still
+  // owe: the sale is then blocked with a message, never silently switched to cash.
+  const fallback = picked === CARD_METHOD ? !cardUsable : picked === CREDIT_LABEL ? buyer.kind !== 'client' : false;
+  const method = (fallback ? null : picked) ?? (cardUsable ? CARD_METHOD : (methods[0] ?? ''));
   const byCard = cardUsable && method === CARD_METHOD;
+  const onCredit = buyer.kind === 'client' && method === CREDIT_LABEL;
+  const creditBlocked = onCredit && clientId !== null && !loadingCredit && !creditUsable;
   const rest = total - (byCard ? Math.min(balance, total) : 0);
   const needsBuyer = buyer.kind !== 'journalier' && buyer.person === null;
 
@@ -53,7 +65,7 @@ export default function SalePanel({ account, products, cart, setCart, onSold, on
         account,
         buyer: buyer.kind === 'journalier' ? { kind: 'journalier' } : { kind: buyer.kind, member_id: buyer.person.id },
         lines: rows.map((r) => ({ product_id: r.p.id, quantity: r.qty })),
-        ...(byCard ? { card: true, method: rest > 0 ? restMethod : undefined } : { method }),
+        ...(onCredit ? { credit: true } : byCard ? { card: true, method: rest > 0 ? restMethod : undefined } : { method }),
       };
       // The cart's own key, kept across edits and failed attempts: the server stores it only after a successful sale.
       let res;
@@ -63,7 +75,15 @@ export default function SalePanel({ account, products, cart, setCart, onSold, on
         // What the refusal may come from is read again: the stock on the cards, the member's card balance.
         onRefused?.();
         if (memberId) wallet.reload();
+        if (clientId) credit.reload();
         throw err;
+      }
+      if (!res.payment) {
+        // A credit sale: no ticket (no money received); the client's file shows what he owes now.
+        toast(`Vente à crédit enregistrée : ${money(res.sale.amount)} à payer par ${res.sale.member_name}.`);
+        onSold?.();
+        navigate(`/membres/${res.sale.member_id}`);
+        return;
       }
       toast(`Vente enregistrée : ${money(res.payment.amount)}.`);
       onSold?.();
@@ -114,9 +134,21 @@ export default function SalePanel({ account, products, cart, setCart, onSold, on
                 : loadingBalance ? 'Lecture du solde…' : balance > 0 ? `${money(balance)} disponibles` : 'Aucun crédit sur la carte'}</span></span>
           </label>
         )}
+        {buyer.kind === 'client' && (
+          <label className={`pay-method pay-method-card${creditUsable || onCredit ? '' : ' is-empty'}`}>
+            <input type="radio" name="method" value={CREDIT_LABEL} checked={onCredit} disabled={(!creditUsable && !onCredit) || loadingCredit}
+              onChange={() => setPicked(CREDIT_LABEL)} />
+            <Icon name="receipt" />
+            <span><strong>{CREDIT_LABEL}</strong>
+              <span className="subtle">{clientId === null ? 'Choisissez le client pour voir son crédit'
+                : loadingCredit ? 'Lecture du crédit…'
+                  : !(credit.data?.credit_limit > 0) ? 'Pas de crédit (plafond à fixer sur sa fiche)'
+                    : `${money(creditAvailable)} de crédit disponible${creditAvailable < total ? ' : pas assez pour ce panier' : ''}`}</span></span>
+          </label>
+        )}
         {methods.map((x) => (
           <label key={x} className="pay-method">
-            <input type="radio" name="method" value={x} checked={!byCard && method === x} onChange={() => setPicked(x)} />
+            <input type="radio" name="method" value={x} checked={!byCard && !onCredit && method === x} onChange={() => setPicked(x)} />
             <Icon name={methodIcon(x)} />
             <span><strong>{x}</strong></span>
           </label>
@@ -128,12 +160,16 @@ export default function SalePanel({ account, products, cart, setCart, onSold, on
             {methods.map((x) => <option key={x}>{x}</option>)}</select></label>
       )}
 
+      {creditBlocked && rows.length > 0 && (
+        <Notice kind="warn">Crédit insuffisant pour ce panier : retirez un produit ou choisissez un autre moyen de paiement.</Notice>
+      )}
       <FormError error={error} />
-      <button type="submit" className="btn btn-primary btn-block" disabled={busy || loadingBalance || !rows.length || needsBuyer} aria-busy={busy}>
-        {rows.length ? `Encaisser ${money(total)}` : 'Encaisser'}
+      <button type="submit" className="btn btn-primary btn-block" disabled={busy || loadingBalance || loadingCredit || creditBlocked || !rows.length || needsBuyer} aria-busy={busy}>
+        {!rows.length ? 'Encaisser' : onCredit ? `Vendre à crédit ${money(total)}` : `Encaisser ${money(total)}`}
       </button>
       {needsBuyer && <p className="subtle">Choisissez l’acheteur pour encaisser.</p>}
-      <p className="subtle">{buyer.kind === 'journalier' ? 'Ticket imprimé au format ticket de caisse' : 'Ticket : imprimé ou envoyé sur WhatsApp'}</p>
+      <p className="subtle">{onCredit ? 'Pas de ticket : la vente s’ajoute au compte du client, à régler plus tard.'
+        : buyer.kind === 'journalier' ? 'Ticket imprimé au format ticket de caisse' : 'Ticket : imprimé ou envoyé sur WhatsApp'}</p>
     </form>
   );
 }
