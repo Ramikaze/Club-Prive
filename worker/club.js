@@ -9,6 +9,7 @@ import { text, int, toId, flag, frDate } from './validate.js';
 import { ledgerMethods, DEFAULT_CATEGORIES, OUTSIDE_MEAL_CATEGORY, CASH_GAP_CATEGORY } from './ledger.js';
 import { shopMethods, buyerShown } from './shop.js';
 import { caisseMethods } from './caisses.js';
+import { creditMethods } from './credit.js';
 import { billedMethods, DRINK_PART_SQL } from './billed.js';
 import {
   newTicketCode, formatTicketNumber, normalizeTicketCode, memberInitials, paymentLines, TICKET_CODE_LENGTH,
@@ -135,9 +136,12 @@ const CHARGE_SELECT = `
   JOIN members m ON m.id = c.member_id
   LEFT JOIN users u ON u.id = c.created_by
   LEFT JOIN users cu ON cu.id = c.cancelled_by
-  LEFT JOIN payment_allocations pa ON pa.charge_id = c.id
+  LEFT JOIN payment_allocations pa ON pa.id = (SELECT MAX(x.id) FROM payment_allocations x WHERE x.charge_id = c.id)
   LEFT JOIN payments p ON p.id = pa.payment_id
-  LEFT JOIN refunds rf ON rf.charge_id = c.id`;
+  LEFT JOIN refunds rf ON rf.id = (SELECT MAX(y.id) FROM refunds y WHERE y.charge_id = c.id)`;
+
+// A line that is no credit purchase of a regular client: those wait on the client's account, not among the open notes.
+const NOT_CREDIT_SQL = 'NOT EXISTS (SELECT 1 FROM shop_sales cs WHERE cs.id = c.shop_sale_id AND cs.on_credit = 1)';
 
 // A product with the version of its photo (the date of the photo, null without one). One join serves a whole
 // list, and only the date is read: the picture itself is never loaded with the products.
@@ -908,6 +912,7 @@ export class Club {
       kind: m.kind, former_client_no: m.former_client_no ?? null, became_member_at: m.became_member_at ?? null,
       card_code: this.activeCardCode(m.id),
       active: m.active !== 0, deactivated_at: m.deactivated_at ?? null, deactivation_reason: m.deactivation_reason ?? null,
+      credit_limit: m.credit_limit ?? 0,
     };
   }
 
@@ -980,7 +985,7 @@ export class Club {
        JOIN members mm ON mm.id = p.member_id LEFT JOIN users u ON u.id = p.created_by
        WHERE p.member_id = ? ORDER BY p.paid_at DESC LIMIT 100`, m.id,
     ).map((p) => this.paymentDTO(p));
-    const { due } = this.get("SELECT COALESCE(SUM(amount), 0) AS due FROM charges WHERE member_id = ? AND status = 'due'", m.id);
+    const { due } = this.get("SELECT COALESCE(SUM(amount - settled), 0) AS due FROM charges WHERE member_id = ? AND status = 'due'", m.id);
     const subscription = this.subscriptionSummary(m.id, today);
     const cardsDeactivated = this.hasDeactivatedCardsOnly(m.id);
     return {
@@ -1044,7 +1049,7 @@ export class Club {
     ).map((s) => this.subscriptionDTO(s, today));
     const sumOf = (kind) => wallet.filter((w) => w.kind === kind).reduce((n, w) => n + w.amount, 0);
     const kept = payments.filter((p) => !p.cancelled_at);
-    const { due } = this.get("SELECT COALESCE(SUM(amount), 0) AS due FROM charges WHERE member_id = ? AND status = 'due'", m.id);
+    const { due } = this.get("SELECT COALESCE(SUM(amount - settled), 0) AS due FROM charges WHERE member_id = ? AND status = 'due'", m.id);
     return {
       member: this.memberBase(m),
       period: { from: start, to: end, start_at: a, end_at: b },
@@ -2769,6 +2774,7 @@ export class Club {
       kind: p.kind ?? 'encaissement', card_amount: p.card_amount ?? 0, label: p.label ?? null,
       cancelled_at: p.cancelled_at ?? null, cancel_reason: p.cancel_reason ?? null, shop_sale_id: p.shop_sale_id ?? null,
       shop_cancelled_at: shop?.cancelled_at ?? null, shop_cancel_reason: shop?.cancel_reason ?? null,
+      settlement: !!p.settlement,
     };
   }
 
@@ -2786,6 +2792,10 @@ export class Club {
     for (const c of charges) {
       if (c.status !== 'due') {
         throw conflict('DEJA_TRAITEE', `La ligne « ${c.label} » n'est plus à encaisser (${CHARGE_STATUS[c.status].toLowerCase()}).`);
+      }
+      // A credit sale's line is paid only by a settlement, from the client's account (worker/credit.js).
+      if (!shopSaleId && this.isCreditLine(c)) {
+        throw conflict('VENTE_A_CREDIT', `La ligne « ${c.label} » est un achat à crédit : enregistrez un règlement sur la fiche du client.`);
       }
     }
     if (new Set(charges.map((c) => c.member_id)).size > 1) throw invalid("Un encaissement ne peut concerner qu'un seul membre.");
@@ -2814,7 +2824,7 @@ export class Club {
     );
     for (const c of charges) {
       this.run('INSERT INTO payment_allocations (payment_id, charge_id, account, amount) VALUES (?, ?, ?, ?)', paymentId, c.id, c.account, c.amount);
-      const res = this.run("UPDATE charges SET status = 'payee' WHERE id = ? AND status = 'due'", c.id);
+      const res = this.run("UPDATE charges SET status = 'payee', settled = amount WHERE id = ? AND status = 'due'", c.id);
       if (res.changes !== 1) throw conflict('DEJA_TRAITEE', `La ligne « ${c.label} » a été traitée entre-temps.`);
     }
     if (cardAmount > 0) {
@@ -2861,7 +2871,11 @@ export class Club {
   // The part of a paid line its payment took from the card and has not given back yet: the card part of a
   // payment goes back to the card first (its money is never handed out in cash), line after line in refund order.
   cardPartOf(c) {
-    const alloc = this.get('SELECT * FROM payment_allocations WHERE charge_id = ?', c.id);
+    // A line paid in several settlements has several allocations: the latest one of a payment still standing.
+    const alloc = this.get(
+      `SELECT pa.* FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id WHERE pa.charge_id = ?
+       ORDER BY (p.cancelled_at IS NULL) DESC, pa.id DESC LIMIT 1`, c.id,
+    );
     const payment = this.paymentRow(alloc.payment_id);
     const cardRefunded = this.get('SELECT COALESCE(SUM(card_amount), 0) AS n FROM refunds WHERE payment_id = ?', payment.id).n;
     return { payment, cardPart: Math.max(0, Math.min(c.amount, payment.card_amount - cardRefunded)) };
@@ -2939,6 +2953,8 @@ export class Club {
       refunds,
       status: this.ticketStatus(p),
       wallet_balance_after: this.balanceAfterPayment(p),
+      // A settlement of a regular client's debt: what he still owed right after it (his account's balance then).
+      credit_owed_after: p.settlement ? this.clientAccount(p.member_id).movements.find((x) => x.key === `R-${p.id}`)?.balance ?? null : null,
       time_available: this.timeAvailable(p.member_id),
       signature_required: (p.card_amount > 0 || (p.kind ?? 'encaissement') !== 'encaissement') && p.created_by !== null,
       next_copy_no: last + 1,
@@ -3050,7 +3066,7 @@ export class Club {
   }
 
   openCharges() {
-    const rows = this.all(`${CHARGE_SELECT} WHERE c.status = 'due' ORDER BY m.last_name, m.first_name, c.created_at`);
+    const rows = this.all(`${CHARGE_SELECT} WHERE c.status = 'due' AND ${NOT_CREDIT_SQL} ORDER BY m.last_name, m.first_name, c.created_at`);
     const groups = new Map();
     for (const row of rows) {
       const c = this.chargeDTO(row);
@@ -3390,12 +3406,14 @@ export class Club {
     });
     const stockAlerts = this.all(`${PRODUCT_SELECT} WHERE p.active = 1 AND p.stock_qty <= p.low_stock_threshold ORDER BY p.stock_qty, p.name`)
       .map((p) => this.productDTO(p));
-    const { due } = this.get("SELECT COALESCE(SUM(amount), 0) AS due FROM charges WHERE status = 'due'");
+    // The open notes; the regular clients' credit purchases are their debt, shown apart (« Créances clients »).
+    const { due } = this.get(`SELECT COALESCE(SUM(c.amount - c.settled), 0) AS due FROM charges c WHERE c.status = 'due' AND ${NOT_CREDIT_SQL}`);
+    const credit = this.get(`SELECT COALESCE(SUM(c.amount - c.settled), 0) AS n FROM charges c WHERE c.status = 'due' AND NOT ${NOT_CREDIT_SQL}`).n;
     const result = {
       biz_day: today, now: new Date(now).toISOString(),
       rooms_status: roomsStatus,
       today: todayList, current, upcoming, to_close: toClose,
-      expiring, expired, renewal_alerts: renewalAlerts, stock_alerts: stockAlerts, outstanding_total: due,
+      expiring, expired, renewal_alerts: renewalAlerts, stock_alerts: stockAlerts, outstanding_total: due, credit_total: credit,
       cash_today: this.financeSummary(today, today),
     };
     // The Champagne / Autres boissons split is the administrators' Caisse view: the manager's day keeps his old figures.
@@ -3426,7 +3444,8 @@ export class Club {
     acc.alcool.autres_boissons = zero();
     const half = (r) => (r.account === 'alcool' ? acc.alcool[r.drink] : null);
     for (const r of this.all(
-      `SELECT c.account, c.status, c.shop_sale_id IS NOT NULL AS shop, ${DRINK_PART_SQL} AS drink, SUM(c.amount) AS total, COUNT(*) AS n
+      `SELECT c.account, c.status, c.shop_sale_id IS NOT NULL AS shop, ${DRINK_PART_SQL} AS drink, SUM(c.amount) AS total,
+         SUM(c.amount - c.settled) AS left_due, COUNT(*) AS n
        FROM charges c LEFT JOIN products pr ON pr.id = c.product_id
        WHERE c.created_at >= ? AND c.created_at < ? GROUP BY c.account, c.status, shop, drink`, a, b,
     )) {
@@ -3439,7 +3458,7 @@ export class Club {
           h.billed += r.total;
           h.lines += r.n;
         }
-        if (r.status === 'due') h.outstanding += r.total;
+        if (r.status === 'due') h.outstanding += r.left_due;
       }
       if (r.status === 'annulee') {
         x.cancelled += r.total;
@@ -3450,13 +3469,14 @@ export class Club {
         y.billed += r.total;
         y.lines += r.n;
       }
+      // A credit line paid in part still owes only its unpaid part.
       if (r.status === 'due') {
-        x.outstanding += r.total;
-        y.outstanding += r.total;
+        x.outstanding += r.left_due;
+        y.outstanding += r.left_due;
       }
     }
     for (const r of this.all(
-      `SELECT pa.account, p.shop_sale_id IS NOT NULL AS shop, ${DRINK_PART_SQL} AS drink, SUM(pa.amount) AS total
+      `SELECT pa.account, (p.shop_sale_id IS NOT NULL OR c.shop_sale_id IS NOT NULL) AS shop, ${DRINK_PART_SQL} AS drink, SUM(pa.amount) AS total
        FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
        LEFT JOIN charges c ON c.id = pa.charge_id LEFT JOIN products pr ON pr.id = c.product_id
        WHERE p.paid_at >= ? AND p.paid_at < ? GROUP BY pa.account, shop, drink`, a, b,
@@ -3819,4 +3839,5 @@ export class Club {
 Object.assign(Club.prototype, ledgerMethods);
 Object.assign(Club.prototype, shopMethods);
 Object.assign(Club.prototype, caisseMethods);
+Object.assign(Club.prototype, creditMethods);
 Object.assign(Club.prototype, billedMethods);

@@ -76,6 +76,13 @@ export default function TicketSheet({ ticket, copyNo }) {
         ) : <div><dt>Payé</dt><dd>{paidBy}</dd></div>}
       </dl>
 
+      {ticket.credit_owed_after != null && (
+        <dl className="ts-facts ts-balances">
+          {/* A settlement of a regular client's credit purchases: what he still owes right after it. */}
+          <div><dt>Reste dû (crédit)</dt><dd>{money(ticket.credit_owed_after)}</dd></div>
+        </dl>
+      )}
+
       {ticket.wallet_balance_after !== null && (
         <dl className="ts-facts ts-balances">
           <div><dt>Solde carte</dt><dd>{money(ticket.wallet_balance_after)}</dd></div>

@@ -262,6 +262,12 @@ export function createApi({ db, env = {}, demo = false }) {
   add('POST', '/api/shop/sales', {}, (ctx) => club.createShopSale(ctx.user, ctx.body));
   add('POST', '/api/shop/sales/:id/cancel', {}, (ctx) => club.cancelShopSale(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/clients/:id/convert', {}, (ctx) => club.convertClient(ctx.user, ctx.params.id));
+  // Credit of the regular clients (worker/credit.js): the account and the settlements are open to every signed-in user
+  // (the manager collects them); the limit and a settlement's cancellation are checked inside (administrator, associés).
+  add('GET', '/api/clients/:id/account', {}, (ctx) => club.clientAccount(ctx.params.id));
+  add('PUT', '/api/clients/:id/credit-limit', {}, (ctx) => club.setCreditLimit(ctx.user, ctx.params.id, ctx.body));
+  add('POST', '/api/clients/:id/settlements', {}, (ctx) => club.recordSettlement(ctx.user, ctx.params.id, ctx.body));
+  add('POST', '/api/payments/:id/cancel-settlement', {}, (ctx) => club.cancelSettlement(ctx.user, ctx.params.id, ctx.body));
   add('GET', '/api/members/:id', {}, (ctx) => club.memberDetail(ctx.params.id));
   add('GET', '/api/members/:id/purchases', {}, (ctx) => club.purchaseHistory(ctx.params.id));
   add('GET', '/api/members/:id/statement', {}, (ctx) => club.memberStatement(ctx.params.id, ctx.query.from, ctx.query.to));

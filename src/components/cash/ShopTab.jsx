@@ -142,7 +142,8 @@ export default function ShopTab() {
           </div>
           <p className="subtle cash-note">
             Ces ventes comptent aussi dans les comptes Cigares et Alcool de l’onglet Caisse. Une vente payée par carte membre ne fait pas
-            entrer d’argent en caisse : cet argent est entré lors de l’approvisionnement de la carte.
+            entrer d’argent en caisse : cet argent est entré lors de l’approvisionnement de la carte. Une vente « À crédit » non
+            plus : l’argent entre le jour où le client la règle, depuis sa fiche (Compte client).
           </p>
         </div>
       )}</Loaded>
