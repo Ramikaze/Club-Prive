@@ -367,6 +367,21 @@ main:focus { outline: none; }
   white-space: normal; text-align: center; text-wrap: balance;
 }
 .caisse-actions .btn:hover { color: var(--text); }
+/* « Compter la caisse »: one block per till or account, one under the other; the cash as a table of notes and coins
+   (value, how many, amount), the figures right-aligned so that they read as columns. */
+.count-account { display: grid; gap: 8px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+.count-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 12px; }
+.count-head h3 { margin: 0; font-size: 1rem; }
+.count-notes { display: grid; gap: 4px; }
+.count-row { display: grid; grid-template-columns: minmax(0, 1fr) 84px minmax(0, 1fr); align-items: center; gap: 10px; font-size: 0.9rem; }
+.count-row input { min-height: 38px; padding: 4px 10px; text-align: right; font-variant-numeric: tabular-nums; }
+.count-row input[aria-invalid="true"] { border-color: var(--danger); }
+.count-row > :last-child { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.count-cols { font-size: 0.75rem; }
+.count-cols > :nth-child(2) { text-align: right; }
+.count-sum { color: var(--text-2); }
+.count-total { padding-top: 6px; border-top: 1px dashed var(--border); }
+.count-gap { margin: 0; }
 @media (max-width: 499px) {
   .cash-balance-card { padding: 14px; }
   .kpis.cash-balance .kpi .value { font-size: 1rem; }
