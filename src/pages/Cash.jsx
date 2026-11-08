@@ -152,7 +152,7 @@ function AdminCash() {
           {/* On all accounts, the associés' caisses (six tiles); on one account, its four figures. */}
           {method
             ? <CashBalance t={d.treasury} method={method} entries={d.entries} journal={d.journal} openingBalances={settings.opening_balances} onCount={count} />
-            : <CaissesBalance b={d.caisses} onCount={count} onAction={onCaisse} />}
+            : <CaissesBalance b={d.caisses} onCount={count} onAction={onCaisse} onChange={state.reload} />}
           <CategoryColumns
             sum={d.sum} billed={d.billed} method={method} oneDay={oneDay}
             journal={d.journal} entries={d.entries} t={d.treasury} openingBalances={settings.opening_balances}

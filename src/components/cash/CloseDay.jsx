@@ -40,6 +40,8 @@ const Steps = ({ step }) => (
   </ol>
 );
 
+export const closeDayDialog = (day, onDone) => openDialog(CloseDayDialog, { day, onDone });
+
 function CloseDayDialog({ close, day, onDone }) {
   const state = useLoad(async () => {
     const [closing, journal, ledger] = await Promise.all([
@@ -208,7 +210,7 @@ export function DayClosingBar({ isAdmin, onChange }) {
     return (
       <div className="card close-bar">
         <span><Icon name="unlock" /> La caisse du {dayLabel(day, 'medium')} est ouverte.</span>
-        <button type="button" className="btn btn-primary btn-sm" onClick={() => openDialog(CloseDayDialog, { day, onDone: reload })}><Icon name="lock" /> Fermer la caisse</button>
+        <button type="button" className="btn btn-primary btn-sm" onClick={() => closeDayDialog(day, reload)}><Icon name="lock" /> Fermer la caisse</button>
       </div>
     );
   }
@@ -223,7 +225,8 @@ export function DayClosingBar({ isAdmin, onChange }) {
   return (
     <div className="card close-bar is-closed">
       <span><Icon name="lock" /> Caisse fermée le {dateTime(c.closed_at)}{c.closed_by_name ? ` par ${c.closed_by_name}` : ''} · {gapText(gap)}
-        {c.summary.unchecked.length > 0 && ` · ${c.summary.unchecked.length} ticket(s) non pointé(s)`}</span>
+        {c.summary.unchecked.length > 0 && ` · ${c.summary.unchecked.length} ticket(s) non pointé(s)`}
+        {c.verified ? ` · vérifiée par ${c.verified.verified_by_name}` : ' · en attente de vérification'}</span>
       {isAdmin && <button type="button" className="btn btn-sm" onClick={reopen}><Icon name="unlock" /> Rouvrir</button>}
     </div>
   );
