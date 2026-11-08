@@ -152,7 +152,7 @@ function StockDialog({ close, product, kind, onDone }) {
       const res = await api.post(`/api/products/${product.id}/stock`, body, key);
       close();
       toast(`Stock de « ${res.name} » : ${res.stock_qty}.`);
-      onDone?.();
+      onDone?.(res);
     });
   };
 
@@ -203,8 +203,9 @@ function HistoryDialog({ close, product }) {
   return <Modal title={`Mouvements — ${product.name}`} size="wide" onClose={close}>{content}</Modal>;
 }
 
-// The sheet of a product, open to everyone: its photo large, its description, its price and stock. The boss of its rayon
-// outside the demo also keeps the photo up here. A picture is saved the moment it is chosen (not with the Save
+// The sheet of a product, open to everyone: its photo large, its description, its price and stock. Whoever may move
+// its stock (the manager, the boss of its rayon) adds to it or adjusts it from here, as from the list; the sheet then
+// shows the new stock. The boss of its rayon outside the demo also keeps the photo up here. A picture is saved the moment it is chosen (not with the Save
 // button of a form), and the list behind is refreshed so that its thumbnail follows.
 function ProductSheet({ close, product, onDone }) {
   const me = useMe();
@@ -213,6 +214,12 @@ function ProductSheet({ close, product, onDone }) {
   const [p, setP] = useState(product);
   const { busy, error, submit } = useSubmit();
   const picker = useRef(null);
+  const canStock = canSellIn(me, accountOfCategory(p.category));
+  // The stock window opens over the sheet; once saved, the sheet and the list behind show the new stock.
+  const onStock = (res) => {
+    if (res) setP(res);
+    onDone?.();
+  };
   // The server refuses photos in the demo space anyway: the buttons are not even offered there.
   const canEditPhoto = admin && !demo;
 
@@ -263,6 +270,12 @@ function ProductSheet({ close, product, onDone }) {
               <dt>Prix de vente</dt><dd>{money(p.price)}</dd>
               <dt>Stock</dt><dd><StockChip p={p} /></dd>
             </dl>
+            {canStock && (
+              <div className="row">
+                <button type="button" className="btn btn-primary" onClick={() => stockDialog(p, 'entree', onStock)}><Icon name="plus" /> Entrée de stock</button>
+                <button type="button" className="btn" onClick={() => stockDialog(p, 'ajustement', onStock)}>Ajuster le stock</button>
+              </div>
+            )}
             {canEditPhoto && (
               <div className="row">
                 <button type="button" className="btn" disabled={busy} aria-busy={busy} onClick={() => picker.current?.click()}>
