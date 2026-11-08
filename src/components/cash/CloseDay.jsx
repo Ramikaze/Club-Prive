@@ -200,9 +200,9 @@ function Wizard({ close, day, data, onDone }) {
 
 // The day's closing on the cash page: a button to close it, or who closed it and the gap, and for an administrator a
 // way to reopen it.
-export function DayClosingBar({ isAdmin, onChange }) {
+export function DayClosingBar({ isAdmin, onChange, refresh = 0 }) {
   const day = bizToday();
-  const state = useLoad(() => api.get(`/api/day-closing${qs({ day })}`), [day]);
+  const state = useLoad(() => api.get(`/api/day-closing${qs({ day })}`), [day, refresh]);
   const reload = () => { state.reload(); onChange?.(); };
   const c = state.data?.closed;
   if (!state.data) return null;
