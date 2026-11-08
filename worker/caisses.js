@@ -24,22 +24,9 @@ const emptyCaisses = () => ({
 });
 
 export const caisseMethods = {
-  // The six tiles of « Soldes » at the end of the business day `to`, each summed from the cash fund's date:
-  // - fund: the cash fund, less what the members' cards held then (that money is in the till, but it is theirs);
-  // - cards: what the members' cards hold;
-  // - caisses: what was sold (card part included, refunds off), less the expenses, plus the apports, less the profits
-  //   taken, by caisse. An expense or a receipt with no caisse belongs to Réservation de séance; the courier of an
-  //   outside meal is money passing through, in no caisse;
-  // - till: the money of every till and account.
-  // Before the fund's date the tracking has not started: every figure is 0.
-  caisseBalances(to = this.bizToday()) {
-    if (!isValidDate(to)) throw invalid('Date invalide.');
-    const start = this.settings().opening_balances.date ?? null;
+  // Per-caisse sums for the business days `from`..`to` inclusive (every movement of the period, verified or not).
+  caisseSums(from, to) {
     const caisses = emptyCaisses();
-    if (start && to < start) {
-      return { start, to, started: false, fund: { amount: 0, total: 0, card_credit: 0 }, cards: 0, caisses, till: 0 };
-    }
-    const from = start ?? EARLIEST;
     const a = this.dayStartIso(from);
     const b = this.dayStartIso(addDays(to, 1));
     const sale = (r, sign) => {
@@ -80,14 +67,86 @@ export const caisseMethods = {
     x.alcool.balance = x.alcool.sold_champagne + x.alcool.sold_autres - x.alcool.purchases_champagne - x.alcool.purchases_autres
       - x.alcool.other_expenses + x.alcool.apports - x.alcool.taken;
     x.cigares.balance = x.cigares.sold - x.cigares.purchases - x.cigares.other_expenses + x.cigares.apports - x.cigares.taken;
+    return caisses;
+  },
+
+  // True when the business day `day` holds money: a payment or a refund of that day, or an active ledger entry other
+  // than a transfer dated on it.
+  dayHasMoney(day) {
+    const a = this.dayStartIso(day);
+    const b = this.dayStartIso(addDays(day, 1));
+    return !!(
+      this.get('SELECT 1 AS x FROM payments WHERE paid_at >= ? AND paid_at < ? LIMIT 1', a, b)
+      || this.get('SELECT 1 AS x FROM refunds WHERE created_at >= ? AND created_at < ? LIMIT 1', a, b)
+      || this.get("SELECT 1 AS x FROM ledger_entries WHERE status = 'active' AND kind <> 'transfert' AND biz_date = ? LIMIT 1", day)
+    );
+  },
+
+  // The days whose money is not yet verified, oldest first: from the feature's start day (or the cash fund's date if
+  // later) up to `to`, each with money and with no closing verified.
+  pendingDays(to = this.bizToday()) {
+    const since = this.get("SELECT value FROM meta WHERE key = 'day_verification_since'")?.value ?? '9999-12-31';
+    const fund = this.settings().opening_balances.date ?? EARLIEST;
+    const verified = new Set(this.all('SELECT biz_day FROM day_closings WHERE verified_at IS NOT NULL').map((r) => r.biz_day));
+    const closings = new Map(this.all(
+      'SELECT dc.biz_day, dc.closed_at, u.name AS closed_by_name FROM day_closings dc LEFT JOIN users u ON u.id = dc.closed_by',
+    ).map((r) => [r.biz_day, r]));
+    const out = [];
+    for (let day = since > fund ? since : fund; day <= to; day = addDays(day, 1)) {
+      if (verified.has(day) || !this.dayHasMoney(day)) continue;
+      const c = closings.get(day);
+      out.push({ day, closed: !!c, closed_at: c?.closed_at ?? null, closed_by_name: c?.closed_by_name ?? null });
+    }
+    return out;
+  },
+
+  // The six tiles of « Soldes » at the end of the business day `to`, each summed from the cash fund's date:
+  // - fund: the cash fund, less what the members' cards held then (that money is in the till, but it is theirs);
+  // - cards: what the members' cards hold;
+  // - caisses: what was sold (card part included, refunds off), less the expenses, plus the apports, less the profits
+  //   taken, by caisse. An expense or a receipt with no caisse belongs to Réservation de séance; the courier of an
+  //   outside meal is money passing through, in no caisse;
+  // - till: the money of every till and account.
+  // Before the fund's date the tracking has not started: every figure is 0.
+  // Each caisse holds its VALIDATED figures (days whose till was not verified are taken out, see pendingDays) and
+  // `pending`, the net money of those days; validated + pending is the full balance. `till` stays « En tout ».
+  caisseBalances(to = this.bizToday()) {
+    if (!isValidDate(to)) throw invalid('Date invalide.');
+    const start = this.settings().opening_balances.date ?? null;
+    if (start && to < start) {
+      return {
+        start, to, started: false, fund: { amount: 0, total: 0, card_credit: 0 }, cards: 0, caisses: emptyCaisses(), till: 0,
+        pending_days: [], pending_total: 0, till_validated: 0, verified_through: to,
+      };
+    }
+    const from = start ?? EARLIEST;
+    const caisses = this.caisseSums(from, to);
+    const pendingList = this.pendingDays(to);
+    const pending_days = [];
+    for (const k of CAISSES) caisses[k].pending = 0;
+    for (const p of pendingList) {
+      const d = this.caisseSums(p.day, p.day);
+      const net = {};
+      for (const k of CAISSES) {
+        net[k] = d[k].balance;
+        caisses[k].pending += d[k].balance;
+        for (const f of Object.keys(d[k])) if (f !== 'halves') caisses[k][f] -= d[k][f];
+      }
+      pending_days.push({ ...p, net, total: CAISSES.reduce((s, k) => s + net[k], 0) });
+    }
+    caisses.reservations.halves = splitHalves(caisses.reservations.balance);
+    const pending_total = CAISSES.reduce((s, k) => s + caisses[k].pending, 0);
     const total = Object.values(this.settings().opening_balances.amounts).reduce((s, n) => s + n, 0);
     const cardCredit = start ? this.walletLiability(new Date(Date.parse(this.dayStartIso(start)) - 1).toISOString()) : 0;
+    const till = this.treasuryBalances(to, to).total.closing;
     return {
       start, to, started: true,
       fund: { amount: total - cardCredit, total, card_credit: cardCredit },
       cards: this.walletLiabilityAt(to),
       caisses,
-      till: this.treasuryBalances(to, to).total.closing,
+      till,
+      pending_days, pending_total, till_validated: till - pending_total,
+      verified_through: pendingList.length ? addDays(pendingList[0].day, -1) : to,
     };
   },
 
@@ -110,7 +169,7 @@ export const caisseMethods = {
     const amount = int(input.amount, 'Montant', { min: 1, max: 1e13 });
     const method = this.treasuryAccount(input.method, 'Payé depuis');
     const label = text(input.label, 'Libellé', { max: 120 }) ?? `Prise de bénéfices — ${CAISSE_LABEL[account]}`;
-    this.assertCaisseCovers(account, amount, 'Cette prise de bénéfices', actor);
+    this.assertCaisseCovers(account, amount, 'Cette prise de bénéfices', actor, { available: true });
     const id = this.insert(
       `INSERT INTO ledger_entries (kind, biz_date, category_id, account, method, to_method, amount, label, reference,
          status, is_demo, created_at, created_by)
@@ -124,11 +183,13 @@ export const caisseMethods = {
   },
 
   // Refuses an operation that would take a caisse below zero (owner's rule: a caisse never goes negative). The
-  // balance is the caisse's today, every movement recorded so far included. The manager, who neither sees the
-  // caisses nor makes an apport, is told whom to ask, without the balance.
-  assertCaisseCovers(account, amount, what, actor = null) {
+  // balance is the caisse's today, every movement recorded so far included, pending money too; with `available`
+  // (profits, expenses) the money of unverified days is not spendable, except that a negative pending still counts.
+  // The manager, who neither sees the caisses nor makes an apport, is told whom to ask, without the balance.
+  assertCaisseCovers(account, amount, what, actor = null, { available = false } = {}) {
     if (!CAISSES.includes(account)) throw invalid('Caisse invalide.');
-    const balance = this.caisseBalances(this.bizToday()).caisses[account].balance;
+    const c = this.caisseBalances(this.bizToday()).caisses[account];
+    const balance = c.balance + (available ? Math.min(0, c.pending) : c.pending);
     if (balance < amount && actor && !isBoss(actor)) {
       throw conflict(
         'CAISSE_INSUFFISANTE',
@@ -139,7 +200,9 @@ export const caisseMethods = {
     if (balance < amount) {
       throw conflict(
         'CAISSE_INSUFFISANTE',
-        `${what} demande ${this.money(amount)}, mais la caisse « ${CAISSE_LABEL[account]} » ne contient que ${this.money(balance)}. Remettez d'abord de l'argent dans cette caisse (Entrée diverse « Apport des associés »).`,
+        available
+          ? `${what} demande ${this.money(amount)}, mais la caisse « ${CAISSE_LABEL[account]} » ne peut payer que ${this.money(Math.max(0, balance))} : l’argent en attente de vérification ne se dépense pas.`
+          : `${what} demande ${this.money(amount)}, mais la caisse « ${CAISSE_LABEL[account]} » ne contient que ${this.money(balance)}. Remettez d'abord de l'argent dans cette caisse (Entrée diverse « Apport des associés »).`,
         { account, balance, needed: amount },
       );
     }

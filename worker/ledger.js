@@ -213,7 +213,7 @@ export const ledgerMethods = {
     return method;
   },
 
-  createEntry(actor, input, { demo = false } = {}) {
+  createEntry(actor, input, { demo = false, fullBalance = false } = {}) {
     const kind = input.kind;
     // A profit taking has its own door (takeProfits), with its own rules.
     if (!ENTRY_KIND[kind] || kind === 'retrait') throw invalid("Type d'opération invalide.");
@@ -266,7 +266,7 @@ export const ledgerMethods = {
       ?? (paid ? `Paiement — ${paid.supplier.name}` : kind === 'transfert' ? `Transfert ${method} → ${toMethod}` : category.name);
     const reference = text(input.reference, 'Référence', { max: 80 });
     // No caisse ever goes below zero (owner's rule): an expense its caisse cannot cover is refused.
-    if (kind === 'depense') this.assertCaisseCovers(account ?? 'reservations', amount, 'Cette dépense', actor);
+    if (kind === 'depense') this.assertCaisseCovers(account ?? 'reservations', amount, 'Cette dépense', actor, { available: !fullBalance });
     const id = this.insert(
       `INSERT INTO ledger_entries (kind, biz_date, category_id, account, method, to_method, amount, label, reference,
          status, is_demo, created_at, created_by, supplier_id, foreign_amount, foreign_currency)
@@ -485,12 +485,13 @@ export const ledgerMethods = {
   // too, above his own limits: it is the till's correction, not an expense of his. No gap, no entry.
   recordCashGap(actor, day, method, gap, reason) {
     if (gap === 0) return null;
-    // A shortage comes out of Réservation de séance, which must hold it (owner's rule: no caisse below zero).
+    // A shortage comes out of Réservation de séance, which must hold it (owner's rule: no caisse below zero). It is
+    // the till's correction of days already counted, so the whole balance covers it, unverified money included.
     if (gap < 0) this.assertCaisseCovers('reservations', -gap, 'Ce manque de caisse', actor);
     const kind = gap > 0 ? 'recette' : 'depense';
     const category = this.get('SELECT id FROM categories WHERE kind = ? AND name = ?', kind, CASH_GAP_CATEGORY);
     if (!category) throw conflict('CATEGORIE_ECART_ABSENTE', `La catégorie « ${CASH_GAP_CATEGORY} » est introuvable : contactez l'administrateur.`);
-    return this.createEntry({ ...actor, role: 'admin' }, { kind, biz_date: day, category_id: category.id, amount: Math.abs(gap), method, label: reason });
+    return this.createEntry({ ...actor, role: 'admin' }, { kind, biz_date: day, category_id: category.id, amount: Math.abs(gap), method, label: reason }, { fullBalance: true });
   },
 
   // ---------------------------------------------------------------- closing the till (evening)
