@@ -83,10 +83,9 @@ export default function CategoryColumns({ sum, billed, method, oneDay, journal, 
       </div>
       {!billed ? <p className="subtle">Les lignes facturées n’ont pas pu être chargées. Rechargez la page.</p> : (
       <div className="cat-columns">
-        {/* On all accounts, the columns sit on the six tiles' grid, each under its own: nothing under the fund nor the
-            card credit, nothing under the till. */}
-        <div className={`cat-columns-inner${method ? '' : ' aligned'}`}>
-          {!method && <><div className="cat-spacer" aria-hidden="true" /><div className="cat-spacer" aria-hidden="true" /></>}
+        {/* The three columns share the whole width of the block, so each reads at ease (owner, 2026-11-08: no longer
+            set under their tiles of « Soldes »). */}
+        <div className="cat-columns-inner">
           {categoryColumns(sum, billed).map((c) => (
             <div key={c.key} className={`cat-col cat-col-${c.key}`}>
               <div className="cat-col-head">
@@ -96,7 +95,6 @@ export default function CategoryColumns({ sum, billed, method, oneDay, journal, 
               <div className="cat-parts">{c.parts.map((p) => <Part key={p.key} p={p} />)}</div>
             </div>
           ))}
-          {!method && <div className="cat-spacer" aria-hidden="true" />}
         </div>
       </div>
       )}
