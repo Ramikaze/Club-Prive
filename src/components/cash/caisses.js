@@ -24,7 +24,7 @@ export function caisseTiles(b, me, fmt) {
   const caisse = (key, lines, extra = []) => {
     const balance = b.caisses[key].balance;
     return {
-      key, title: CAISSE_LABEL[key], value: balance, negative: balance < 0, lines,
+      key, title: CAISSE_LABEL[key], value: balance, pending: b.caisses[key].pending, negative: balance < 0, lines,
       hints: [...extra, ...(balance < 0 ? ['Remettez de l’argent dans cette caisse.'] : [])],
       actions: actionsFor(me, key, past),
     };
@@ -32,13 +32,13 @@ export function caisseTiles(b, me, fmt) {
   const optional = (label, amount, out) => (amount !== 0 ? [line(label, amount, out)] : []);
   return [
     {
-      key: 'fond', title: 'Fond de caisse', value: b.fund.amount, negative: false, lines: [], actions: [],
+      key: 'fond', title: 'Fond de caisse', value: b.fund.amount, pending: 0, negative: false, lines: [], actions: [],
       hints: [
         b.start ? `au ${fmt.day(b.start)}` : 'depuis le début',
         ...(b.fund.card_credit > 0 ? [`dont crédit des cartes déjà là : −${fmt.money(b.fund.card_credit)}`] : []),
       ],
     },
-    { key: 'cartes', title: 'Solde de crédit sur les cartes clients non utilisées', value: b.cards, negative: false, lines: [], actions: [], hints: [end] },
+    { key: 'cartes', title: 'Solde de crédit sur les cartes clients non utilisées', value: b.cards, pending: 0, negative: false, lines: [], actions: [], hints: [end] },
     caisse('reservations', [
       line('Réservations', r.sold),
       line('Dépenses communes', r.expenses, true),
@@ -61,6 +61,11 @@ export function caisseTiles(b, me, fmt) {
       ...optional('Apports', c.apports),
       line('Bénéfices pris', c.taken, true),
     ]),
-    { key: 'caisse', title: 'Solde en caisse', value: b.till, negative: false, lines: [], actions: [], hints: [end] },
+    {
+      // The validated amount, then what still waits for a verification, then « En tout » (the till as it is today).
+      key: 'caisse', title: 'Solde en caisse', value: b.till_validated, pending: b.pending_total, total: b.till,
+      negative: false, lines: [], actions: [],
+      hints: [b.pending_total !== 0 ? `validé au ${fmt.day(b.verified_through)}` : end],
+    },
   ];
 }

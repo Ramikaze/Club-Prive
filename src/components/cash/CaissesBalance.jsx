@@ -28,6 +28,7 @@ export default function CaissesBalance({ b, onCount, onAction }) {
             <div key={t.key} className={`kpi caisse-tile caisse-${t.key}${t.key === 'caisse' ? ' accent' : ''}`}>
               <div className="label">{t.title}</div>
               <div className={`value${t.negative ? ' amount-out' : ''}`}>{money(t.value)}</div>
+              {t.pending !== 0 && <div className="caisse-pending">{t.pending > 0 ? '+' : '−'}{bare(Math.abs(t.pending))} en attente</div>}
               {t.lines.length > 0 && (
                 <dl className="caisse-lines">
                   {t.lines.map((l) => (
@@ -39,6 +40,9 @@ export default function CaissesBalance({ b, onCount, onAction }) {
                 </dl>
               )}
               {t.hints.map((h) => <div key={h} className="hint">{h}</div>)}
+              {t.key === 'caisse' && t.pending !== 0 && (
+                <div className="caisse-total"><span>En tout</span><strong>{money(t.total)}</strong></div>
+              )}
               {t.actions.length > 0 && (
                 <div className="caisse-actions">
                   {t.actions.map((a) => (
