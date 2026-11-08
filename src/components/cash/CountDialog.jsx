@@ -1,8 +1,9 @@
 // « Compter la caisse » (club management, from « Soldes »; the cash fund form is the administrator's alone). With no cash fund yet, it asks what each till and account
 // holds today and records that as the fund (POST /api/treasury/fund: the opening balances dated today). Once a fund
-// exists, it compares what was counted on one account with the balance the books expect and records the gap
-// (POST /api/treasury/count): a surplus as an other receipt, a shortage as an expense, both « Écart de caisse ». The
-// server computes the expected balance itself; the one shown here is only a preview.
+// exists, it shows every till and account one under the other (the cash counted note by note and coin by coin), compares
+// what was counted on each with the balance the books expect and records each gap (POST /api/treasury/count, one per
+// account filled in): a surplus as an other receipt, a shortage as an expense, both « Écart de caisse ». The server
+// computes the expected balance itself; the one shown here is only a preview.
 import { useState } from 'react';
 import { Modal } from '../ui/Modal.jsx';
 import { FormError, Loaded, Notice } from '../ui/ui.jsx';
@@ -12,6 +13,7 @@ import { bizToday, money, parseMoney } from '../../lib/format.js';
 import { useLoad, useSubmit } from '../../lib/hooks.js';
 import { useIsAdmin, useStore } from '../../store/useStore.js';
 import { CARD_METHOD } from '../../../shared/rules.js';
+import { DENOMINATIONS, cashTotal, lineAmount, parseCount } from './cashCount.js';
 
 const CASH = 'Espèces';
 
@@ -99,43 +101,97 @@ function FundForm({ close, t, methods, currency, onDone }) {
   );
 }
 
+// Every till and account at once, one under the other: the cash note by note and coin by coin, each other account by the
+// balance it shows (MTN MoMo: the phone). Each shows its expected balance and its gap as it is typed. Only what was
+// filled in is recorded, one count per account (POST /api/treasury/count), with the one motif. Each account keeps its
+// own idempotency key: if one count fails, sending again does not record the others twice.
 function CountForm({ close, t, methods, initial, currency, onDone }) {
-  const [key] = useState(newKey);
-  const [v, setV] = useState({
-    method: methods.includes(initial) ? initial : (methods.includes(CASH) ? CASH : methods[0] ?? ''), counted: '', reason: '',
-  });
+  const [keys] = useState(() => Object.fromEntries(methods.map((m) => [m, newKey()])));
+  const [cash, setCash] = useState({});
+  const [other, setOther] = useState({});
+  const [reason, setReason] = useState('');
   const { busy, error, submit } = useSubmit();
-  const set = (k) => (e) => setV({ ...v, [k]: e.target.value });
-  const expected = t.accounts.find((a) => a.method === v.method)?.closing ?? 0;
-  const counted = parseMoney(v.counted);
+  const expectedOf = (m) => t.accounts.find((a) => a.method === m)?.closing ?? 0;
+  const cashCount = cashTotal(cash);
+  // What one account holds as typed so far; null while untouched or not a number.
+  const countedOf = (m) => {
+    if (m === CASH) return cashCount.filled && cashCount.invalid.length === 0 ? cashCount.total : null;
+    return String(other[m] ?? '').trim() === '' ? null : parseMoney(other[m]);
+  };
+  // The field that takes the focus: the account the page was showing, else the first note.
+  const first = methods.includes(initial) ? initial : methods[0];
 
   const onSubmit = (e) => {
     e.preventDefault();
     submit(async () => {
-      if (counted === null) throw new Error('Montant compté invalide : saisissez un nombre (exemple : 25 000).');
-      const res = await api.post('/api/treasury/count', { method: v.method, counted, reason: v.reason }, key);
+      const todo = [];
+      for (const m of methods) {
+        if (m === CASH) {
+          if (!cashCount.filled) continue;
+          if (cashCount.invalid.length) throw new Error(`${CASH} : nombre invalide sur la ligne ${cashCount.invalid.join(', ')} (un nombre entier, exemple : 12).`);
+          todo.push({ method: m, counted: cashCount.total });
+        } else {
+          if (String(other[m] ?? '').trim() === '') continue;
+          const counted = parseMoney(other[m]);
+          if (counted === null) throw new Error(`${m} : montant invalide (exemple : 25 000).`);
+          todo.push({ method: m, counted });
+        }
+      }
+      if (todo.length === 0) throw new Error('Rien à enregistrer : comptez les billets et pièces, ou saisissez le solde d’un compte.');
+      const done = [];
+      for (const c of todo) {
+        const res = await api.post('/api/treasury/count', { ...c, reason }, keys[c.method]);
+        done.push(`${c.method} : ${res.gap === 0 ? 'juste' : gapText(res.gap)}`);
+        onDone?.(res);
+      }
       close();
-      toast(res.gap === 0 ? 'Caisse juste : aucun écart.' : `Écart enregistré : ${gapText(res.gap)}.`);
-      onDone?.(res);
+      toast(`Comptage enregistré. ${done.join(' · ')}.`);
     });
   };
 
   return (
     <form className="form-grid" onSubmit={onSubmit} noValidate>
-      <label className="field"><span>Caisse ou compte</span>
-        <select value={v.method} onChange={set('method')}>
-          {methods.map((m) => <option key={m} value={m}>{m}</option>)}
-        </select></label>
-      <p>Solde attendu : <strong>{money(expected)}</strong></p>
-      <label className="field"><span>Montant compté ({currency})</span>
-        <input inputMode="decimal" autoComplete="off" placeholder="0" required value={v.counted} onChange={set('counted')} />
-        <span className="help">Ce qu’il y a vraiment dans la caisse ou sur le compte maintenant.</span></label>
-      {counted !== null && (
-        <p aria-live="polite">Écart : <strong className={counted > expected ? 'amount-in' : counted < expected ? 'amount-out' : undefined}>{gapText(counted - expected)}</strong></p>
-      )}
+      {methods.map((m) => {
+        const expected = expectedOf(m);
+        const counted = countedOf(m);
+        return (
+          <section key={m} className="count-account" aria-label={m}>
+            <div className="count-head">
+              <h3>{m}</h3>
+              <span className="subtle">Solde attendu : <strong>{money(expected)}</strong></span>
+            </div>
+            {m === CASH ? (
+              <div className="count-notes" role="group" aria-label="Billets et pièces">
+                <div className="count-row count-cols subtle"><span>Billet / pièce</span><span>Nombre</span><span>Montant</span></div>
+                {DENOMINATIONS.map((d, i) => {
+                  const n = parseCount(cash[d.value]);
+                  return (
+                    <label key={d.value} className="count-row">
+                      <span>{d.label} <span className="subtle">{d.kind}</span></span>
+                      <input inputMode="numeric" autoComplete="off" placeholder="0" aria-label={`Nombre : ${d.label} (${d.kind})`}
+                        autoFocus={m === first && i === 0} aria-invalid={n === null || undefined}
+                        value={cash[d.value] ?? ''} onChange={(e) => setCash({ ...cash, [d.value]: e.target.value })} />
+                      <span className="count-sum">{n === null ? '—' : money(lineAmount(d.value, n))}</span>
+                    </label>
+                  );
+                })}
+                <div className="count-row count-total"><span>Total compté</span><span /><strong>{money(cashCount.total)}</strong></div>
+              </div>
+            ) : (
+              <label className="field"><span>Solde affiché ({currency})</span>
+                <input inputMode="decimal" autoComplete="off" placeholder="Laisser vide pour ne pas le compter" autoFocus={m === first}
+                  value={other[m] ?? ''} onChange={(e) => setOther({ ...other, [m]: e.target.value })} />
+                <span className="help">Ce que montre le compte maintenant (téléphone, relevé).</span></label>
+            )}
+            {counted !== null && (
+              <p className="count-gap" aria-live="polite">Écart : <strong className={counted > expected ? 'amount-in' : counted < expected ? 'amount-out' : undefined}>{gapText(counted - expected)}</strong></p>
+            )}
+          </section>
+        );
+      })}
       <label className="field"><span>Motif</span>
-        <input maxLength={120} placeholder="Comptage de caisse" value={v.reason} onChange={set('reason')} />
-        <span className="help">Facultatif. Un écart est enregistré dans « Écart de caisse » : en recette s’il y a plus, en dépense s’il manque.</span></label>
+        <input maxLength={120} placeholder="Comptage de caisse" value={reason} onChange={(e) => setReason(e.target.value)} />
+        <span className="help">Facultatif, commun à tous les comptes. Seuls les comptes remplis sont enregistrés. Un écart va dans « Écart de caisse » : en recette s’il y a plus, en dépense s’il manque.</span></label>
       <FormError error={error} />
       <div className="modal-actions">
         <button type="button" className="btn" onClick={close}>Annuler</button>
