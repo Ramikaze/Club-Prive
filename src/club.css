@@ -1126,14 +1126,6 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
   .cat-columns-inner { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr); }
   .cat-col-boisson .cat-parts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-/* « Par catégorie » under « Soldes »: on all accounts each column under its tile (spec, decision 6), on the tiles'
-   grid and from the same width; the spacers stand for the fund, the card credit and the till. */
-.cat-spacer { display: none; }
-@container (min-width: 1000px) {
-  .cat-columns-inner.aligned { grid-template-columns: 1fr 1fr 1fr 2fr 1fr 1fr; gap: 10px; }
-  .cat-columns-inner.aligned .cat-spacer { display: block; }
-  .cat-columns-inner.aligned .cat-col { padding: 10px; }
-}
 
 .cash-block .card-head h2, .cash-balance-card .card-head h2 { display: inline-flex; align-items: center; gap: 8px; }
 .cash-block .card-head h2 svg, .cash-balance-card .card-head h2 svg { width: 20px; height: 20px; color: var(--text-3); }
