@@ -179,3 +179,62 @@ test('les journées avant la mise en service comptent comme vérifiées', async 
     assert.equal(b.till_validated, b.till);
   } finally { c.srv.destroy(); }
 });
+
+test('le gérant ne peut pas vérifier (403)', async () => {
+  refused(await ger.post(`/api/day-closing/${yesterday}/verify`, {}), 403);
+});
+
+test('une journée ouverte ne se vérifie pas (NON_FERMEE)', async () => {
+  const r = await admin.post(`/api/day-closing/${today}/verify`, {});
+  refused(r, 409, 'NON_FERMEE');
+  assert.equal(r.data.error.message, 'La caisse de cette journée n’est pas encore fermée.');
+});
+
+test('les journées se vérifient dans l’ordre (JOURNEE_PRECEDENTE)', async () => {
+  const c = await club();
+  try {
+    await fundAndSell(c, 100000, noon(c.srv, c.twoAgo));
+    await sell(c, 2, noon(c.srv, c.yesterday));
+    ok(await c.ger.post('/api/day-closing', { day: c.twoAgo, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 100000 * UM } }));
+    ok(await c.ger.post('/api/day-closing', { day: c.yesterday, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 200000 * UM } }));
+    const [y, m, d] = c.twoAgo.split('-');
+    const r = await c.admin.post(`/api/day-closing/${c.yesterday}/verify`, {});
+    refused(r, 409, 'JOURNEE_PRECEDENTE');
+    assert.equal(r.data.error.message, `Vérifiez d’abord la caisse du ${d}/${m}/${y}.`);
+    ok(await c.admin.post(`/api/day-closing/${c.twoAgo}/verify`, {}));
+    ok(await c.admin.post(`/api/day-closing/${c.yesterday}/verify`, {}));
+  } finally { c.srv.destroy(); }
+});
+
+test('vérifier fait passer l’argent dans le solde validé, tracé dans le journal', async () => {
+  const before = ok(await admin.get(`/api/day-closing?day=${yesterday}`));
+  assert.equal(before.net.cigares, 100000 * UM);
+  assert.equal(before.closed.verified, null);
+  const v = ok(await cig.post(`/api/day-closing/${yesterday}/verify`, {}));
+  assert.equal(v.closed.verified.verified_by_name, 'Associé cigares');
+  assert.ok(v.closed.verified.verified_at);
+  const b = ok(await admin.get('/api/caisses'));
+  assert.equal(b.caisses.cigares.balance, 100000 * UM);
+  assert.equal(b.caisses.cigares.pending, 50000 * UM);
+  assert.equal(b.verified_through, yesterday);
+  assert.ok(server.club.get("SELECT 1 AS x FROM audit_log WHERE action = 'caisse.verifier'"));
+  const again = await admin.post(`/api/day-closing/${yesterday}/verify`, {});
+  refused(again, 409, 'DEJA_VERIFIEE');
+  assert.equal(again.data.error.message, 'La caisse de cette journée est déjà vérifiée.');
+});
+
+test('rouvrir une journée vérifiée remet son argent en attente', async () => {
+  ok(await admin.post(`/api/day-closing/${yesterday}/reopen`, { reason: 'Erreur de saisie' }));
+  let b = ok(await admin.get('/api/caisses'));
+  assert.equal(b.caisses.cigares.balance, 0);
+  assert.equal(b.caisses.cigares.pending, 150000 * UM);
+  assert.equal(b.verified_through, addDays(yesterday, -1));
+  const log = server.club.get("SELECT details FROM audit_log WHERE action = 'caisse.rouvrir' ORDER BY id DESC");
+  assert.ok(JSON.parse(log.details).verifiee_le);
+  // Close and verify again: the shared state ends with yesterday closed and verified, today open.
+  ok(await ger.post('/api/day-closing', { day: yesterday, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 100000 * UM } }));
+  ok(await admin.post(`/api/day-closing/${yesterday}/verify`, {}));
+  b = ok(await admin.get('/api/caisses'));
+  assert.equal(b.caisses.cigares.balance, 100000 * UM);
+  assert.equal(b.caisses.cigares.pending, 50000 * UM);
+});

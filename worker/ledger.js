@@ -4,7 +4,7 @@
 // A treasury account is a payment method (Espèces, Carte bancaire...). Opening balances count from
 // their date; movements before it are ignored, so the club can start tracking cash at any point.
 import { invalid, forbidden, notFound, conflict } from './errors.js';
-import { text, int, toId, flag } from './validate.js';
+import { text, int, toId, flag, frDate } from './validate.js';
 import { addDays, addMonths, isValidDate, localParts } from '../shared/time.js';
 import { ACCOUNTS, ACCOUNT_LABELS, CARD_METHOD } from '../shared/rules.js';
 import { isBoss } from '../shared/roles.js';
@@ -508,12 +508,19 @@ export const ledgerMethods = {
   dayClosing(day) {
     const d = day ?? this.bizToday();
     if (!isValidDate(d)) throw invalid('Date invalide.');
-    const row = this.get('SELECT dc.*, u.name AS closed_by_name FROM day_closings dc LEFT JOIN users u ON u.id = dc.closed_by WHERE dc.biz_day = ?', d);
+    const row = this.get(
+      `SELECT dc.*, u.name AS closed_by_name, v.name AS verified_by_name FROM day_closings dc
+       LEFT JOIN users u ON u.id = dc.closed_by LEFT JOIN users v ON v.id = dc.verified_by WHERE dc.biz_day = ?`, d);
+    const sums = this.caisseSums(d, d);
     const accounts = this.treasuryBalances(d, d).accounts
       .map((a) => ({ method: a.method, expected: a.closing, in: a.in, out: a.out, to_count: a.closing !== 0 || a.in !== 0 || a.out !== 0 }));
     return {
       day: d, today: this.bizToday(), accounts,
-      closed: row ? { closed_at: row.closed_at, closed_by_name: row.closed_by_name ?? null, summary: JSON.parse(row.summary) } : null,
+      net: { reservations: sums.reservations.balance, alcool: sums.alcool.balance, cigares: sums.cigares.balance },
+      closed: row ? {
+        closed_at: row.closed_at, closed_by_name: row.closed_by_name ?? null, summary: JSON.parse(row.summary),
+        verified: row.verified_at ? { verified_at: row.verified_at, verified_by_name: row.verified_by_name ?? null } : null,
+      } : null,
     };
   },
 
@@ -555,13 +562,28 @@ export const ledgerMethods = {
     return this.dayClosing(day);
   },
 
+  // An associé or the administrator verifies the till of a closed day: its money joins the validated balances. The days
+  // go in order: an earlier day with money still waiting must be verified first.
+  verifyDay(actor, day) {
+    if (!isValidDate(day)) throw invalid('Date invalide.');
+    const row = this.get('SELECT * FROM day_closings WHERE biz_day = ?', day);
+    if (!row) throw conflict('NON_FERMEE', 'La caisse de cette journée n’est pas encore fermée.');
+    if (row.verified_at) throw conflict('DEJA_VERIFIEE', 'La caisse de cette journée est déjà vérifiée.');
+    const earlier = this.pendingDays(day).find((p) => p.day < day);
+    if (earlier) throw conflict('JOURNEE_PRECEDENTE', `Vérifiez d’abord la caisse du ${frDate(earlier.day)}.`);
+    this.run('UPDATE day_closings SET verified_at = ?, verified_by = ? WHERE biz_day = ?', this.nowIso(), actor.id, day);
+    const net = this.dayClosing(day).net;
+    this.audit(actor, 'caisse.verifier', 'day', null, { jour: day, net });
+    return this.dayClosing(day);
+  },
+
   reopenDay(actor, day, input) {
     if (!isValidDate(day)) throw invalid('Date invalide.');
     const row = this.get('SELECT * FROM day_closings WHERE biz_day = ?', day);
     if (!row) throw conflict('NON_FERMEE', "La caisse de cette journée n'est pas fermée.");
     const reason = text(input.reason, 'Motif de réouverture', { required: true, min: 3, max: 300 });
     this.run('DELETE FROM day_closings WHERE biz_day = ?', day);
-    this.audit(actor, 'caisse.rouvrir', 'day', null, { jour: day, motif: reason, fermee_le: row.closed_at, synthese_a_la_fermeture: JSON.parse(row.summary) });
+    this.audit(actor, 'caisse.rouvrir', 'day', null, { jour: day, motif: reason, fermee_le: row.closed_at, verifiee_le: row.verified_at, synthese_a_la_fermeture: JSON.parse(row.summary) });
     return this.dayClosing(day);
   },
 

@@ -384,6 +384,7 @@ export function createApi({ db, env = {}, demo = false }) {
   add('GET', '/api/day-closing', {}, (ctx) => club.dayClosing(ctx.query.day));
   add('POST', '/api/day-closing', {}, (ctx) => club.closeDay(ctx.user, ctx.body));
   add('POST', '/api/day-closing/:day/reopen', CLUB, (ctx) => club.reopenDay(ctx.user, ctx.params.day, ctx.body));
+  add('POST', '/api/day-closing/:day/verify', CLUB, (ctx) => club.verifyDay(ctx.user, ctx.params.day));
   add('GET', '/api/closings', CLUB, () => club.closings());
   add('POST', '/api/closings', CLUB, (ctx) => club.closeMonth(ctx.user, ctx.body));
   add('POST', '/api/closings/:month/reopen', CLUB, (ctx) => club.reopenMonth(ctx.user, ctx.params.month, ctx.body));
