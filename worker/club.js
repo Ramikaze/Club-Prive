@@ -250,6 +250,8 @@ export class Club {
       // The automatic renewals leave alone the subscriptions that ended before the card existed: a member whose
       // plan lapsed long ago is not debited at the first recharge. Set once, on the first business day of the card.
       this.run("INSERT OR IGNORE INTO meta (key, value) VALUES ('renewals_since', ?)", this.bizToday());
+      // The daily till is verified from the first business day of the feature on; the days before stay unverified.
+      this.run("INSERT OR IGNORE INTO meta (key, value) VALUES ('day_verification_since', ?)", this.bizToday());
       // Members recorded before names were formatted get « Prénom NOM » once.
       if (!this.get("SELECT 1 AS x FROM meta WHERE key = 'names_formatted'")) {
         for (const m of this.all('SELECT id, first_name, last_name FROM members')) {
