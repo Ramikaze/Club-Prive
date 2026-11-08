@@ -358,8 +358,15 @@ main:focus { outline: none; }
 .caisse-lines > div { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; column-gap: 6px; }
 .caisse-lines dt { color: var(--text-2); }
 .caisse-lines dd { margin: 0 0 0 auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.caisse-actions { margin-top: auto; padding-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
-.caisse-actions .btn { white-space: normal; text-align: left; line-height: 1.25; }
+/* The buttons under a caisse: as quiet as the lines above them (same small size, lighter weight), one per row across
+   the whole tile so that they line up whatever its width; a label too long for a narrow tile breaks on two even lines. */
+.caisse-actions { margin-top: auto; padding-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.caisse-actions .btn {
+  width: 100%; min-height: 34px; padding: 5px 10px; border-radius: 8px;
+  font-size: 0.75rem; font-weight: 500; letter-spacing: 0.01em; line-height: 1.25; color: var(--text-2);
+  white-space: normal; text-align: center; text-wrap: balance;
+}
+.caisse-actions .btn:hover { color: var(--text); }
 @media (max-width: 499px) {
   .cash-balance-card { padding: 14px; }
   .kpis.cash-balance .kpi .value { font-size: 1rem; }
