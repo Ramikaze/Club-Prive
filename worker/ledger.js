@@ -505,7 +505,7 @@ export const ledgerMethods = {
 
   // What the closing of a day shows: whether it is closed (and how), and each till and account with the balance the
   // books expect at the end of the day. An account with neither balance nor movement has nothing to count.
-  dayClosing(day) {
+  dayClosing(day, actor = null) {
     const d = day ?? this.bizToday();
     if (!isValidDate(d)) throw invalid('Date invalide.');
     const row = this.get(
@@ -516,7 +516,7 @@ export const ledgerMethods = {
       .map((a) => ({ method: a.method, expected: a.closing, in: a.in, out: a.out, to_count: a.closing !== 0 || a.in !== 0 || a.out !== 0 }));
     return {
       day: d, today: this.bizToday(), accounts,
-      net: { reservations: sums.reservations.balance, alcool: sums.alcool.balance, cigares: sums.cigares.balance },
+      ...(actor && isBoss(actor) ? { net: { reservations: sums.reservations.balance, alcool: sums.alcool.balance, cigares: sums.cigares.balance } } : {}),
       closed: row ? {
         closed_at: row.closed_at, closed_by_name: row.closed_by_name ?? null, summary: JSON.parse(row.summary),
         verified: row.verified_at ? { verified_at: row.verified_at, verified_by_name: row.verified_by_name ?? null } : null,
@@ -559,7 +559,7 @@ export const ledgerMethods = {
     this.audit(actor, 'caisse.fermer', 'day', null, {
       jour: day, ecart: lines.reduce((s, l) => s + l.gap, 0), motif_ecart: gapReason, non_pointes: unchecked.length, motif_non_pointes: uncheckedReason,
     });
-    return this.dayClosing(day);
+    return this.dayClosing(day, actor);
   },
 
   // An associé or the administrator verifies the till of a closed day: its money joins the validated balances. The days
@@ -570,11 +570,13 @@ export const ledgerMethods = {
     if (!row) throw conflict('NON_FERMEE', 'La caisse de cette journée n’est pas encore fermée.');
     if (row.verified_at) throw conflict('DEJA_VERIFIEE', 'La caisse de cette journée est déjà vérifiée.');
     const earlier = this.pendingDays(day).find((p) => p.day < day);
-    if (earlier) throw conflict('JOURNEE_PRECEDENTE', `Vérifiez d’abord la caisse du ${frDate(earlier.day)}.`);
+    if (earlier) {
+      throw conflict('JOURNEE_PRECEDENTE', `${earlier.closed ? 'Vérifiez' : 'Fermez puis vérifiez'} d’abord la caisse du ${frDate(earlier.day)}.`);
+    }
     this.run('UPDATE day_closings SET verified_at = ?, verified_by = ? WHERE biz_day = ?', this.nowIso(), actor.id, day);
-    const net = this.dayClosing(day).net;
-    this.audit(actor, 'caisse.verifier', 'day', null, { jour: day, net });
-    return this.dayClosing(day);
+    const done = this.dayClosing(day, actor);
+    this.audit(actor, 'caisse.verifier', 'day', null, { jour: day, net: done.net });
+    return done;
   },
 
   reopenDay(actor, day, input) {
@@ -582,9 +584,12 @@ export const ledgerMethods = {
     const row = this.get('SELECT * FROM day_closings WHERE biz_day = ?', day);
     if (!row) throw conflict('NON_FERMEE', "La caisse de cette journée n'est pas fermée.");
     const reason = text(input.reason, 'Motif de réouverture', { required: true, min: 3, max: 300 });
+    if (this.get('SELECT 1 AS x FROM closed_periods WHERE month = ?', day.slice(0, 7))) {
+      throw conflict('PERIODE_CLOTUREE', `Cette journée tombe en ${monthLabel(day.slice(0, 7))}, une période clôturée : rouvrez d’abord le mois.`);
+    }
     this.run('DELETE FROM day_closings WHERE biz_day = ?', day);
     this.audit(actor, 'caisse.rouvrir', 'day', null, { jour: day, motif: reason, fermee_le: row.closed_at, verifiee_le: row.verified_at, synthese_a_la_fermeture: JSON.parse(row.summary) });
-    return this.dayClosing(day);
+    return this.dayClosing(day, actor);
   },
 
   // ---------------------------------------------------------------- general ledger
@@ -781,6 +786,10 @@ export const ledgerMethods = {
     );
     if (n > 0) {
       throw conflict('RESERVATIONS_OUVERTES', `${n} réservation(s) de ${monthLabel(month)} ne sont ni terminées ni annulées : traitez-les avant la clôture.`);
+    }
+    const unverified = this.pendingDays(last).find((p) => p.day >= first);
+    if (unverified) {
+      throw conflict('JOURNEES_A_VERIFIER', `La caisse du ${frDate(unverified.day)} n’est pas encore vérifiée : fermez-la puis vérifiez-la avant de clôturer le mois.`);
     }
     const summary = {
       treasury: this.treasuryBalances(first, last), result: this.periodResult(first, last), wallet_liability: this.walletLiabilityAt(last),

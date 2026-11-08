@@ -92,7 +92,9 @@ export const caisseMethods = {
       'SELECT dc.biz_day, dc.closed_at, u.name AS closed_by_name FROM day_closings dc LEFT JOIN users u ON u.id = dc.closed_by',
     ).map((r) => [r.biz_day, r]));
     const out = [];
-    for (let day = since > fund ? since : fund; day <= to; day = addDays(day, 1)) {
+    // The walk stops at today: no day after it can hold money yet.
+    const end = to < this.bizToday() ? to : this.bizToday();
+    for (let day = since > fund ? since : fund; day <= end; day = addDays(day, 1)) {
       if (verified.has(day) || !this.dayHasMoney(day)) continue;
       const c = closings.get(day);
       out.push({ day, closed: !!c, closed_at: c?.closed_at ?? null, closed_by_name: c?.closed_by_name ?? null });
@@ -195,7 +197,9 @@ export const caisseMethods = {
     if (balance < amount && actor && !isBoss(actor)) {
       throw conflict(
         'CAISSE_INSUFFISANTE',
-        `${what} n’est pas possible : la caisse « ${CAISSE_LABEL[account]} » ne contient pas assez d’argent. Demandez à un associé ou à l’administrateur d’y remettre de l’argent.`,
+        available && c.balance + c.pending >= amount
+          ? `${what} n’est pas possible : l’argent de la caisse « ${CAISSE_LABEL[account]} » attend la vérification des journées précédentes par un associé ou l’administrateur.`
+          : `${what} n’est pas possible : la caisse « ${CAISSE_LABEL[account]} » ne contient pas assez d’argent. Demandez à un associé ou à l’administrateur d’y remettre de l’argent.`,
         { account },
       );
     }

@@ -110,7 +110,7 @@ function AdminCash() {
       if (account === 'cigares') pay('achat_cigares');
       else openDialog(SupplierChoice, { onChoose: pay });
     } else if (action === 'benefices') {
-      openDialog(ProfitDialog, { account, balance: d.caisses.caisses[account].balance, onDone: state.reload });
+      openDialog(ProfitDialog, { account, balance: d.caisses.caisses[account].balance + Math.min(0, d.caisses.caisses[account].pending), onDone: state.reload });
     } else {
       openDialog(EntryDialog, {
         kind: 'recette', categoryCode: 'apport', account: account === 'reservations' ? '' : account, title: 'Faire un apport',

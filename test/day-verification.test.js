@@ -2,7 +2,7 @@
 // it and when, and the club notes the first business day of the feature. Days closed before that day stay as they were.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { addDays } from '../shared/time.js';
+import { addDays, addMonths } from '../shared/time.js';
 import { Server, Client, ok, UM } from './harness.js';
 
 const server = new Server({}, { lenientTariffs: true, dayVerification: true });
@@ -122,6 +122,8 @@ test('une dépense du gérant sur de l’argent en attente est refusée', async 
     // The full balance (100 000, pending) would cover it; the available money (0) does not.
     const r = await c.ger.post('/api/ledger/entries', { kind: 'depense', category_id: cat, amount: 3000 * UM, method: 'Espèces' });
     refused(r, 409, 'CAISSE_INSUFFISANTE');
+    assert.match(r.data.error.message, /attend la vérification/);
+    assert.doesNotMatch(r.data.error.message, /remettre de l’argent/);
     // Once the money is validated, the same expense goes through.
     c.srv.club.run("UPDATE meta SET value = ? WHERE key = 'day_verification_since'", c.today);
     ok(await c.ger.post('/api/ledger/entries', { kind: 'depense', category_id: cat, amount: 3000 * UM, method: 'Espèces' }));
@@ -217,7 +219,8 @@ test('vérifier fait passer l’argent dans le solde validé, tracé dans le jou
   assert.equal(b.caisses.cigares.balance, 100000 * UM);
   assert.equal(b.caisses.cigares.pending, 50000 * UM);
   assert.equal(b.verified_through, yesterday);
-  assert.ok(server.club.get("SELECT 1 AS x FROM audit_log WHERE action = 'caisse.verifier'"));
+  const audit = server.club.get("SELECT details FROM audit_log WHERE action = 'caisse.verifier'");
+  assert.equal(JSON.parse(audit.details).net.cigares, 100000 * UM);
   const again = await admin.post(`/api/day-closing/${yesterday}/verify`, {});
   refused(again, 409, 'DEJA_VERIFIEE');
   assert.equal(again.data.error.message, 'La caisse de cette journée est déjà vérifiée.');
@@ -249,5 +252,91 @@ test('l’Accueil signale les caisses à vérifier aux administrateurs seulement
     assert.deepEqual(ok(await c.ger.get('/api/dashboard')).days_to_verify, []);
     ok(await c.admin.post(`/api/day-closing/${c.yesterday}/verify`, {}));
     assert.deepEqual(ok(await c.admin.get('/api/dashboard')).days_to_verify, []);
+  } finally { c.srv.destroy(); }
+});
+
+test('le gérant ne voit pas les nets des caisses (GET /api/day-closing)', async () => {
+  assert.ok(ok(await admin.get(`/api/day-closing?day=${yesterday}`)).net);
+  assert.ok(ok(await cig.get(`/api/day-closing?day=${yesterday}`)).net);
+  assert.equal(ok(await ger.get(`/api/day-closing?day=${yesterday}`)).net, undefined);
+});
+
+test('JOURNEE_PRECEDENTE : une journée précédente non fermée demande de la fermer puis de la vérifier', async () => {
+  const c = await club();
+  try {
+    await fundAndSell(c, 100000, noon(c.srv, c.twoAgo));
+    await sell(c, 2, noon(c.srv, c.yesterday));
+    ok(await c.ger.post('/api/day-closing', { day: c.yesterday, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 200000 * UM } }));
+    const [y, m, d] = c.twoAgo.split('-');
+    const r = await c.admin.post(`/api/day-closing/${c.yesterday}/verify`, {});
+    refused(r, 409, 'JOURNEE_PRECEDENTE');
+    assert.equal(r.data.error.message, `Fermez puis vérifiez d’abord la caisse du ${d}/${m}/${y}.`);
+  } finally { c.srv.destroy(); }
+});
+
+// A club whose fund and a sale (100 000) date from a day of the previous month.
+async function pastMonthClub() {
+  const c = await club();
+  const first = addMonths(`${c.today.slice(0, 7)}-01`, -1);
+  c.pastDay = addDays(first, 9);
+  c.pastMonth = first.slice(0, 7);
+  c.twoAgo = c.pastDay;
+  await fundAndSell(c, 100000, noon(c.srv, c.pastDay));
+  return c;
+}
+
+test('clôturer un mois est refusé tant qu’une de ses journées avec de l’argent n’est pas vérifiée', async () => {
+  const c = await pastMonthClub();
+  try {
+    const [y, m, d] = c.pastDay.split('-');
+    const msg = `La caisse du ${d}/${m}/${y} n’est pas encore vérifiée : fermez-la puis vérifiez-la avant de clôturer le mois.`;
+    let r = await c.admin.post('/api/closings', { month: c.pastMonth });
+    refused(r, 409, 'JOURNEES_A_VERIFIER');
+    assert.equal(r.data.error.message, msg);
+    ok(await c.ger.post('/api/day-closing', { day: c.pastDay, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 100000 * UM } }));
+    r = await c.admin.post('/api/closings', { month: c.pastMonth });
+    refused(r, 409, 'JOURNEES_A_VERIFIER');
+    ok(await c.admin.post(`/api/day-closing/${c.pastDay}/verify`, {}));
+    ok(await c.admin.post('/api/closings', { month: c.pastMonth }));
+  } finally { c.srv.destroy(); }
+});
+
+test('rouvrir une journée vérifiée d’un mois clôturé est refusé (PERIODE_CLOTUREE)', async () => {
+  const c = await pastMonthClub();
+  try {
+    ok(await c.ger.post('/api/day-closing', { day: c.pastDay, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 100000 * UM } }));
+    ok(await c.admin.post(`/api/day-closing/${c.pastDay}/verify`, {}));
+    ok(await c.admin.post('/api/closings', { month: c.pastMonth }));
+    const r = await c.admin.post(`/api/day-closing/${c.pastDay}/reopen`, { reason: 'Erreur de saisie' });
+    refused(r, 409, 'PERIODE_CLOTUREE');
+    assert.match(r.data.error.message, /rouvrez d’abord le mois/);
+    assert.ok(c.srv.club.get('SELECT 1 AS x FROM day_closings WHERE biz_day = ?', c.pastDay));
+  } finally { c.srv.destroy(); }
+});
+
+test('l’argent en attente se dépense en négatif seulement : le disponible tient compte du négatif', async () => {
+  const c = await club();
+  try {
+    c.srv.club.at = noon(c.srv, c.twoAgo);
+    ok(await c.admin.post('/api/treasury/fund', { amounts: { 'Espèces': 0 } }));
+    const cigar = ok(await c.admin.post('/api/products', { category: 'cigare', name: 'Cigare B', reference: 'CIGB', price: 10000 * UM, initial_stock: 200 })).id;
+    c.srv.club.run("UPDATE meta SET value = ? WHERE key = 'day_verification_since'", c.twoAgo);
+    const sellB = async (qty, day) => {
+      c.srv.club.at = noon(c.srv, day);
+      ok(await c.ger.post('/api/shop/sales', { account: 'cigares', buyer: { kind: 'journalier' }, lines: [{ product_id: cigar, quantity: qty }], method: 'Espèces' }));
+    };
+    await sellB(64, c.yesterday);
+    ok(await c.ger.post('/api/day-closing', { day: c.yesterday, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 640000 * UM } }));
+    ok(await c.admin.post(`/api/day-closing/${c.yesterday}/verify`, {}));
+    await sellB(9, c.today);
+    c.srv.club.at = null;
+    const cat = ok(await c.admin.get('/api/ledger/categories')).find((x) => x.code === 'achat_cigares').id;
+    const pay = (amount) => c.admin.post('/api/ledger/entries', { kind: 'depense', category_id: cat, amount: amount * UM, method: 'Espèces' });
+    ok(await pay(600000));
+    const b = ok(await c.admin.get('/api/caisses'));
+    assert.equal(b.caisses.cigares.balance, 640000 * UM);
+    assert.equal(b.caisses.cigares.pending, -510000 * UM);
+    refused(await pay(130001), 409, 'CAISSE_INSUFFISANTE');
+    ok(await pay(130000));
   } finally { c.srv.destroy(); }
 });

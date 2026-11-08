@@ -217,7 +217,7 @@ export function DayClosingBar({ isAdmin, onChange, refresh = 0 }) {
   const gap = c.summary.accounts.reduce((s, a) => s + a.gap, 0);
   const reopen = () => actionDialog({
     title: `Rouvrir la caisse du ${dayLabel(day, 'medium')}`,
-    message: 'Les encaissements et dépenses pourront de nouveau être datés de ce jour. La réouverture est tracée avec son motif.',
+    message: `Les encaissements et dépenses pourront de nouveau être datés de ce jour. La réouverture est tracée avec son motif.${c.verified ? ' La vérification de la caisse sera effacée : l’argent de cette journée repasse « en attente ».' : ''}`,
     reasonLabel: 'Motif de la réouverture',
     confirmLabel: 'Rouvrir la journée',
     run: async ({ reason }) => { await api.post(`/api/day-closing/${day}/reopen`, { reason }); toast('Journée rouverte.'); reload(); },
@@ -226,7 +226,7 @@ export function DayClosingBar({ isAdmin, onChange, refresh = 0 }) {
     <div className="card close-bar is-closed">
       <span><Icon name="lock" /> Caisse fermée le {dateTime(c.closed_at)}{c.closed_by_name ? ` par ${c.closed_by_name}` : ''} · {gapText(gap)}
         {c.summary.unchecked.length > 0 && ` · ${c.summary.unchecked.length} ticket(s) non pointé(s)`}
-        {c.verified ? ` · vérifiée par ${c.verified.verified_by_name}` : ' · en attente de vérification'}</span>
+        {c.verified ? (c.verified.verified_by_name ? ` · vérifiée par ${c.verified.verified_by_name}` : ' · vérifiée') : ' · en attente de vérification'}</span>
       {isAdmin && <button type="button" className="btn btn-sm" onClick={reopen}><Icon name="unlock" /> Rouvrir</button>}
     </div>
   );
