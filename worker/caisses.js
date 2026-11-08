@@ -114,8 +114,10 @@ export const caisseMethods = {
     if (!isValidDate(to)) throw invalid('Date invalide.');
     const start = this.settings().opening_balances.date ?? null;
     if (start && to < start) {
+      const empty = emptyCaisses();
+      for (const k of CAISSES) empty[k].pending = 0;
       return {
-        start, to, started: false, fund: { amount: 0, total: 0, card_credit: 0 }, cards: 0, caisses: emptyCaisses(), till: 0,
+        start, to, started: false, fund: { amount: 0, total: 0, card_credit: 0 }, cards: 0, caisses: empty, till: 0,
         pending_days: [], pending_total: 0, till_validated: 0, verified_through: to,
       };
     }

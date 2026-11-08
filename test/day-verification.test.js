@@ -150,10 +150,20 @@ test('un manque de caisse à la fermeture passe sur le solde complet', async () 
 test('sans fond de caisse : pending_days vide, rien ne casse', async () => {
   const c = await club();
   try {
+    // Fund dated in the future: the tracking has not started (started: false), yet the money guard still works.
+    c.srv.club.run("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('opening_balances', ?, ?)",
+      JSON.stringify({ date: addDays(c.today, 3), amounts: { 'Espèces': 0 } }), new Date().toISOString());
+    c.srv.club.cachedSettings = null;
     const b = ok(await c.admin.get('/api/caisses'));
+    assert.equal(b.started, false);
+    for (const k of ['reservations', 'alcool', 'cigares']) assert.equal(b.caisses[k].pending, 0);
     assert.deepEqual(b.pending_days, []);
     assert.equal(b.pending_total, 0);
+    assert.equal(b.till_validated, 0);
     assert.equal(b.verified_through, c.today);
+    const cat = ok(await c.admin.get('/api/ledger/categories')).find((x) => x.code === 'achat_cigares').id;
+    refused(await c.ger.post('/api/ledger/entries', { kind: 'depense', category_id: cat, amount: 3000 * UM, method: 'Espèces' }), 409, 'CAISSE_INSUFFISANTE');
+    refused(await c.admin.post('/api/caisses/retrait', { account: 'cigares', amount: 1000 * UM, method: 'Espèces' }), 409, 'CAISSE_INSUFFISANTE');
   } finally { c.srv.destroy(); }
 });
 
