@@ -187,7 +187,8 @@ export default function Dashboard() {
         const newMember = () => openMemberDialog(null, (m) => navigate(`/membres/${m.id}`));
 
         const memberAlerts = d.expiring.length + d.expired.length;
-        const totalAlerts = d.to_close.length + d.stock_alerts.length + memberAlerts;
+        const toVerify = d.days_to_verify ?? [];
+        const totalAlerts = d.to_close.length + d.stock_alerts.length + memberAlerts + toVerify.length;
 
         return (
           <>
@@ -263,6 +264,15 @@ export default function Dashboard() {
                           <div className="meta">{d.to_close.map((r) => r.member_name).join(', ')}</div>
                         </div>
                         <span className="chip chip-warn">{d.to_close.length} à clôturer</span><Go />
+                      </Link>
+                    )}
+                    {toVerify.length > 0 && (
+                      <Link className="list-item" to="/caisse">
+                        <div className="grow">
+                          <div className="title">Caisses à vérifier</div>
+                          <div className="meta">{toVerify.slice(0, 3).map((day) => dayLabel(day, 'short')).join(', ')}{toVerify.length > 3 ? '…' : ''}</div>
+                        </div>
+                        <span className="chip chip-warn">{toVerify.length} à vérifier</span><Go />
                       </Link>
                     )}
                     {d.stock_alerts.length > 0 && (

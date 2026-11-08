@@ -3431,6 +3431,8 @@ export class Club {
     if (!isBoss(actor)) {
       result.cash_today = { ...result.cash_today, accounts: result.cash_today.accounts.map(({ champagne, autres_boissons, ...rest }) => rest) };
     }
+    // The days whose till is waiting for a verification (past days, or today once closed): the bosses' alert.
+    result.days_to_verify = isBoss(actor) ? this.pendingDays(today).filter((p) => p.day < today || p.closed).map((p) => p.day) : [];
     if (isBoss(actor)) {
       result.revenue = {
         week: this.financeSummary(addDays(today, -6), today),

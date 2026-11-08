@@ -238,3 +238,16 @@ test('rouvrir une journée vérifiée remet son argent en attente', async () => 
   assert.equal(b.caisses.cigares.balance, 100000 * UM);
   assert.equal(b.caisses.cigares.pending, 50000 * UM);
 });
+
+test('l’Accueil signale les caisses à vérifier aux administrateurs seulement', async () => {
+  const c = await club();
+  try {
+    await fundAndSell(c, 100000, noon(c.srv, c.yesterday));
+    ok(await c.ger.post('/api/day-closing', { day: c.yesterday, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 100000 * UM } }));
+    assert.deepEqual(ok(await c.admin.get('/api/dashboard')).days_to_verify, [c.yesterday]);
+    assert.deepEqual(ok(await c.cig.get('/api/dashboard')).days_to_verify, [c.yesterday]);
+    assert.deepEqual(ok(await c.ger.get('/api/dashboard')).days_to_verify, []);
+    ok(await c.admin.post(`/api/day-closing/${c.yesterday}/verify`, {}));
+    assert.deepEqual(ok(await c.admin.get('/api/dashboard')).days_to_verify, []);
+  } finally { c.srv.destroy(); }
+});
