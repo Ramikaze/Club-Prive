@@ -250,6 +250,8 @@ export class Club {
       // The automatic renewals leave alone the subscriptions that ended before the card existed: a member whose
       // plan lapsed long ago is not debited at the first recharge. Set once, on the first business day of the card.
       this.run("INSERT OR IGNORE INTO meta (key, value) VALUES ('renewals_since', ?)", this.bizToday());
+      // The daily till is verified from the first business day of the feature on; the days before stay unverified.
+      this.run("INSERT OR IGNORE INTO meta (key, value) VALUES ('day_verification_since', ?)", this.bizToday());
       // Members recorded before names were formatted get « Prénom NOM » once.
       if (!this.get("SELECT 1 AS x FROM meta WHERE key = 'names_formatted'")) {
         for (const m of this.all('SELECT id, first_name, last_name FROM members')) {
@@ -3429,6 +3431,8 @@ export class Club {
     if (!isBoss(actor)) {
       result.cash_today = { ...result.cash_today, accounts: result.cash_today.accounts.map(({ champagne, autres_boissons, ...rest }) => rest) };
     }
+    // The days whose till is waiting for a verification (past days, or today once closed): the bosses' alert.
+    result.days_to_verify = isBoss(actor) ? this.pendingDays(today).filter((p) => p.day < today || p.closed).map((p) => p.day) : [];
     if (isBoss(actor)) {
       result.revenue = {
         week: this.financeSummary(addDays(today, -6), today),

@@ -21,11 +21,13 @@ export async function fundCaisse(client, account, amount, method = 'Espèces') {
 }
 
 export class Server {
-  // `demo`: the club runs as the demo space. `lenientTariffs`: see start().
-  constructor(env = {}, { demo = false, lenientTariffs = false } = {}) {
+  // `demo`: the club runs as the demo space. `lenientTariffs`: see start(). `dayVerification`: the daily till is
+  // verified from the real start day on (see start()); otherwise every day counts as verified, as before the feature.
+  constructor(env = {}, { demo = false, lenientTariffs = false, dayVerification = false } = {}) {
     this.env = env;
     this.demo = demo;
     this.lenientTariffs = lenientTariffs;
+    this.dayVerification = dayVerification;
     this.dir = fs.mkdtempSync(path.join(os.tmpdir(), 'club-test-'));
     this.file = path.join(this.dir, 'test.sqlite');
   }
@@ -49,6 +51,11 @@ export class Server {
         "UPDATE settings SET value = json_set(value, '$.weekend_min_duration_min', json_extract(value, '$.min_duration_min')) WHERE key = 'booking'",
       );
       this.club.cachedSettings = null;
+      // The verification of the daily till starts on the real start day. Other test servers verify every day (the
+      // legacy scenarios close days without verifying them), unless the test asks for the feature.
+      if (!this.dayVerification) {
+        this.db.run("UPDATE meta SET value = '9999-12-31' WHERE key = 'day_verification_since'");
+      }
       this.started = true;
     }
   }

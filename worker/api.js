@@ -381,9 +381,10 @@ export function createApi({ db, env = {}, demo = false }) {
   add('POST', '/api/treasury/fund', ADMIN, (ctx) => ({ treasury: club.setCashFund(ctx.user, ctx.body), bundle: club.bundle(ctx.user) }));
   add('POST', '/api/treasury/count', CLUB, (ctx) => club.countCash(ctx.user, ctx.body));
   // The evening closing of the till: the manager or an administrator closes the day; only an administrator reopens it.
-  add('GET', '/api/day-closing', {}, (ctx) => club.dayClosing(ctx.query.day));
+  add('GET', '/api/day-closing', {}, (ctx) => club.dayClosing(ctx.query.day, ctx.user));
   add('POST', '/api/day-closing', {}, (ctx) => club.closeDay(ctx.user, ctx.body));
   add('POST', '/api/day-closing/:day/reopen', CLUB, (ctx) => club.reopenDay(ctx.user, ctx.params.day, ctx.body));
+  add('POST', '/api/day-closing/:day/verify', CLUB, (ctx) => club.verifyDay(ctx.user, ctx.params.day));
   add('GET', '/api/closings', CLUB, () => club.closings());
   add('POST', '/api/closings', CLUB, (ctx) => club.closeMonth(ctx.user, ctx.body));
   add('POST', '/api/closings/:month/reopen', CLUB, (ctx) => club.reopenMonth(ctx.user, ctx.params.month, ctx.body));

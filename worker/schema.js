@@ -882,7 +882,15 @@ const V22 = [
   'CREATE INDEX ledger_entries_supplier ON ledger_entries(supplier_id)',
 ];
 
-export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22];
+// V23: the verification of the daily till (spec docs/superpowers/specs/2026-11-08-verification-caisse-design.md). A day
+// closing records who verified the till and when; the days closed before the feature keep both columns empty. The
+// first business day of the feature is kept in meta (day_verification_since, set at boot). It comes after the suppliers (V22).
+const V23 = [
+  'ALTER TABLE day_closings ADD COLUMN verified_at TEXT',
+  'ALTER TABLE day_closings ADD COLUMN verified_by INTEGER REFERENCES users(id)',
+];
+
+export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23];
 
 export function migrate(db) {
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');

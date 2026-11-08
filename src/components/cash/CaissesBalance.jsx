@@ -4,13 +4,14 @@
 // stays in the head. Amounts never wrap; only a title may.
 import Icon from '../ui/Icon.jsx';
 import { Modal } from '../ui/Modal.jsx';
+import { PendingDaysBand } from './VerifyDays.jsx';
 import { caisseTiles } from './caisses.js';
 import { bizToday, dayLabel, money } from '../../lib/format.js';
 import { useMe, useStore } from '../../store/useStore.js';
 
 const ACTION_LABEL = { fournisseur: 'Payer un fournisseur', benefices: 'Prendre des bénéfices', apport: 'Faire un apport' };
 
-export default function CaissesBalance({ b, onCount, onAction }) {
+export default function CaissesBalance({ b, onCount, onAction, onChange }) {
   const me = useMe();
   const currency = useStore((s) => s.settings.currency.label);
   // The lines read as in the owner's mock-up: « +420 000 », the currency once, on the tile's figure.
@@ -28,6 +29,7 @@ export default function CaissesBalance({ b, onCount, onAction }) {
             <div key={t.key} className={`kpi caisse-tile caisse-${t.key}${t.key === 'caisse' ? ' accent' : ''}`}>
               <div className="label">{t.title}</div>
               <div className={`value${t.negative ? ' amount-out' : ''}`}>{money(t.value)}</div>
+              {t.pending !== 0 && <div className="caisse-pending">{t.pending > 0 ? '+' : '−'}{bare(Math.abs(t.pending))} en attente</div>}
               {t.lines.length > 0 && (
                 <dl className="caisse-lines">
                   {t.lines.map((l) => (
@@ -39,6 +41,9 @@ export default function CaissesBalance({ b, onCount, onAction }) {
                 </dl>
               )}
               {t.hints.map((h) => <div key={h} className="hint">{h}</div>)}
+              {t.key === 'caisse' && t.pending !== 0 && (
+                <div className="caisse-total"><span>En tout</span><strong>{money(t.total)}</strong></div>
+              )}
               {t.actions.length > 0 && (
                 <div className="caisse-actions">
                   {t.actions.map((a) => (
@@ -50,6 +55,7 @@ export default function CaissesBalance({ b, onCount, onAction }) {
           ))}
         </div>
       )}
+      {tiles && b.to >= bizToday() && <PendingDaysBand days={b.pending_days} onChange={onChange} />}
     </section>
   );
 }

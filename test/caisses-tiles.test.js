@@ -12,14 +12,14 @@ const balances = (over = {}) => ({
   fund: { amount: 100000 * UM, total: 100000 * UM, card_credit: 0 },
   cards: 350000 * UM,
   caisses: {
-    reservations: { balance: 125000 * UM, sold: 175000 * UM, expenses: 50000 * UM, apports: 0, taken: 0, halves: { alcool: 62500 * UM, cigares: 62500 * UM } },
+    reservations: { pending: 0, balance: 125000 * UM, sold: 175000 * UM, expenses: 50000 * UM, apports: 0, taken: 0, halves: { alcool: 62500 * UM, cigares: 62500 * UM } },
     alcool: {
-      balance: 220000 * UM, sold_champagne: 360000 * UM, sold_autres: 60000 * UM, purchases_champagne: 120000 * UM,
+      pending: 0, balance: 220000 * UM, sold_champagne: 360000 * UM, sold_autres: 60000 * UM, purchases_champagne: 120000 * UM,
       purchases_autres: 30000 * UM, other_expenses: 0, apports: 0, taken: 50000 * UM, ...over.alcool,
     },
-    cigares: { balance: 100000 * UM, sold: 300000 * UM, purchases: 200000 * UM, other_expenses: 0, apports: 0, taken: 0, ...over.cigares },
+    cigares: { pending: 0, balance: 100000 * UM, sold: 300000 * UM, purchases: 200000 * UM, other_expenses: 0, apports: 0, taken: 0, ...over.cigares },
   },
-  till: 895000 * UM,
+  till: 895000 * UM, till_validated: 895000 * UM, pending_total: 0, pending_days: 0, verified_through: '2026-11-07',
   ...over.top,
 });
 const admin = { role: 'admin' };
@@ -77,4 +77,27 @@ test('le fond dit le crédit des cartes qu’il contenait déjà', () => {
 
 test('une période passée : pas de boutons, le solde montré n’est pas celui d’aujourd’hui', () => {
   for (const t of caisseTiles(balances({ top: { to: '2026-11-06' } }), admin, fmt)) assert.deepEqual(t.actions, [], t.key);
+});
+
+test('l’argent en attente : validé gros, « en attente » dessous ; « En tout » sur la tuile du solde en caisse', () => {
+  const b = balances({
+    cigares: { balance: 640000, pending: 90000 },
+    top: { till: 3890000, till_validated: 3490000, pending_total: 400000, verified_through: '2026-11-07' },
+  });
+  const tiles = caisseTiles(b, admin, fmt);
+  const cigare = byKey(tiles, 'cigares');
+  assert.equal(cigare.value, 640000);
+  assert.equal(cigare.pending, 90000);
+  const till = byKey(tiles, 'caisse');
+  assert.deepEqual({ value: till.value, pending: till.pending, total: till.total }, { value: 3490000, pending: 400000, total: 3890000 });
+  assert.deepEqual(till.hints, ['validé au 07/11/2026']);
+  assert.equal(byKey(tiles, 'fond').pending, 0);
+  assert.equal(byKey(tiles, 'cartes').pending, 0);
+});
+
+test('rien en attente : pas de ligne, la tuile du solde dit « à ce jour »', () => {
+  const till = byKey(caisseTiles(balances(), admin, fmt), 'caisse');
+  assert.equal(till.pending, 0);
+  assert.deepEqual(till.hints, ['à ce jour']);
+  assert.ok(caisseTiles(balances(), admin, fmt).every((t) => t.pending === 0));
 });

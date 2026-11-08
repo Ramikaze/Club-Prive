@@ -4,7 +4,7 @@
 // to the money received) sits between the balances and the receipts. The manager sees the day only, without the
 // balances (treasury is the administrators'), and records the day's expenses within his cap: his page is unchanged
 // (« Recettes du jour »).
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
 import { openDialog } from '../components/ui/Modal.jsx';
@@ -72,6 +72,8 @@ function useScrollToBlock(type, loaded) {
 const periodLabel = (from, to) => (from === to ? dayLabel(from, 'title') : `Du ${dayLabel(from, 'medium')} au ${dayLabel(to, 'medium')}`);
 
 function AdminCash() {
+  // Bumped by the « journées à vérifier » band so the closing bar above reloads its own day too.
+  const [barTick, setBarTick] = useState(0);
   const settings = useSettings();
   const period = useCashPeriod();
   const { from, to } = period;
@@ -108,7 +110,7 @@ function AdminCash() {
       if (account === 'cigares') pay('achat_cigares');
       else openDialog(SupplierChoice, { onChoose: pay });
     } else if (action === 'benefices') {
-      openDialog(ProfitDialog, { account, balance: d.caisses.caisses[account].balance, onDone: state.reload });
+      openDialog(ProfitDialog, { account, balance: d.caisses.caisses[account].balance + Math.min(0, d.caisses.caisses[account].pending), onDone: state.reload });
     } else {
       openDialog(EntryDialog, {
         kind: 'recette', categoryCode: 'apport', account: account === 'reservations' ? '' : account, title: 'Faire un apport',
@@ -148,11 +150,11 @@ function AdminCash() {
       </div>
       <Loaded state={state}>{(d) => (
         <div className="cash-page">
-          <DayClosingBar isAdmin onChange={state.reload} />
+          <DayClosingBar isAdmin onChange={state.reload} refresh={barTick} />
           {/* On all accounts, the associés' caisses (six tiles); on one account, its four figures. */}
           {method
             ? <CashBalance t={d.treasury} method={method} entries={d.entries} journal={d.journal} openingBalances={settings.opening_balances} onCount={count} />
-            : <CaissesBalance b={d.caisses} onCount={count} onAction={onCaisse} />}
+            : <CaissesBalance b={d.caisses} onCount={count} onAction={onCaisse} onChange={() => { setBarTick((n) => n + 1); state.reload(); }} />}
           <CategoryColumns
             sum={d.sum} billed={d.billed} method={method} oneDay={oneDay}
             journal={d.journal} entries={d.entries} t={d.treasury} openingBalances={settings.opening_balances}

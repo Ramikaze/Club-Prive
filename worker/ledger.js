@@ -4,7 +4,7 @@
 // A treasury account is a payment method (Espèces, Carte bancaire...). Opening balances count from
 // their date; movements before it are ignored, so the club can start tracking cash at any point.
 import { invalid, forbidden, notFound, conflict } from './errors.js';
-import { text, int, toId, flag } from './validate.js';
+import { text, int, toId, flag, frDate } from './validate.js';
 import { addDays, addMonths, isValidDate, localParts } from '../shared/time.js';
 import { ACCOUNTS, ACCOUNT_LABELS, CARD_METHOD } from '../shared/rules.js';
 import { isBoss } from '../shared/roles.js';
@@ -213,7 +213,7 @@ export const ledgerMethods = {
     return method;
   },
 
-  createEntry(actor, input, { demo = false } = {}) {
+  createEntry(actor, input, { demo = false, fullBalance = false } = {}) {
     const kind = input.kind;
     // A profit taking has its own door (takeProfits), with its own rules.
     if (!ENTRY_KIND[kind] || kind === 'retrait') throw invalid("Type d'opération invalide.");
@@ -266,7 +266,7 @@ export const ledgerMethods = {
       ?? (paid ? `Paiement — ${paid.supplier.name}` : kind === 'transfert' ? `Transfert ${method} → ${toMethod}` : category.name);
     const reference = text(input.reference, 'Référence', { max: 80 });
     // No caisse ever goes below zero (owner's rule): an expense its caisse cannot cover is refused.
-    if (kind === 'depense') this.assertCaisseCovers(account ?? 'reservations', amount, 'Cette dépense', actor);
+    if (kind === 'depense') this.assertCaisseCovers(account ?? 'reservations', amount, 'Cette dépense', actor, { available: !fullBalance });
     const id = this.insert(
       `INSERT INTO ledger_entries (kind, biz_date, category_id, account, method, to_method, amount, label, reference,
          status, is_demo, created_at, created_by, supplier_id, foreign_amount, foreign_currency)
@@ -485,12 +485,13 @@ export const ledgerMethods = {
   // too, above his own limits: it is the till's correction, not an expense of his. No gap, no entry.
   recordCashGap(actor, day, method, gap, reason) {
     if (gap === 0) return null;
-    // A shortage comes out of Réservation de séance, which must hold it (owner's rule: no caisse below zero).
+    // A shortage comes out of Réservation de séance, which must hold it (owner's rule: no caisse below zero). It is
+    // the till's correction of days already counted, so the whole balance covers it, unverified money included.
     if (gap < 0) this.assertCaisseCovers('reservations', -gap, 'Ce manque de caisse', actor);
     const kind = gap > 0 ? 'recette' : 'depense';
     const category = this.get('SELECT id FROM categories WHERE kind = ? AND name = ?', kind, CASH_GAP_CATEGORY);
     if (!category) throw conflict('CATEGORIE_ECART_ABSENTE', `La catégorie « ${CASH_GAP_CATEGORY} » est introuvable : contactez l'administrateur.`);
-    return this.createEntry({ ...actor, role: 'admin' }, { kind, biz_date: day, category_id: category.id, amount: Math.abs(gap), method, label: reason });
+    return this.createEntry({ ...actor, role: 'admin' }, { kind, biz_date: day, category_id: category.id, amount: Math.abs(gap), method, label: reason }, { fullBalance: true });
   },
 
   // ---------------------------------------------------------------- closing the till (evening)
@@ -504,15 +505,22 @@ export const ledgerMethods = {
 
   // What the closing of a day shows: whether it is closed (and how), and each till and account with the balance the
   // books expect at the end of the day. An account with neither balance nor movement has nothing to count.
-  dayClosing(day) {
+  dayClosing(day, actor = null) {
     const d = day ?? this.bizToday();
     if (!isValidDate(d)) throw invalid('Date invalide.');
-    const row = this.get('SELECT dc.*, u.name AS closed_by_name FROM day_closings dc LEFT JOIN users u ON u.id = dc.closed_by WHERE dc.biz_day = ?', d);
+    const row = this.get(
+      `SELECT dc.*, u.name AS closed_by_name, v.name AS verified_by_name FROM day_closings dc
+       LEFT JOIN users u ON u.id = dc.closed_by LEFT JOIN users v ON v.id = dc.verified_by WHERE dc.biz_day = ?`, d);
+    const sums = this.caisseSums(d, d);
     const accounts = this.treasuryBalances(d, d).accounts
       .map((a) => ({ method: a.method, expected: a.closing, in: a.in, out: a.out, to_count: a.closing !== 0 || a.in !== 0 || a.out !== 0 }));
     return {
       day: d, today: this.bizToday(), accounts,
-      closed: row ? { closed_at: row.closed_at, closed_by_name: row.closed_by_name ?? null, summary: JSON.parse(row.summary) } : null,
+      ...(actor && isBoss(actor) ? { net: { reservations: sums.reservations.balance, alcool: sums.alcool.balance, cigares: sums.cigares.balance } } : {}),
+      closed: row ? {
+        closed_at: row.closed_at, closed_by_name: row.closed_by_name ?? null, summary: JSON.parse(row.summary),
+        verified: row.verified_at ? { verified_at: row.verified_at, verified_by_name: row.verified_by_name ?? null } : null,
+      } : null,
     };
   },
 
@@ -551,7 +559,24 @@ export const ledgerMethods = {
     this.audit(actor, 'caisse.fermer', 'day', null, {
       jour: day, ecart: lines.reduce((s, l) => s + l.gap, 0), motif_ecart: gapReason, non_pointes: unchecked.length, motif_non_pointes: uncheckedReason,
     });
-    return this.dayClosing(day);
+    return this.dayClosing(day, actor);
+  },
+
+  // An associé or the administrator verifies the till of a closed day: its money joins the validated balances. The days
+  // go in order: an earlier day with money still waiting must be verified first.
+  verifyDay(actor, day) {
+    if (!isValidDate(day)) throw invalid('Date invalide.');
+    const row = this.get('SELECT * FROM day_closings WHERE biz_day = ?', day);
+    if (!row) throw conflict('NON_FERMEE', 'La caisse de cette journée n’est pas encore fermée.');
+    if (row.verified_at) throw conflict('DEJA_VERIFIEE', 'La caisse de cette journée est déjà vérifiée.');
+    const earlier = this.pendingDays(day).find((p) => p.day < day);
+    if (earlier) {
+      throw conflict('JOURNEE_PRECEDENTE', `${earlier.closed ? 'Vérifiez' : 'Fermez puis vérifiez'} d’abord la caisse du ${frDate(earlier.day)}.`);
+    }
+    this.run('UPDATE day_closings SET verified_at = ?, verified_by = ? WHERE biz_day = ?', this.nowIso(), actor.id, day);
+    const done = this.dayClosing(day, actor);
+    this.audit(actor, 'caisse.verifier', 'day', null, { jour: day, net: done.net });
+    return done;
   },
 
   reopenDay(actor, day, input) {
@@ -559,9 +584,12 @@ export const ledgerMethods = {
     const row = this.get('SELECT * FROM day_closings WHERE biz_day = ?', day);
     if (!row) throw conflict('NON_FERMEE', "La caisse de cette journée n'est pas fermée.");
     const reason = text(input.reason, 'Motif de réouverture', { required: true, min: 3, max: 300 });
+    if (this.get('SELECT 1 AS x FROM closed_periods WHERE month = ?', day.slice(0, 7))) {
+      throw conflict('PERIODE_CLOTUREE', `Cette journée tombe en ${monthLabel(day.slice(0, 7))}, une période clôturée : rouvrez d’abord le mois.`);
+    }
     this.run('DELETE FROM day_closings WHERE biz_day = ?', day);
-    this.audit(actor, 'caisse.rouvrir', 'day', null, { jour: day, motif: reason, fermee_le: row.closed_at, synthese_a_la_fermeture: JSON.parse(row.summary) });
-    return this.dayClosing(day);
+    this.audit(actor, 'caisse.rouvrir', 'day', null, { jour: day, motif: reason, fermee_le: row.closed_at, verifiee_le: row.verified_at, synthese_a_la_fermeture: JSON.parse(row.summary) });
+    return this.dayClosing(day, actor);
   },
 
   // ---------------------------------------------------------------- general ledger
@@ -758,6 +786,10 @@ export const ledgerMethods = {
     );
     if (n > 0) {
       throw conflict('RESERVATIONS_OUVERTES', `${n} réservation(s) de ${monthLabel(month)} ne sont ni terminées ni annulées : traitez-les avant la clôture.`);
+    }
+    const unverified = this.pendingDays(last).find((p) => p.day >= first);
+    if (unverified) {
+      throw conflict('JOURNEES_A_VERIFIER', `La caisse du ${frDate(unverified.day)} n’est pas encore vérifiée : fermez-la puis vérifiez-la avant de clôturer le mois.`);
     }
     const summary = {
       treasury: this.treasuryBalances(first, last), result: this.periodResult(first, last), wallet_liability: this.walletLiabilityAt(last),

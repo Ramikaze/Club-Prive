@@ -40,6 +40,8 @@ const Steps = ({ step }) => (
   </ol>
 );
 
+export const closeDayDialog = (day, onDone) => openDialog(CloseDayDialog, { day, onDone });
+
 function CloseDayDialog({ close, day, onDone }) {
   const state = useLoad(async () => {
     const [closing, journal, ledger] = await Promise.all([
@@ -198,9 +200,9 @@ function Wizard({ close, day, data, onDone }) {
 
 // The day's closing on the cash page: a button to close it, or who closed it and the gap, and for an administrator a
 // way to reopen it.
-export function DayClosingBar({ isAdmin, onChange }) {
+export function DayClosingBar({ isAdmin, onChange, refresh = 0 }) {
   const day = bizToday();
-  const state = useLoad(() => api.get(`/api/day-closing${qs({ day })}`), [day]);
+  const state = useLoad(() => api.get(`/api/day-closing${qs({ day })}`), [day, refresh]);
   const reload = () => { state.reload(); onChange?.(); };
   const c = state.data?.closed;
   if (!state.data) return null;
@@ -208,14 +210,14 @@ export function DayClosingBar({ isAdmin, onChange }) {
     return (
       <div className="card close-bar">
         <span><Icon name="unlock" /> La caisse du {dayLabel(day, 'medium')} est ouverte.</span>
-        <button type="button" className="btn btn-primary btn-sm" onClick={() => openDialog(CloseDayDialog, { day, onDone: reload })}><Icon name="lock" /> Fermer la caisse</button>
+        <button type="button" className="btn btn-primary btn-sm" onClick={() => closeDayDialog(day, reload)}><Icon name="lock" /> Fermer la caisse</button>
       </div>
     );
   }
   const gap = c.summary.accounts.reduce((s, a) => s + a.gap, 0);
   const reopen = () => actionDialog({
     title: `Rouvrir la caisse du ${dayLabel(day, 'medium')}`,
-    message: 'Les encaissements et dépenses pourront de nouveau être datés de ce jour. La réouverture est tracée avec son motif.',
+    message: `Les encaissements et dépenses pourront de nouveau être datés de ce jour. La réouverture est tracée avec son motif.${c.verified ? ' La vérification de la caisse sera effacée : l’argent de cette journée repasse « en attente ».' : ''}`,
     reasonLabel: 'Motif de la réouverture',
     confirmLabel: 'Rouvrir la journée',
     run: async ({ reason }) => { await api.post(`/api/day-closing/${day}/reopen`, { reason }); toast('Journée rouverte.'); reload(); },
@@ -223,7 +225,8 @@ export function DayClosingBar({ isAdmin, onChange }) {
   return (
     <div className="card close-bar is-closed">
       <span><Icon name="lock" /> Caisse fermée le {dateTime(c.closed_at)}{c.closed_by_name ? ` par ${c.closed_by_name}` : ''} · {gapText(gap)}
-        {c.summary.unchecked.length > 0 && ` · ${c.summary.unchecked.length} ticket(s) non pointé(s)`}</span>
+        {c.summary.unchecked.length > 0 && ` · ${c.summary.unchecked.length} ticket(s) non pointé(s)`}
+        {c.verified ? (c.verified.verified_by_name ? ` · vérifiée par ${c.verified.verified_by_name}` : ' · vérifiée') : ' · en attente de vérification'}</span>
       {isAdmin && <button type="button" className="btn btn-sm" onClick={reopen}><Icon name="unlock" /> Rouvrir</button>}
     </div>
   );
