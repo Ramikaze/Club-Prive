@@ -291,3 +291,16 @@ test('une commande à moitié encaissée : le rayon vendu ne retient plus de sto
   refused(r, 409, 'COMMANDE_DEJA_ENCAISSEE');
   assert.equal(server.club.get('SELECT status FROM client_orders WHERE id = ?', o.id).status, 'en_attente');
 });
+
+test('côté équipe : la liste des produits porte « held » (mis de côté), jamais côté client', async () => {
+  const p = await newProduct('cigare', 6);
+  const a = await person();
+  const heldOf = async () => ok(await ger.get('/api/products')).find((x) => x.id === p.id).held;
+  assert.equal(await heldOf(), 0);
+  const o = ok(await order(a, [{ product_id: p.id, quantity: 2 }]));
+  assert.equal(await heldOf(), 2);
+  const clientList = ok(await a.client.get('/api/client/products'));
+  assert.equal(JSON.stringify(clientList).includes('held'), false);
+  ok(await ger.post(`/api/orders/${o.id}/cancel`, { reason: 'Test' }));
+  assert.equal(await heldOf(), 0);
+});

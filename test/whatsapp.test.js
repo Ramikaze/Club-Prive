@@ -4,7 +4,7 @@
 // use +242 06 000 00 00, and the other numbers are made up.
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { waDigits, waLink } from '../shared/whatsapp.js';
+import { waDigits, waLink, clientAccessText } from '../shared/whatsapp.js';
 import { Server, Client, ok } from './harness.js';
 
 // ---------------------------------------------------------------- waDigits
@@ -197,4 +197,15 @@ test('le détail d’une réservation annulée ou terminée porte aussi le prén
   assert.equal(finished.reservation.status, 'terminee');
   assert.equal(finished.member_first_name, 'Bruno');
   assert.equal(finished.member_phone, '06 000 00 02');
+});
+
+test('le message d’accès client porte l’adresse, l’identifiant, le code et sa durée', () => {
+  const text = clientAccessText({ first_name: 'Awa', url: 'https://club.example/client', login: '242060000000', code: 'ABCD2345' });
+  assert.ok(text.includes('Awa'));
+  assert.ok(text.includes('https://club.example/client'));
+  assert.ok(text.includes('242060000000'));
+  assert.ok(text.includes('ABCD2345'));
+  assert.ok(text.includes('7 jours'));
+  assert.ok(text.includes('mot de passe'));
+  assert.ok(text.includes('L’équipe Limen'));
 });

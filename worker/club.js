@@ -3131,7 +3131,9 @@ export class Club {
     const rows = includeInactive
       ? this.all(`${PRODUCT_SELECT} ORDER BY ${PRODUCT_ORDER}, p.name`)
       : this.all(`${PRODUCT_SELECT} WHERE p.active = 1 ORDER BY ${PRODUCT_ORDER}, p.name`);
-    return rows.map((p) => this.productDTO(p));
+    // `held`: units set aside by open client orders (staff only: the Boutique card says « N mis de côté »).
+    const held = this.heldQuantities();
+    return rows.map((p) => ({ ...this.productDTO(p), held: held.get(p.id) ?? 0 }));
   }
 
   productFields(input, current = {}) {

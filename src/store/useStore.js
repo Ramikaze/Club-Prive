@@ -23,6 +23,10 @@ export const useStore = create((set) => ({
   // they were filled in: another user, the demo or the real club starts with empty carts.
   shopCarts: null,
   setShopCarts: (update) => set((s) => ({ shopCarts: update(s.shopCarts) })),
+  // What waits on the « Commandes » page (open orders + reservation requests), for the menu's counter. Read by the same
+  // poll as the page itself.
+  orderCounts: 0,
+  setOrderCounts: (n) => set({ orderCounts: n }),
   setBundle: (bundle) => {
     const demo = bundle.demo === true;
     document.title = `${demo ? '[DÉMO] ' : ''}${bundle.settings.club_name} — Gestion`;
@@ -44,7 +48,7 @@ export const useStore = create((set) => ({
     clearSpace();
     clearActionToasts();
     document.title = 'Connexion — Limen';
-    set({ status: 'login', me: null, demo: false, shopCarts: null });
+    set({ status: 'login', me: null, demo: false, shopCarts: null, orderCounts: 0 });
   },
   setOffline: (error) => set({ status: 'offline', bootError: error }),
 }));

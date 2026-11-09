@@ -65,6 +65,7 @@ export default function SalePanel({ account, products, cart, setCart, onSold, on
         account,
         buyer: buyer.kind === 'journalier' ? { kind: 'journalier' } : { kind: buyer.kind, member_id: buyer.person.id },
         lines: rows.map((r) => ({ product_id: r.p.id, quantity: r.qty })),
+        ...(cart.order_id ? { order_id: cart.order_id } : {}),
         ...(onCredit ? { credit: true } : byCard ? { card: true, method: rest > 0 ? restMethod : undefined } : { method }),
       };
       // The cart's own key, kept across edits and failed attempts: the server stores it only after a successful sale.
@@ -98,7 +99,11 @@ export default function SalePanel({ account, products, cart, setCart, onSold, on
         <span className="chip chip-neutral"><i className={`dot dot-${account}`} /> {shop.tag}</span>
       </div>
 
-      <BuyerPicker buyer={buyer} onChange={(b) => setCart((c) => ({ ...c, buyer: b }))} />
+      {cart.order_id ? (
+        <Notice kind="info">Commande en ligne de {buyer.person?.name} : quantités modifiables au comptoir. Changer d’acheteur détache la commande.</Notice>
+      ) : null}
+      {/* Another buyer is no longer the order's: the sale would be refused, so the link is dropped. */}
+      <BuyerPicker buyer={buyer} onChange={(b) => setCart(({ order_id: _order, ...c }) => ({ ...c, buyer: b }))} />
       {isMember && buyer.person.in_room && (
         <Notice kind="warn">Ce membre est en séance : pour une consommation sur place, ajoutez-la à sa séance.</Notice>
       )}

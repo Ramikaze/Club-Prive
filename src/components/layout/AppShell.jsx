@@ -23,6 +23,8 @@ export const NAV = [
   { path: '/agenda', label: 'Agenda', short: 'Agenda', icon: 'calendar', tab: true, also: ['/reservations'] },
   { path: '/membres', label: 'Membres / Clients', short: 'Membres', icon: 'users', tab: true, also: ['/clients', '/cartes'] },
   { path: '/boutique', label: 'Boutique', short: 'Boutique', icon: 'shop' },
+  // Orders and reservation requests from the client space; the counter is what waits (useOrderCounter).
+  { path: '/commandes', label: 'Commandes', short: 'Commandes', icon: 'receipt', counter: true },
   { path: '/produits', label: 'Stocks', short: 'Stocks', icon: 'box' },
   { path: '/caisse', label: 'Caisse', short: 'Caisse', icon: 'wallet', tab: true },
   // Supplier accounts (owner, 2026-11-07: « Les fournisseurs s'afficheront ici. Ils auront leur icône. »): the
@@ -42,6 +44,34 @@ const RAIL_KEY = 'sidebar-rail';
 function readRail() {
   try { return localStorage.getItem(RAIL_KEY) === '1'; } catch { return false; }
 }
+
+const ORDERS_POLL_MS = 30000;
+
+// The menu's counter: what waits on the « Commandes » page, read every 30 s while the tab is visible (a hidden tab
+// asks nothing, and asks again as soon as it is shown). The page itself reads the same answer when it is open.
+function useOrderCounter(paused) {
+  useEffect(() => {
+    if (paused) return undefined;
+    let alive = true;
+    const poll = async () => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const { counts } = await api.get('/api/orders');
+        if (alive) useStore.getState().setOrderCounts(counts.orders + counts.requests);
+      } catch { /* the counter keeps its last value */ }
+    };
+    poll();
+    const timer = setInterval(poll, ORDERS_POLL_MS);
+    document.addEventListener('visibilitychange', poll);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', poll);
+    };
+  }, [paused]);
+}
+
+const NavCount = ({ n }) => (n > 0 ? <span className="nav-count" aria-label={`${n} en attente`}>{n}</span> : null);
 
 async function logout() {
   try { await api.post('/api/logout', {}); } catch { /* session already gone */ }
@@ -88,6 +118,7 @@ function AccountMenu({ close, onTour }) {
   // its password cannot be changed: neither is shown.
   const demo = useStore((s) => s.demo);
   const navigate = useNavigate();
+  const orderCount = useStore((s) => s.orderCounts);
   const isAdmin = me.role === 'admin';
   const go = (path) => {
     close();
@@ -99,7 +130,7 @@ function AccountMenu({ close, onTour }) {
       <div className="menu-list">
         <p className="muted">{ROLE_LABEL[me.role]}{!demo && ` · identifiant ${me.login}`}</p>
         {NAV.filter((n) => n.path && !n.tab && (!n.admin || isAdmin) && (!n.boss || isBoss(me))).map((n) => (
-          <button key={n.path} type="button" className="btn btn-block" onClick={() => go(n.path)}><Icon name={n.icon} /> {n.label}</button>
+          <button key={n.path} type="button" className="btn btn-block" onClick={() => go(n.path)}><Icon name={n.icon} /> {n.label}{n.counter ? <NavCount n={orderCount} /> : null}</button>
         ))}
         <hr />
         <button type="button" className="btn btn-block btn-demo" onClick={() => { close(); switchSpace(); }}>
@@ -130,6 +161,8 @@ export default function AppShell() {
   const isAdmin = me.role === 'admin';
   const { pathname } = useLocation();
   const current = navFor(pathname);
+  const orderCount = useStore((s) => s.orderCounts);
+  useOrderCounter(pathname === '/commandes');
   const [tour, setTour] = useState(false);
   const [rail, setRail] = useState(readRail);
   const toggleRail = () => {
@@ -178,7 +211,7 @@ export default function AppShell() {
         <nav className="side-nav" id="side-nav" data-tour="nav">
           {NAV.filter((n) => (!n.admin || isAdmin) && (!n.boss || isBoss(me))).map((n) => (n.group
             ? <div key={n.group} className="side-nav-label">{n.group}</div>
-            : <Link key={n.path} to={n.path} aria-current={aria(n.path)} title={tip(n.label)}><Icon name={n.icon} /><span className="side-label">{n.label}</span></Link>))}
+            : <Link key={n.path} to={n.path} aria-current={aria(n.path)} title={tip(n.label)}><Icon name={n.icon} /><span className="side-label">{n.label}</span>{n.counter ? <NavCount n={orderCount} /> : null}</Link>))}
         </nav>
         <div className="side-user" data-tour="account">
           <div className="side-who" title={tip(`${me.name} · ${ROLE_LABEL[me.role]}`)}><div className="who">{me.name}</div><div className="role">{ROLE_LABEL[me.role]}</div></div>

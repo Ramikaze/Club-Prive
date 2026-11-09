@@ -43,6 +43,7 @@ export default function ShopProductCard({ product, inCart, canSell, canEditPhoto
           {out ? <span className="chip chip-danger">rupture</span>
             : product.low ? <span className="chip chip-warn">stock {product.stock_qty} · faible</span>
               : <span className="chip chip-ok">stock {product.stock_qty}</span>}
+          {product.held > 0 && <span className="chip chip-info">{product.held} mis de côté</span>}
           {inCart > 0 && <span className="chip chip-neutral">{inCart} au panier</span>}
         </p>
       </div>

@@ -1340,3 +1340,19 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
   .table.stack-sm.supplier-statement td:has(.supplier-op)::before { display: block; margin-bottom: 2px; }
   .table.stack-sm.supplier-statement td.is-empty { display: none; }
 }
+
+/* ------------------------------------------------------------------ « Commandes » : compteur du menu et page */
+
+.nav-count {
+  margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px;
+  display: inline-grid; place-items: center; font-size: 0.72rem; font-weight: 700; line-height: 1;
+  background: var(--bronze); color: var(--charcoal);
+}
+.shell.is-rail .side-nav a .nav-count { position: absolute; top: 4px; right: 6px; margin: 0; min-width: 16px; height: 16px; font-size: 0.65rem; padding: 0 4px; }
+.menu-list .btn .nav-count { margin-left: 8px; }
+
+.order-list { display: grid; gap: 14px; }
+.order-card .order-lines { margin: 8px 0; padding-left: 18px; }
+.order-card .order-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.order-rayon { margin-top: 8px; }
+.order-rayon h3 { font-size: 0.95rem; margin-bottom: 2px; }

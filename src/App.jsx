@@ -19,6 +19,7 @@ import Reservation from './pages/Reservation.jsx';
 import BookingConfirmation from './pages/BookingConfirmation.jsx';
 import Products from './pages/Products.jsx';
 import Shop from './pages/Shop.jsx';
+import Orders from './pages/Orders.jsx';
 import Cash from './pages/Cash.jsx';
 import ShopTab from './components/cash/ShopTab.jsx';
 import Ticket from './pages/Ticket.jsx';
@@ -189,6 +190,7 @@ export default function App() {
             <Route path="fournisseurs" element={<BossOnly><Suppliers /></BossOnly>} />
             <Route path="fournisseurs/:id" element={<BossOnly><Supplier /></BossOnly>} />
             <Route path="boutique" element={<Shop />} />
+            <Route path="commandes" element={<Orders />} />
             <Route path="clients" element={<ClientsList />} />
             <Route path="parametres" element={<AdminOnly><Settings /></AdminOnly>} />
             <Route path="*" element={<NotFound />} />

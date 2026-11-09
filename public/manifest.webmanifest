@@ -1,0 +1,12 @@
+{
+  "name": "Limen · Club privé",
+  "short_name": "Limen",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#1c1d1f",
+  "theme_color": "#1c1d1f",
+  "icons": [
+    { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }
+  ]
+}

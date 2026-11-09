@@ -23,3 +23,21 @@ export function waDigits(phone) {
 export function waLink(digits, text) {
   return `https://wa.me/${clean(digits).replace(/\D/g, '')}?text=${encodeURIComponent(String(text ?? ''))}`;
 }
+
+// The message that gives a client his access to the client space: the address, his identifier and the temporary code
+// (valid 7 days, it only opens the « choose your password » screen). `url` is the space's address, `${origin}/client`.
+export function clientAccessText({ first_name, url, login, code }) {
+  const name = clean(first_name);
+  return [
+    name ? `Bonjour ${name},` : 'Bonjour,',
+    '',
+    'Votre espace client Limen est prêt : vous pouvez y commander à la Boutique et demander une réservation.',
+    `Adresse : ${url}`,
+    `Identifiant : ${login}`,
+    `Code provisoire : ${code} (valable 7 jours)`,
+    '',
+    'À votre première connexion, vous choisirez votre mot de passe.',
+    '',
+    'L’équipe Limen',
+  ].join('\n');
+}
