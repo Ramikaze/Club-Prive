@@ -284,9 +284,9 @@ export function createApi({ db, env = {}, demo = false }) {
   add('POST', '/api/members/:id/deactivate', {}, (ctx) => club.deactivateMember(ctx.user, ctx.params.id, ctx.body));
   // Client space access, handed out by the staff (every role); the temporary code is returned once, never logged.
   add('GET', '/api/members/:id/client-access', { ...ACCOUNTS }, (ctx) => club.clientAccessStatus(club.fileRow(ctx.params.id).id));
-  add('POST', '/api/members/:id/client-access', { ...ACCOUNTS, prepare: prepareClientCode },
+  add('POST', '/api/members/:id/client-access', { ...ACCOUNTS, noIdempotency: true, prepare: prepareClientCode },
     (ctx) => clientCodeAnswer(ctx, club.createClientAccess(ctx.user, ctx.params.id, clientCode(ctx))));
-  add('POST', '/api/members/:id/client-access/code', { ...ACCOUNTS, prepare: prepareClientCode },
+  add('POST', '/api/members/:id/client-access/code', { ...ACCOUNTS, noIdempotency: true, prepare: prepareClientCode },
     (ctx) => clientCodeAnswer(ctx, club.renewClientCode(ctx.user, ctx.params.id, clientCode(ctx))));
   add('POST', '/api/members/:id/client-access/disable', { ...ACCOUNTS }, (ctx) => club.setClientAccessActive(ctx.user, ctx.params.id, false));
   add('POST', '/api/members/:id/client-access/enable', { ...ACCOUNTS }, (ctx) => club.setClientAccessActive(ctx.user, ctx.params.id, true));
@@ -490,7 +490,8 @@ export function createApi({ db, env = {}, demo = false }) {
         return respond(route.handler(ctx), cookies, false);
       }
 
-      const key = request.headers.get('idempotency-key') ?? undefined;
+      // A route that answers a secret shown once (noIdempotency) never records nor replays: the answer would sit in the table.
+      const key = route.opts.noIdempotency ? undefined : request.headers.get('idempotency-key') ?? undefined;
       if (key !== undefined && !/^[A-Za-z0-9_-]{8,100}$/.test(key)) throw invalid("Clé d'idempotence invalide.");
       const hash = key && ctx.user ? await sha256Hex(JSON.stringify([request.method, url.pathname, ctx.body])) : null;
       const replay = () => {

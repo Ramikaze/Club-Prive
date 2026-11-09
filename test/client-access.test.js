@@ -147,3 +147,17 @@ test('espace démo : créer un accès est refusé', async () => {
   assert.equal(res.status, 403);
   assert.equal(res.data.error.code, 'MODE_DEMO');
 });
+
+test('le code n’est jamais gardé dans les clés d’idempotence', async () => {
+  const { server, admin } = await setup();
+  const m = await newMember(admin);
+  const headers = { 'idempotency-key': 'cle-test-0001' };
+  const created = (await admin.call('POST', `/api/members/${m.id}/client-access`, {}, headers)).data;
+  const renewed = (await admin.call('POST', `/api/members/${m.id}/client-access/code`, {}, { 'idempotency-key': 'cle-test-0002' })).data;
+  assert.match(created.code, CODE_RE);
+  assert.match(renewed.code, CODE_RE);
+  assert.equal(server.club.get('SELECT COUNT(*) AS n FROM idempotency_keys').n, 0);
+  // A retry with the same key is not replayed: it answers as a fresh call.
+  const retry = await admin.call('POST', `/api/members/${m.id}/client-access/code`, {}, { 'idempotency-key': 'cle-test-0002' });
+  assert.notEqual(retry.data.code, renewed.code);
+});
