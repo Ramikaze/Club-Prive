@@ -16,6 +16,7 @@ import { clientViewMethods } from './clientView.js';
 import { clientOrderMethods } from './clientOrders.js';
 import { clientRequestMethods } from './clientRequests.js';
 import { billedMethods, DRINK_PART_SQL } from './billed.js';
+import { pushMethods } from './push.js';
 import {
   newTicketCode, formatTicketNumber, normalizeTicketCode, memberInitials, paymentLines, TICKET_CODE_LENGTH,
 } from '../shared/ticket.js';
@@ -3871,3 +3872,4 @@ Object.assign(Club.prototype, clientViewMethods);
 Object.assign(Club.prototype, clientOrderMethods);
 Object.assign(Club.prototype, clientRequestMethods);
 Object.assign(Club.prototype, billedMethods);
+Object.assign(Club.prototype, pushMethods);

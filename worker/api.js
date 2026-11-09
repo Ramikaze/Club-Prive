@@ -14,6 +14,7 @@ import { AppError, forbidden, invalid, conflict, notSignedIn } from './errors.js
 import { hashPassword, verifyPassword, sha256Hex, newToken, newClientCode, checkPasswordStrength, parseCookies } from './auth.js';
 import { ALWAYS_REAL } from './space.js';
 import { createClientRoutes } from './clientApi.js';
+import { sendWebPush, PUSH_TIMEOUT_MS } from './push.js';
 import { isBoss } from '../shared/roles.js';
 
 const MAX_BODY = 256 * 1024;
@@ -115,10 +116,18 @@ const CLIENT_PATH = /^\/api\/client(\/|$)/;
 // `demo`: this API is the demo space's. Everything that differs there (accounts refused, exported file
 // names, the reset route, the two entry points below) follows this option, never `club.demo`, which
 // the tests also set on a real club to relax the tariffs.
-export function createApi({ db, env = {}, demo = false }) {
+// `sendPush(subscription, message)`: sends one notification to one staff device and gives { status }. The tests pass a
+// recorder; otherwise it is Web Push (worker/push.js) with the three VAPID secrets, and without them nothing is sent.
+export function createApi({ db, env = {}, demo = false, sendPush: pushSender = null }) {
   migrate(db);
   const club = new Club(db, { demo });
   club.bootstrap();
+
+  const vapid = env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY && env.VAPID_SUBJECT
+    ? { publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY, subject: env.VAPID_SUBJECT }
+    : null;
+  // The demo space never sends: its accounts are the real club's, and so would be the devices told of a fictitious order.
+  const sendPush = demo ? null : pushSender ?? (vapid ? (subscription, message) => sendWebPush(subscription, message, vapid) : null);
 
   const allowedOrigins = String(env.ALLOWED_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   const throttle = new Map();
@@ -459,6 +468,15 @@ export function createApi({ db, env = {}, demo = false }) {
   add('POST', '/api/closings', CLUB, (ctx) => club.closeMonth(ctx.user, ctx.body));
   add('POST', '/api/closings/:month/reopen', CLUB, (ctx) => club.reopenMonth(ctx.user, ctx.params.month, ctx.body));
 
+  // Push notifications on the staff's devices (worker/push.js): the public key a browser subscribes with (null while the
+  // VAPID secrets are missing: notifications are off), and the device's subscription, kept for the signed-in account. Any
+  // role may subscribe a device; pushRecipients decides who is told (never the administrator). The real club's alone.
+  if (!demo) {
+    add('GET', '/api/push/key', {}, () => ({ key: vapid?.publicKey ?? null }));
+    add('POST', '/api/push/subscriptions', {}, (ctx) => club.subscribePush(ctx.user, ctx.body));
+    add('DELETE', '/api/push/subscriptions', {}, (ctx) => club.unsubscribePush(ctx.user, ctx.body));
+  }
+
   // Products & stock
   add('GET', '/api/products', {}, (ctx) => club.listProducts({ includeInactive: ctx.query.all === '1' }));
   add('POST', '/api/products', CLUB, (ctx) => club.createProduct(ctx.user, ctx.body));
@@ -485,7 +503,8 @@ export function createApi({ db, env = {}, demo = false }) {
   // of a write that already succeeded is answered from its record at once (`replayed`), without redoing the preparation;
   // the same key with other data is refused. Otherwise the route's preparation runs, then the handler and the record in
   // one transaction: the whole write commits or rolls back as one unit. A route that answers a secret shown once
-  // (noIdempotency) never records nor replays: the answer would sit in the table.
+  // (noIdempotency) never records nor replays: the answer would sit in the table. Once the transaction has committed, the
+  // notifications the handler queued in `ctx.after` go out (notify); a replay, which runs no handler, queues none.
   async function runWrite(request, url, route, ctx, records, ownerId) {
     const key = route.opts.noIdempotency ? undefined : request.headers.get('idempotency-key') ?? undefined;
     if (key !== undefined && !/^[A-Za-z0-9_-]{8,100}$/.test(key)) throw invalid("Clé d'idempotence invalide.");
@@ -515,7 +534,44 @@ export function createApi({ db, env = {}, demo = false }) {
       club.run(records.insert, key, ownerId, hash, JSON.stringify(result ?? null), new Date().toISOString());
       return result;
     });
+    if (!replayed) await notify(ctx.after).catch((err) => console.error('Notifications push :', err));
     return { payload, replayed };
+  }
+
+  // The notifications a committed write queued: each is a function, called now, that gives the messages to send
+  // ([{ userIds, title, body, url }]). Every device of every recipient is sent its message, all at once, and the answer
+  // waits for them PUSH_TIMEOUT_MS at most. Nothing here fails the write nor throws: an error is logged (never a key, nor
+  // a device's address beyond its push service), and a device its push service no longer knows (404, 410) is forgotten.
+  async function notify(after) {
+    if (!sendPush || !after?.length) return;
+    const sends = [];
+    for (const messages of after) {
+      try {
+        for (const { userIds, title, body, url } of messages()) {
+          for (const subscription of club.pushSubscriptionsOf(userIds)) sends.push(pushOne(subscription, { title, body, url }));
+        }
+      } catch (err) {
+        console.error('Notifications push non préparées :', err);
+      }
+    }
+    if (!sends.length) return;
+    let timer;
+    const late = new Promise((resolve) => { timer = setTimeout(() => resolve(true), PUSH_TIMEOUT_MS); });
+    const timedOut = await Promise.race([Promise.allSettled(sends).then(() => false), late]);
+    clearTimeout(timer);
+    if (timedOut) console.error(`Notifications push : pas de réponse en ${PUSH_TIMEOUT_MS / 1000} s, la réponse part sans les attendre.`);
+  }
+
+  async function pushOne(subscription, message) {
+    let service = 'un service de notification';
+    try {
+      service = new URL(subscription.endpoint).origin;
+      const status = (await sendPush(subscription, message))?.status;
+      if (status === 404 || status === 410) club.forgetPushSubscription(subscription.endpoint);
+      else if (!(status >= 200 && status < 300)) console.error(`Notification push refusée par ${service} (statut ${status}).`);
+    } catch (err) {
+      console.error(`Notification push non envoyée à ${service} : ${err?.message ?? err}`);
+    }
   }
   // Where each space keeps its idempotency records: the staff's per account (with the answer's status, always 200), the
   // client's per client access.
@@ -564,6 +620,7 @@ export function createApi({ db, env = {}, demo = false }) {
         ip: request.headers.get('cf-connecting-ip') ?? 'local',
         query: Object.fromEntries(url.searchParams),
         setCookie: (value, maxAge) => cookies.push(cookieHeader(value, maxAge)),
+        after: [],
       };
       // A credential that is not in the body is checked before the body is read, so that a caller without it
       // makes the Worker read and parse nothing (the import door's body may be up to 300 KB). The guard finds no

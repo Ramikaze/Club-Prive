@@ -99,13 +99,22 @@ export function createClientRoutes({ club, helpers }) {
   add('GET', '/api/client/products', {}, () => club.clientProducts());
   add('GET', '/api/client/products/:id/photo', {}, (ctx) => ({ __image: club.clientProductPhoto(ctx.params.id) }));
   add('GET', '/api/client/orders', {}, (ctx) => club.clientOrders(ctx.member.id));
-  add('POST', '/api/client/orders', {}, (ctx) => club.createClientOrder(ctx.member.id, ctx.body));
+  // A new order is told to the staff concerned once it is recorded (worker/push.js).
+  add('POST', '/api/client/orders', {}, (ctx) => {
+    const order = club.createClientOrder(ctx.member.id, ctx.body);
+    ctx.after.push(() => [club.orderNotification(order.id)]);
+    return order;
+  });
   add('POST', '/api/client/orders/:id/cancel', {}, (ctx) => club.cancelClientOrder(ctx.member.id, ctx.params.id));
 
   // Reservation requests (worker/clientRequests.js): the free slots, the quote, the request and its cancellation.
   add('GET', '/api/client/slots', {}, (ctx) => club.clientSlots(ctx.member.id, ctx.query));
   add('POST', '/api/client/reservation-requests/quote', {}, (ctx) => club.clientRequestQuote(ctx.member.id, ctx.body));
-  add('POST', '/api/client/reservation-requests', {}, (ctx) => club.createClientRequest(ctx.member.id, ctx.body));
+  add('POST', '/api/client/reservation-requests', {}, (ctx) => {
+    const request = club.createClientRequest(ctx.member.id, ctx.body);
+    ctx.after.push(() => [club.requestNotification(request.id)]);
+    return request;
+  });
   add('POST', '/api/client/reservation-requests/:id/cancel', {}, (ctx) => club.cancelClientRequest(ctx.member.id, ctx.params.id));
 
   async function handleClient(request, url) {
@@ -128,6 +137,7 @@ export function createClientRoutes({ club, helpers }) {
         ip: request.headers.get('cf-connecting-ip') ?? 'local',
         query: Object.fromEntries(url.searchParams),
         setCookie: (value, maxAge) => cookies.push(cookieHeader(value, maxAge)),
+        after: [],
       };
       // An unknown path asks for a session like any other client route: without one the answer is 401, whatever exists.
       if (!route?.opts.public) {
