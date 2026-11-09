@@ -548,6 +548,23 @@ test('import : les références suivent le plus grand numéro en service, pas le
   assert.equal(ok(await importWith(door, { item: { name: 'Nouvelle bouteille', price: 5000, category: 'bouteille' } })).reference, 'BOU-008');
 });
 
+test('import : une « autre boisson » prend la série BOU du champagne et peut arriver sans prix', async () => {
+  const { server, admin } = await setup({ env: { IMPORT_TOKEN } });
+  const door = new Client(server);
+  await newProduct(admin, { name: 'Champagne maison', category: 'bouteille', reference: 'BOU-003' });
+
+  const vodka = ok(await importWith(door, { item: { name: 'Belvedere Pure Vodka 70 cl', price: 0, category: 'boisson', description: 'Vodka polonaise.' } }));
+  assert.deepEqual(vodka, { id: vodka.id, reference: 'BOU-004', status: 'created', photo: false });
+  const row = server.club.get('SELECT category, price, stock_qty, active FROM products WHERE id = ?', vodka.id);
+  assert.deepEqual({ ...row }, { category: 'boisson', price: 0, stock_qty: 0, active: 1 });
+  // The price comes later: a new import of the same name updates it, in the same category.
+  assert.equal(ok(await importWith(door, { item: { name: 'belvedere pure vodka 70 cl', price: 45000, category: 'boisson' } })).id, vodka.id);
+  assert.equal(server.club.get('SELECT price FROM products WHERE id = ?', vodka.id).price, 45000 * 100);
+  // The same name as a champagne is a mistake in the file, as between cigars and bottles.
+  const wrong = await importWith(door, { item: { name: 'Champagne maison', price: 0, category: 'boisson' } });
+  assert.equal(wrong.data.error.code, 'CATEGORIE_DIFFERENTE');
+});
+
 test('import : même nom, aux majuscules et espaces près — mise à jour du prix, de la description et de la photo, sans doublon', async () => {
   const { server, admin, manager } = await setup({ env: { IMPORT_TOKEN } });
   const door = new Client(server);
