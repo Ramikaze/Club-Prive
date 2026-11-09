@@ -988,7 +988,15 @@ const V24 = [
   )`,
 ];
 
-export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24];
+// V25: the identifier chosen by the client (spec docs/superpowers/specs/2026-11-09-identifiant-client-design.md). A
+// client access says whether its login is the identifier the client chose (1) or a provisional one: his member number
+// for a new access, his phone for the accesses made before (0). The existing accesses are all phone logins: they stay at
+// 0, and their clients choose an identifier at their next sign-in. It comes after the client space (V24).
+const V25 = [
+  'ALTER TABLE client_accounts ADD COLUMN login_chosen INTEGER NOT NULL DEFAULT 0 CHECK (login_chosen IN (0, 1))',
+];
+
+export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25];
 
 export function migrate(db) {
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');

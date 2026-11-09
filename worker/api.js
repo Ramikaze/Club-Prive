@@ -349,14 +349,16 @@ export function createApi({ db, env = {}, demo = false, sendPush: pushSender = n
   add('PUT', '/api/members/:id', {}, (ctx) => club.updateMember(ctx.user, ctx.params.id, ctx.body));
   // Members are deactivated, never deleted: their payments and transactions stay in the books.
   add('POST', '/api/members/:id/deactivate', {}, (ctx) => club.deactivateMember(ctx.user, ctx.params.id, ctx.body));
-  // Client space access, handed out by the staff (every role); the temporary code is returned once, never logged.
+  // Client space access. Whoever holds a temporary code may enter the client's space: only the administrator and the
+  // associés create an access, give a new code or restore a cut access. Every staff member sees the access and may cut
+  // it, which only protects the client. The temporary code is returned once, never logged.
   add('GET', '/api/members/:id/client-access', { ...ACCOUNTS }, (ctx) => club.clientAccessStatus(club.fileRow(ctx.params.id).id));
-  add('POST', '/api/members/:id/client-access', { ...ACCOUNTS, noIdempotency: true, prepare: prepareClientCode },
+  add('POST', '/api/members/:id/client-access', { ...ACCOUNTS, ...CLUB, noIdempotency: true, prepare: prepareClientCode },
     (ctx) => clientCodeAnswer(ctx, club.createClientAccess(ctx.user, ctx.params.id, clientCode(ctx))));
-  add('POST', '/api/members/:id/client-access/code', { ...ACCOUNTS, noIdempotency: true, prepare: prepareClientCode },
+  add('POST', '/api/members/:id/client-access/code', { ...ACCOUNTS, ...CLUB, noIdempotency: true, prepare: prepareClientCode },
     (ctx) => clientCodeAnswer(ctx, club.renewClientCode(ctx.user, ctx.params.id, clientCode(ctx))));
   add('POST', '/api/members/:id/client-access/disable', { ...ACCOUNTS }, (ctx) => club.setClientAccessActive(ctx.user, ctx.params.id, false));
-  add('POST', '/api/members/:id/client-access/enable', { ...ACCOUNTS }, (ctx) => club.setClientAccessActive(ctx.user, ctx.params.id, true));
+  add('POST', '/api/members/:id/client-access/enable', { ...ACCOUNTS, ...CLUB }, (ctx) => club.setClientAccessActive(ctx.user, ctx.params.id, true));
   add('POST', '/api/members/:id/reactivate', {}, (ctx) => club.reactivateMember(ctx.user, ctx.params.id));
   add('POST', '/api/members/:id/subscriptions', {}, (ctx) => club.activateSubscription(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/subscriptions/:id/cancel', CLUB, (ctx) => club.cancelSubscription(ctx.user, ctx.params.id, ctx.body));

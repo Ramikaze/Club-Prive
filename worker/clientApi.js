@@ -6,14 +6,28 @@
 //  - the client is the one of the session, never an id from the address or the body.
 // The same protections as the staff's routes (JSON and known origin for every write, bounded body, security headers,
 // sign-in lockout) come from worker/api.js as `helpers`, not copied here.
-// A session opened with the temporary code only reaches the routes marked BEFORE_PASSWORD: every other client route,
-// known or not, answers 403 MOT_DE_PASSE_A_CHOISIR until the client has chosen his password.
-import { AppError, invalid, notSignedIn } from './errors.js';
+// A session whose client has not chosen his identifier yet, or opened with the temporary code, only reaches the routes
+// marked BEFORE_PASSWORD (the « choose » step): every other client route, known or not, answers 403
+// IDENTIFIANT_A_CHOISIR until the identifier is chosen, then MOT_DE_PASSE_A_CHOISIR until the password is.
+import { AppError, conflict, invalid, notSignedIn } from './errors.js';
 import { hashPassword, verifyPassword, sha256Hex, newToken, checkPasswordStrength, parseCookies } from './auth.js';
-import { clientLogin } from './clientAccess.js';
+import { clientLoginKey, clientIdentifier } from './clientAccess.js';
 
 const badCredentials = () => new AppError(401, 'IDENTIFIANTS', 'Identifiant ou mot de passe incorrect.');
 const passwordFirst = () => new AppError(403, 'MOT_DE_PASSE_A_CHOISIR', 'Choisissez d’abord votre mot de passe.');
+const loginFirst = () => new AppError(403, 'IDENTIFIANT_A_CHOISIR', 'Choisissez d’abord votre identifiant.');
+
+// The identifier sent with a new password: required while none is chosen, open to a change in a session opened with
+// the code (the client may keep his or take another), refused otherwise: outside a new code, it does not change.
+// `given`: the body holds one (a blank one counts as none).
+const givenLogin = (raw) => raw !== undefined && raw !== null && !(typeof raw === 'string' && !raw.trim());
+function checkLoginRule({ account, mustSetPassword }, given) {
+  const chosen = account.login_chosen === 1;
+  if (!chosen && !given) throw invalid('Choisissez votre identifiant.', 'IDENTIFIANT_INVALIDE');
+  if (chosen && given && !mustSetPassword) {
+    throw invalid('Votre identifiant ne change qu’avec un nouveau code provisoire, donné au club.', 'IDENTIFIANT_FIGE');
+  }
+}
 
 export function createClientRoutes({ club, helpers }) {
   const {
@@ -21,12 +35,16 @@ export function createClientRoutes({ club, helpers }) {
   } = helpers;
   const { add, match } = routeTable();
 
-  // What the client learns of himself on signing in and on GET /api/client/me, field by field: himself, and the club's
+  // What the client learns of himself on signing in and on GET /api/client/me, field by field: himself, the identifier
+  // he chose (null until he has, so the « choose » screen never offers his member number or his phone), and the club's
   // name, currency, time zone and booking rules (the screens write money and dates, and offer durations, with them).
-  const me = ({ member, mustSetPassword }) => {
+  const me = ({ account, member, mustSetPassword }) => {
     const { club_name: name, currency, timezone, booking } = club.settings();
+    const loginChosen = account.login_chosen === 1;
     return {
       must_set_password: mustSetPassword,
+      login: loginChosen ? account.login : null,
+      login_chosen: loginChosen,
       member: { first_name: member.first_name, last_name: member.last_name, member_no: member.member_no, kind: member.kind },
       club: {
         name, currency: { label: currency.label, decimals: currency.decimals }, timezone,
@@ -35,28 +53,30 @@ export function createClientRoutes({ club, helpers }) {
       },
     };
   };
-  // The routes a session opened with the temporary code may reach.
+  // The routes of the « choose » step: a session whose identifier or password is still to choose may reach them.
   const BEFORE_PASSWORD = { beforePassword: true };
 
   add('POST', '/api/client/login', {
     public: true,
     prepare: async (ctx) => {
-      // The key reads the number as the account lookup does, so writing it another way gives no fresh tries. Text that
-      // is no number shares one key per address: it opens no account anyway.
-      const key = `${ctx.ip}|client|${clientLogin(ctx.body.login) ?? ''}`;
+      // The key reads the identifier as the account lookup does, so writing it another way gives no fresh tries.
+      const key = `${ctx.ip}|client|${clientLoginKey(ctx.body.login)}`;
       checkThrottle(key);
-      const account = club.clientAccountByLogin(ctx.body.login);
+      // Named by its member number, an access opens with its live code only: its password is not even looked at.
+      const found = club.clientAccountByLogin(ctx.body.login);
+      const account = found?.account ?? null;
+      const passwordHash = found?.codeOnly ? null : account?.password_hash;
       const password = String(ctx.body.password ?? '');
       const codeLive = !!account?.temp_hash && String(account.temp_expires_at ?? '') > club.nowIso();
       let valid = false;
       let viaCode = false;
-      if (account?.password_hash) valid = await verifyPassword(password, account.password_hash);
+      if (passwordHash) valid = await verifyPassword(password, passwordHash);
       // The temporary code is printed in capitals, and a phone types lowercase in a password field: it is read in
       // capitals, without the spaces around. The password is checked as typed.
       if (!valid && codeLive) valid = viaCode = await verifyPassword(password.trim().toUpperCase(), account.temp_hash);
       // No account, or one with neither password nor a live code: a dummy hash is checked all the same, so the answer
-      // takes as long, and says the same, whether the number is known or not.
-      if (!account?.password_hash && !codeLive) await verifyPassword(password, await dummyHash());
+      // takes as long, and says the same, whether the identifier is known or not.
+      if (!passwordHash && !codeLive) await verifyPassword(password, await dummyHash());
       if (!valid || !club.activeClientAccess(account.id)) {
         recordFailure(key);
         throw badCredentials();
@@ -81,12 +101,16 @@ export function createClientRoutes({ club, helpers }) {
     return { ok: true };
   });
 
-  // A session opened with the code chooses the password without the current one; any other must give it. The body
-  // holds passwords: the route keeps no idempotency record, whose request hash would be a fast hash of them.
+  // A session opened with the code chooses the password without the current one; any other must give it. The identifier
+  // comes with it ({ login }) as checkLoginRule says. The body holds passwords: the route keeps no idempotency record,
+  // whose request hash would be a fast hash of them.
   add('POST', '/api/client/password', {
     ...BEFORE_PASSWORD,
     noIdempotency: true,
     prepare: async (ctx) => {
+      const given = givenLogin(ctx.body.login);
+      checkLoginRule(ctx, given);
+      ctx.newLogin = given ? clientIdentifier(ctx.body.login) : null;
       if (!ctx.mustSetPassword && !(await verifyPassword(String(ctx.body.current_password ?? ''), ctx.account.password_hash))) {
         throw invalid('Mot de passe actuel incorrect.');
       }
@@ -95,9 +119,24 @@ export function createClientRoutes({ club, helpers }) {
       ctx.passwordHash = await hashPassword(ctx.body.new_password);
     },
   }, (ctx) => {
-    // The session may have been closed (access cut, password changed elsewhere) while the password was hashed.
-    if (!club.clientSessionAccount(ctx.tokenHash)) throw notSignedIn();
-    club.setClientPassword(ctx.account.id, ctx.passwordHash, ctx.tokenHash);
+    // The session may have been closed (access cut, password changed elsewhere), or the identifier chosen from another
+    // session, while the password was hashed: both are read again in the transaction.
+    const session = club.clientSessionAccount(ctx.tokenHash);
+    if (!session) throw notSignedIn();
+    checkLoginRule(session, !!ctx.newLogin);
+    club.setClientPassword(session.account.id, ctx.passwordHash, ctx.tokenHash, ctx.newLogin);
+    return me(club.clientSessionAccount(ctx.tokenHash));
+  });
+
+  // An access made with the phone (before V25) and signed in with its password chooses its identifier alone, here. A
+  // session opened with the code chooses it with the password (/api/client/password). Once chosen, it changes only with
+  // a new code.
+  add('POST', '/api/client/login-name', BEFORE_PASSWORD, (ctx) => {
+    const session = club.clientSessionAccount(ctx.tokenHash);
+    if (!session) throw notSignedIn();
+    if (session.loginChosen) throw conflict('IDENTIFIANT_DEJA_CHOISI', 'Votre identifiant est déjà choisi.');
+    if (session.mustSetPassword) throw passwordFirst();
+    club.setClientLogin(session.account.id, clientIdentifier(ctx.body.login));
     return me(club.clientSessionAccount(ctx.tokenHash));
   });
 
@@ -143,7 +182,7 @@ export function createClientRoutes({ club, helpers }) {
       const token = parseCookies(request.headers.get('cookie')).csid || null;
       const ctx = {
         params: found?.params ?? {}, body: null, token, tokenHash: token ? await sha256Hex(token) : null,
-        account: null, member: null, mustSetPassword: false,
+        account: null, member: null, mustSetPassword: false, loginChosen: false,
         headers: request.headers,
         ip: request.headers.get('cf-connecting-ip') ?? 'local',
         query: Object.fromEntries(url.searchParams),
@@ -155,7 +194,10 @@ export function createClientRoutes({ club, helpers }) {
         const session = club.clientSessionAccount(ctx.tokenHash);
         if (!session) throw notSignedIn();
         Object.assign(ctx, session);
-        if (ctx.mustSetPassword && !route?.opts.beforePassword) throw passwordFirst();
+        if (!route?.opts.beforePassword) {
+          if (!ctx.loginChosen) throw loginFirst();
+          if (ctx.mustSetPassword) throw passwordFirst();
+        }
       }
       if (!route) throw new AppError(404, 'INTROUVABLE', 'Ressource inconnue.');
       ctx.body = writes ? await readJson(request, route.opts.maxBody) : {};

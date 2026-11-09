@@ -3,17 +3,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Server, Client, ok, UM } from './harness.js';
+import { MIGRATIONS } from '../worker/schema.js';
 
 const CLIENT_TABLES = [
   'client_accounts', 'client_sessions', 'client_idempotency', 'client_orders', 'client_order_lines',
   'client_order_sales', 'reservation_requests', 'client_ticket_copies',
 ];
 
-test('migration V24 : schema_version = 24 et les tables existent', async () => {
+test('migration V24 : le schéma est à jour et les tables existent', async () => {
   const server = new Server({});
   try {
     await server.start();
-    assert.equal(server.db.get("SELECT value FROM meta WHERE key = 'schema_version'").value, '24');
+    assert.equal(server.db.get("SELECT value FROM meta WHERE key = 'schema_version'").value, String(MIGRATIONS.length));
     for (const table of [...CLIENT_TABLES, 'push_subscriptions']) server.db.all(`SELECT 1 FROM ${table} LIMIT 1`);
   } finally {
     server.destroy();

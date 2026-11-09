@@ -199,13 +199,15 @@ test('le détail d’une réservation annulée ou terminée porte aussi le prén
   assert.equal(finished.member_phone, '06 000 00 02');
 });
 
-test('le message d’accès client porte l’adresse, l’identifiant, le code et sa durée', () => {
-  const text = clientAccessText({ first_name: 'Awa', url: 'https://club.example/client', login: '242060000000', code: 'ABCD2345' });
+test('le message d’accès client porte l’adresse, le numéro de membre comme identifiant provisoire, le code et sa durée', () => {
+  const text = clientAccessText({ first_name: 'Awa', url: 'https://club.example/client', member_no: 'M-0012', code: 'ABCD2345' });
+  const lines = text.split('\n');
   assert.ok(text.includes('Awa'));
-  assert.ok(text.includes('https://club.example/client'));
-  assert.ok(text.includes('242060000000'));
-  assert.ok(text.includes('ABCD2345'));
-  assert.ok(text.includes('7 jours'));
-  assert.ok(text.includes('mot de passe'));
+  assert.ok(lines.includes('Adresse : https://club.example/client'));
+  assert.ok(lines.includes('Identifiant provisoire : M-0012'));
+  assert.ok(lines.some((l) => l.includes('ABCD2345') && l.includes('valable 7 jours')));
+  assert.ok(text.toLowerCase().includes('vous choisirez votre identifiant et votre mot de passe à la première connexion'));
   assert.ok(text.includes('L’équipe Limen'));
+  // The phone is never the identifier: the message has no field for it.
+  assert.ok(!/t[ée]l[ée]phone/i.test(text));
 });
