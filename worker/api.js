@@ -480,9 +480,60 @@ export function createApi({ db, env = {}, demo = false }) {
     if (origin && origin !== url.origin && !allowedOrigins.includes(origin)) throw forbidden('Requête refusée : origine inconnue.');
   }
 
+  // Every write, the staff's (handle) and the client's (worker/clientApi.js), runs here; `records` says where the
+  // idempotency records of `ownerId` (the staff account, or the client access) are kept. With an Idempotency-Key, a retry
+  // of a write that already succeeded is answered from its record at once (`replayed`), without redoing the preparation;
+  // the same key with other data is refused. Otherwise the route's preparation runs, then the handler and the record in
+  // one transaction: the whole write commits or rolls back as one unit. A route that answers a secret shown once
+  // (noIdempotency) never records nor replays: the answer would sit in the table.
+  async function runWrite(request, url, route, ctx, records, ownerId) {
+    const key = route.opts.noIdempotency ? undefined : request.headers.get('idempotency-key') ?? undefined;
+    if (key !== undefined && !/^[A-Za-z0-9_-]{8,100}$/.test(key)) throw invalid("Clé d'idempotence invalide.");
+    const hash = key && ownerId ? await sha256Hex(JSON.stringify([request.method, url.pathname, ctx.body])) : null;
+    const replay = () => {
+      const prev = club.get(records.find, key, ownerId);
+      if (!prev) return undefined;
+      if (prev.request_hash !== hash) {
+        throw new AppError(422, 'CLE_REUTILISEE', "Cette opération a déjà été enregistrée avec d'autres données. Rechargez la page.");
+      }
+      return JSON.parse(prev.response);
+    };
+    if (hash) {
+      const previous = replay();
+      if (previous !== undefined) return { payload: previous, replayed: true };
+    }
+    if (route.opts.prepare) await route.opts.prepare(ctx);
+    let replayed = false;
+    const payload = club.tx(() => {
+      if (!hash) return route.handler(ctx);
+      const previous = replay();
+      if (previous !== undefined) {
+        replayed = true;
+        return previous;
+      }
+      const result = route.handler(ctx);
+      club.run(records.insert, key, ownerId, hash, JSON.stringify(result ?? null), new Date().toISOString());
+      return result;
+    });
+    return { payload, replayed };
+  }
+  // Where each space keeps its idempotency records: the staff's per account (with the answer's status, always 200), the
+  // client's per client access.
+  const STAFF_RECORDS = {
+    find: 'SELECT * FROM idempotency_keys WHERE key = ? AND user_id = ?',
+    insert: 'INSERT INTO idempotency_keys (key, user_id, request_hash, response, created_at, status) VALUES (?, ?, ?, ?, ?, 200)',
+  };
+  const CLIENT_RECORDS = {
+    find: 'SELECT * FROM client_idempotency WHERE key = ? AND account_id = ?',
+    insert: 'INSERT INTO client_idempotency (key, account_id, request_hash, response, created_at) VALUES (?, ?, ?, ?, ?)',
+  };
+
   // The client space exists in the real club only, as the staff's accounts do: the demo space has none.
   const clientRoutes = demo ? null : createClientRoutes({
-    club, env, helpers: { routeTable, checkThrottle, recordFailure, clearFailures, dummyHash, readJson, checkCsrf, json, errorResponse, imageResponse },
+    club, env, helpers: {
+      routeTable, checkThrottle, recordFailure, clearFailures, dummyHash, readJson, checkCsrf, json, errorResponse, imageResponse,
+      runClientWrite: (request, url, route, ctx) => runWrite(request, url, route, ctx, CLIENT_RECORDS, ctx.account?.id),
+    },
   });
 
   // `user` (the signed-in account's row) and `demoConfig` come from handleDemo alone, never from the
@@ -533,40 +584,7 @@ export function createApi({ db, env = {}, demo = false }) {
         return respond(route.handler(ctx), cookies, false);
       }
 
-      // A route that answers a secret shown once (noIdempotency) never records nor replays: the answer would sit in the table.
-      const key = route.opts.noIdempotency ? undefined : request.headers.get('idempotency-key') ?? undefined;
-      if (key !== undefined && !/^[A-Za-z0-9_-]{8,100}$/.test(key)) throw invalid("Clé d'idempotence invalide.");
-      const hash = key && ctx.user ? await sha256Hex(JSON.stringify([request.method, url.pathname, ctx.body])) : null;
-      const replay = () => {
-        const prev = club.get('SELECT * FROM idempotency_keys WHERE key = ? AND user_id = ?', key, ctx.user.id);
-        if (!prev) return undefined;
-        if (prev.request_hash !== hash) {
-          throw new AppError(422, 'CLE_REUTILISEE', "Cette opération a déjà été enregistrée avec d'autres données. Rechargez la page.");
-        }
-        return JSON.parse(prev.response);
-      };
-      // A retry that already succeeded is answered at once, without redoing the preparation.
-      if (hash) {
-        const previous = replay();
-        if (previous !== undefined) return respond(previous, cookies, true);
-      }
-      if (route.opts.prepare) await route.opts.prepare(ctx);
-      let replayed = false;
-      // The whole write, including the idempotency record, commits or rolls back as one unit.
-      const payload = club.tx(() => {
-        if (!hash) return route.handler(ctx);
-        const previous = replay();
-        if (previous !== undefined) {
-          replayed = true;
-          return previous;
-        }
-        const result = route.handler(ctx);
-        club.run(
-          'INSERT INTO idempotency_keys (key, user_id, request_hash, status, response, created_at) VALUES (?, ?, ?, 200, ?, ?)',
-          key, ctx.user.id, hash, JSON.stringify(result ?? null), new Date().toISOString(),
-        );
-        return result;
-      });
+      const { payload, replayed } = await runWrite(request, url, route, ctx, STAFF_RECORDS, ctx.user?.id);
       return respond(payload, cookies, replayed);
     } catch (err) {
       return errorResponse(err);

@@ -22,7 +22,9 @@ const me = ({ member, mustSetPassword }) => ({
 });
 
 export function createClientRoutes({ club, helpers }) {
-  const { routeTable, checkThrottle, recordFailure, clearFailures, dummyHash, readJson, checkCsrf, json, errorResponse, imageResponse } = helpers;
+  const {
+    routeTable, checkThrottle, recordFailure, clearFailures, dummyHash, readJson, checkCsrf, json, errorResponse, imageResponse, runClientWrite,
+  } = helpers;
   const { add, match } = routeTable();
   // The routes a session opened with the temporary code may reach.
   const BEFORE_PASSWORD = { beforePassword: true };
@@ -143,40 +145,9 @@ export function createClientRoutes({ club, helpers }) {
         return payload?.__image ? imageResponse(payload.__image) : json(200, payload, { cookies });
       }
 
-      // Every client write runs below: the same idempotency rules as the staff's (worker/api.js), recorded per client
-      // account in client_idempotency. A retry that already succeeded is answered at once, without redoing anything.
-      const key = route.opts.noIdempotency ? undefined : request.headers.get('idempotency-key') ?? undefined;
-      if (key !== undefined && !/^[A-Za-z0-9_-]{8,100}$/.test(key)) throw invalid("Clé d'idempotence invalide.");
-      const hash = key && ctx.account ? await sha256Hex(JSON.stringify([request.method, url.pathname, ctx.body])) : null;
-      const replay = () => {
-        const prev = club.get('SELECT * FROM client_idempotency WHERE key = ? AND account_id = ?', key, ctx.account.id);
-        if (!prev) return undefined;
-        if (prev.request_hash !== hash) {
-          throw new AppError(422, 'CLE_REUTILISEE', "Cette opération a déjà été enregistrée avec d'autres données. Rechargez la page.");
-        }
-        return JSON.parse(prev.response);
-      };
-      if (hash) {
-        const previous = replay();
-        if (previous !== undefined) return json(200, previous, { cookies, replayed: true });
-      }
-      if (route.opts.prepare) await route.opts.prepare(ctx);
-      let replayed = false;
-      // The whole write, including the idempotency record, commits or rolls back as one unit.
-      const payload = club.tx(() => {
-        if (!hash) return route.handler(ctx);
-        const previous = replay();
-        if (previous !== undefined) {
-          replayed = true;
-          return previous;
-        }
-        const result = route.handler(ctx);
-        club.run(
-          'INSERT INTO client_idempotency (key, account_id, request_hash, response, created_at) VALUES (?, ?, ?, ?, ?)',
-          key, ctx.account.id, hash, JSON.stringify(result ?? null), new Date().toISOString(),
-        );
-        return result;
-      });
+      // Every client write runs as the staff's do (runWrite, worker/api.js), its idempotency records kept per client access
+      // in client_idempotency.
+      const { payload, replayed } = await runClientWrite(request, url, route, ctx);
       return json(200, payload, { cookies, replayed });
     } catch (err) {
       return errorResponse(err);
