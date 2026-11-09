@@ -67,9 +67,12 @@ export const clientRequestMethods = {
     this.assertCanRequest(memberId);
     const q = this.requestInput(input);
     const quote = this.quoteReservation(null, { member_id: memberId, room_id: this.resolveRoom().id, ...q, pay_with_card: true });
+    // Owner's decision 8: a card whose balance covers the deposit pays it at the confirmation (as createReservation
+    // does); otherwise the deposit is paid at the club, or the card recharged, before the club confirms.
     return {
       included_minutes: quote.included_minutes, paid_minutes: quote.paid_minutes, supplement_amount: quote.supplement_amount,
       card_amount: quote.card_amount, deposit_amount: quote.deposit_amount,
+      deposit_from_card: quote.deposit_amount > 0 && quote.card_balance >= quote.deposit_amount,
     };
   },
 

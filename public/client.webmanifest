@@ -1,0 +1,13 @@
+{
+  "id": "/client",
+  "name": "Limen — Mon espace",
+  "short_name": "Limen",
+  "start_url": "/client",
+  "scope": "/client",
+  "display": "standalone",
+  "background_color": "#1c1d1f",
+  "theme_color": "#1c1d1f",
+  "icons": [
+    { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }
+  ]
+}

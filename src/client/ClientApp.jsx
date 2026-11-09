@@ -32,6 +32,12 @@ function applyClientTheme() {
   else delete document.documentElement.dataset.theme;
 }
 
+// « Add to home screen » takes the page's manifest: the client's opens /client, never the staff's sign-in (index.html
+// links the staff's manifest, for every path).
+function applyClientManifest() {
+  document.querySelector('link[rel="manifest"]')?.setAttribute('href', '/client.webmanifest');
+}
+
 class CrashBoundary extends Component {
   state = { crashed: false };
 
@@ -136,6 +142,7 @@ export default function ClientApp() {
 
   useEffect(() => {
     applyClientTheme();
+    applyClientManifest();
     setClientHandlers({ signedOut: leave, passwordFirst: () => setPhase('password') });
     let cancelled = false;
     clientApi.get('/api/client/me').then((me) => { if (!cancelled) enter(me); }, (e) => {

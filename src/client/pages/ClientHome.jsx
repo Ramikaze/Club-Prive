@@ -73,6 +73,7 @@ function Balances({ account }) {
         <span>Heures abonnement</span>
         <strong>{subscription ? fmtDuration(subscription.available_min) : '—'}</strong>
         {subscription && <small>{subscription.plan_name}</small>}
+        {subscription && <small>Jusqu’au {dayLabel(subscription.end_date, 'short')}</small>}
       </div>
     </div>
   );
@@ -108,7 +109,8 @@ function Reservations({ account, reload }) {
               <strong>{dayLabel(q.date, 'medium')} · {q.start_time}</strong>
               <span className="muted">{fmtDuration(q.duration_min)} · {q.party_size} pers.</span>
               {q.status === 'refusee' && <span className="cl-reason">{q.message ? `Refusée : ${q.message}` : 'Demande refusée.'}</span>}
-              {q.status === 'en_attente' && q.duration_min >= 180 && q.deposit_amount > 0 && (
+              {/* The deposit still to pay: 0 when the card covers it, the club then takes it from the card at the confirmation. */}
+              {q.status === 'en_attente' && q.deposit_amount > 0 && (
                 <span className="cl-reason">Un acompte de {money(q.deposit_amount)} est à payer au club ou en rechargeant votre carte.</span>
               )}
               {q.status === 'en_attente' && (asking === q.id ? (

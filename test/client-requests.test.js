@@ -104,11 +104,23 @@ test('devis : la part incluse, le payant, la carte et l’acompte', async () => 
   const a = await person('membre', { balance: 30000 * UM });
   ok(await ger.post(`/api/members/${a.member.id}/subscriptions`, { plan_id: plan.id, start_date: today }));
   const quote = ok(await a.client.post('/api/client/reservation-requests/quote', { date: day, start_time: '15:00', duration_min: 240, party_size: 2 }));
-  assert.deepEqual(Object.keys(quote).sort(), ['card_amount', 'deposit_amount', 'included_minutes', 'paid_minutes', 'supplement_amount']);
+  assert.deepEqual(Object.keys(quote).sort(), ['card_amount', 'deposit_amount', 'deposit_from_card', 'included_minutes', 'paid_minutes', 'supplement_amount']);
   assert.equal(quote.included_minutes, 120);
   assert.equal(quote.paid_minutes, 120);
   assert.equal(quote.deposit_amount, quote.supplement_amount / 2);
   assert.equal(quote.card_amount, Math.min(30000 * UM, quote.supplement_amount));
+  // Owner's decision 8: a card that covers the deposit pays it at the confirmation; otherwise it is paid at the club.
+  assert.equal(quote.deposit_from_card, 30000 * UM >= quote.deposit_amount);
+  const empty = await person('membre');
+  const unpaid = ok(await empty.client.post('/api/client/reservation-requests/quote', { date: day, start_time: '15:00', duration_min: 180 }));
+  assert.ok(unpaid.deposit_amount > 0);
+  assert.equal(unpaid.deposit_from_card, false);
+  ok(await ger.post(`/api/members/${empty.member.id}/wallet/recharge`, { amount: unpaid.deposit_amount, method: 'Espèces' }));
+  const covered = ok(await empty.client.post('/api/client/reservation-requests/quote', { date: day, start_time: '15:00', duration_min: 180 }));
+  assert.equal(covered.deposit_amount, unpaid.deposit_amount);
+  assert.equal(covered.deposit_from_card, true);
+  // No deposit, nothing taken from the card for it.
+  assert.equal(ok(await empty.client.post('/api/client/reservation-requests/quote', { date: day, start_time: '15:00', duration_min: 60 })).deposit_from_card, false);
 });
 
 test('confirmer une demande crée la réservation et la lie', async () => {
@@ -164,8 +176,10 @@ test('3 h sans acompte couvert : refus ACOMPTE_REQUIS, demande toujours en atten
   refused(await confirm(a, q), 400, 'ACOMPTE_REQUIS');
   assert.equal(row(q.id).status, 'en_attente');
   assert.equal(server.club.get('SELECT COUNT(*) AS n FROM reservations WHERE member_id = ?', a.member.id).n, 0);
-  assert.equal(ok(await a.client.get('/api/client/account')).requests[0].status, 'en_attente');
+  // The client is told the deposit is to pay; once the card covers it, nothing is left to pay: the confirmation takes it.
+  assert.deepEqual(ok(await a.client.get('/api/client/account')).requests.map((r) => [r.status, r.deposit_amount]), [['en_attente', q.deposit_amount]]);
   ok(await ger.post(`/api/members/${a.member.id}/wallet/recharge`, { amount: 100000 * UM, method: 'Espèces' }));
+  assert.equal(ok(await a.client.get('/api/client/account')).requests[0].deposit_amount, 0);
   const booked = ok(await confirm(a, q)).reservation;
   assert.equal(row(q.id).status, 'confirmee');
   assert.equal(row(q.id).reservation_id, booked.id);

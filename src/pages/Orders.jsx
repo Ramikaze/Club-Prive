@@ -65,6 +65,13 @@ function PushToggle() {
   );
 }
 
+// A rayon already sold: its ticket is its sale's payment; a sale on credit has no payment yet, hence no ticket.
+function Sold({ paymentId }) {
+  return paymentId
+    ? <Link className="chip chip-neutral" to={`/caisse/ticket/${paymentId}`}>encaissé</Link>
+    : <span className="chip chip-neutral">encaissé</span>;
+}
+
 function OrderCard({ order: o, reload }) {
   const me = useMe();
   const navigate = useNavigate();
@@ -123,7 +130,7 @@ function OrderCard({ order: o, reload }) {
       </div>
       {byRayon.map(({ account, lines }) => (
         <div className="order-rayon" key={account}>
-          <h3>{SHOP[account].tab} {o.sales[account] ? <Link className="chip chip-neutral" to={`/caisse/ticket/${o.sales[account]}`}>encaissé</Link> : null}</h3>
+          <h3>{SHOP[account].tab} {o.sales[account] ? <Sold paymentId={o.tickets?.[account]} /> : null}</h3>
           <ul className="order-lines">
             {lines.map((l) => (
               <li key={l.product_id}>{l.quantity} × {l.name} <span className="subtle">({money(l.unit_price)})</span>

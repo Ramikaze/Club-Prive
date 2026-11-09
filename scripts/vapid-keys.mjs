@@ -16,14 +16,15 @@ const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256
 const publicKey = Buffer.from(await crypto.subtle.exportKey('raw', pair.publicKey)).toString('base64url');
 const { d: privateKey } = await crypto.subtle.exportKey('jwk', pair.privateKey);
 
+// Each value is printed alone on its line, with nothing before it, so that it is copied without a space.
 console.log(`Les trois secrets des notifications push (à coller quand wrangler les demande) :
 
-  npx wrangler secret put VAPID_PUBLIC_KEY
-    ${publicKey}
+npx wrangler secret put VAPID_PUBLIC_KEY
+${publicKey}
 
-  npx wrangler secret put VAPID_PRIVATE_KEY
-    ${privateKey}
+npx wrangler secret put VAPID_PRIVATE_KEY
+${privateKey}
 
-  npx wrangler secret put VAPID_SUBJECT
-    ${subject}
+npx wrangler secret put VAPID_SUBJECT
+${subject}
 ${process.argv[2] ? '' : '\n(Contact par défaut : relancez avec votre adresse, par exemple node scripts/vapid-keys.mjs mailto:vous@exemple.com.)\n'}`);

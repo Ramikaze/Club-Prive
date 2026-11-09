@@ -210,3 +210,68 @@ test('copie client : notée à part, ne change pas les duplicatas', async () => 
     { payment_id: alice.saleId, member_id: alice.member.id, kind: 'telechargement' },
   ]);
 });
+
+test('vente payée par carte puis annulée : un seul remboursement dans l’historique', async () => {
+  const c = ok(await manager.post('/api/members', { first_name: 'carla', last_name: 'rembourse', phone: '06 444 44 44' }));
+  ok(await manager.post(`/api/members/${c.id}/wallet/recharge`, { amount: 100000 * UM, method: 'Espèces' }));
+  const client = await signedIn(c.id, '06 444 44 44');
+  const sale = await sell(c.id, { card: true, method: undefined });
+  assert.equal(sale.payment.card_amount, 20000 * UM);
+  ok(await admin.post(`/api/shop/sales/${sale.sale.id}/cancel`, { reason: 'Erreur de rayon' }));
+  const refunds = ok(await client.get('/api/client/history')).items.filter((i) => i.kind === 'remboursement');
+  assert.equal(refunds.length, 1, JSON.stringify(refunds));
+  assert.equal(refunds[0].amount, 20000 * UM);
+  assert.equal(refunds[0].payment_id, sale.payment.id);
+  assert.match(refunds[0].label, /Champagne vue/);
+  // A cancelled outside meal has no refund row: its card part coming back is the card's own movement, still shown.
+  const meal = ok(await manager.post(`/api/members/${c.id}/outside-meal`, { amount: 15000 * UM, label: 'Pizzeria Secrète' })).payment;
+  ok(await admin.post(`/api/payments/${meal.id}/cancel-meal`, { reason: 'Commande perdue par le livreur' }));
+  const items = ok(await client.get('/api/client/history')).items;
+  const back = items.filter((i) => i.kind === 'remboursement' && i.payment_id === meal.id);
+  assert.deepEqual(back.map((i) => [i.label, i.amount]), [['Remboursement sur la carte', 15000 * UM]]);
+  assert.equal(items.filter((i) => i.kind === 'remboursement').length, 2);
+});
+
+test('repas commandé à l’extérieur payé par carte : dans l’historique, sans le libellé du personnel', async () => {
+  const d = ok(await manager.post('/api/members', { first_name: 'dora', last_name: 'repas', phone: '06 555 55 55' }));
+  ok(await manager.post(`/api/members/${d.id}/wallet/recharge`, { amount: 100000 * UM, method: 'Espèces' }));
+  const client = await signedIn(d.id, '06 555 55 55');
+  const meal = ok(await manager.post(`/api/members/${d.id}/outside-meal`, { amount: 15000 * UM, label: 'Pizzeria Secrète' })).payment;
+  assert.equal(ok(await client.get('/api/client/account')).wallet.balance, 85000 * UM);
+  const history = ok(await client.get('/api/client/history'));
+  const item = history.items.find((i) => i.kind === 'repas');
+  assert.deepEqual(item, {
+    at: meal.paid_at, kind: 'repas', label: 'Repas commandé à l’extérieur', amount: 15000 * UM,
+    payment_id: meal.id, ticket_number: item.ticket_number, status: 'valide',
+  });
+  assert.match(item.ticket_number, /\d/);
+  assert.deepEqual(history.items.map((i) => i.kind).sort(), ['recharge', 'repas']);
+  // Its ticket opens, and names neither the restaurant nor the dish the staff typed.
+  const { ticket } = ok(await client.get(`/api/client/tickets/${meal.id}`));
+  assert.equal(ticket.kind, 'repas');
+  assert.equal(ticket.label, 'Repas commandé à l’extérieur');
+  assert.equal(ticket.amount, 15000 * UM);
+  assert.ok(!JSON.stringify({ history, ticket }).includes('Pizzeria'));
+  // Cancelled, it stays in the history as « annulé ».
+  ok(await admin.post(`/api/payments/${meal.id}/cancel-meal`, { reason: 'Repas jamais livré' }));
+  const after = ok(await client.get('/api/client/history')).items.find((i) => i.kind === 'repas');
+  assert.equal(after.status, 'annule');
+  assert.equal(after.payment_id, meal.id);
+});
+
+test('acompte d’une demande : rien à payer quand la carte le couvre', async () => {
+  const room = server.club.get('SELECT id FROM rooms LIMIT 1').id;
+  const e = ok(await manager.post('/api/members', { first_name: 'eva', last_name: 'acompte', phone: '06 666 66 66' }));
+  const client = await signedIn(e.id, '06 666 66 66');
+  const id = server.club.run(
+    `INSERT INTO reservation_requests (member_id, room_id, date, start_time, duration_min, party_size, status, created_at)
+     VALUES (?, ?, ?, '14:00', 180, 2, 'en_attente', ?)`, e.id, room, tomorrowOf(tomorrowOf(today)), new Date().toISOString(),
+  ).lastId;
+  const deposit = async () => ok(await client.get('/api/client/account')).requests.find((r) => r.id === id).deposit_amount;
+  // An empty card: the whole deposit is due, at the club or by recharging the card.
+  const due = await deposit();
+  assert.ok(due > 0);
+  // A card that covers the deposit pays it at the confirmation: nothing is left to pay.
+  ok(await manager.post(`/api/members/${e.id}/wallet/recharge`, { amount: due, method: 'Espèces' }));
+  assert.equal(await deposit(), 0);
+});

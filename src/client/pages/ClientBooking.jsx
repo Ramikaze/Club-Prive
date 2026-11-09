@@ -52,7 +52,9 @@ function Estimate({ quote }) {
       <strong>Estimation</strong>
       {quote.included_minutes > 0 && <p>Compris dans votre abonnement : {fmtDuration(quote.included_minutes)}.</p>}
       {quote.supplement_amount > 0 && <p>À payer en plus : {money(quote.supplement_amount)}{quote.card_amount > 0 ? `, dont ${money(quote.card_amount)} sur votre carte` : ''}.</p>}
-      {quote.deposit_amount > 0 && <p>Acompte de {money(quote.deposit_amount)} (séance de 3 h ou plus), à payer au club ou en rechargeant votre carte.</p>}
+      {quote.deposit_amount > 0 && (quote.deposit_from_card
+        ? <p>Acompte de {money(quote.deposit_amount)} (séance de 3 h ou plus), pris sur votre carte quand le club confirme.</p>
+        : <p>Acompte de {money(quote.deposit_amount)} (séance de 3 h ou plus), à payer au club ou en rechargeant votre carte : le club ne confirme pas avant.</p>)}
       {nothing && <p>Rien à payer en plus.</p>}
       <p className="subtle">Le club confirme ou refuse votre demande : rien n’est réservé tant qu’il n’a pas répondu.</p>
     </div>

@@ -304,3 +304,27 @@ test('côté équipe : la liste des produits porte « held » (mis de côté), j
   ok(await ger.post(`/api/orders/${o.id}/cancel`, { reason: 'Test' }));
   assert.equal(await heldOf(), 0);
 });
+
+test('côté équipe : « encaissé » mène au ticket de la vente (son paiement), pas de ticket pour une vente à crédit', async () => {
+  const c = await newProduct('cigare', 5);
+  const b = await newProduct('bouteille', 5);
+  const a = await person();
+  ok(await admin.put(`/api/clients/${a.member.id}/credit-limit`, { credit_limit: 100000 * UM }));
+  // A recharge elsewhere takes a payment number and no sale number: the two numbers part.
+  const m = ok(await ger.post('/api/members', { first_name: 'paul', last_name: 'decale', phone: '06 599 00 00' }));
+  ok(await ger.post(`/api/members/${m.id}/wallet/recharge`, { amount: 1000 * UM, method: 'Espèces' }));
+  const buyer = { kind: 'client', member_id: a.member.id };
+  const both = [{ product_id: c.id, quantity: 1 }, { product_id: b.id, quantity: 1 }];
+  const paid = ok(await order(a, both));
+  const cash = ok(await ger.post('/api/shop/sales', { account: 'cigares', buyer, lines: [{ product_id: c.id, quantity: 1 }], method: 'Espèces', order_id: paid.id }));
+  assert.notEqual(cash.payment.id, cash.sale.id);
+  const onCredit = ok(await order(a, both));
+  const credit = ok(await ger.post('/api/shop/sales', { account: 'alcool', buyer, lines: [{ product_id: b.id, quantity: 1 }], credit: true, order_id: onCredit.id }));
+  assert.equal(credit.payment ?? null, null);
+  const { orders } = ok(await ger.get('/api/orders'));
+  const seen = (id) => orders.find((o) => o.id === id);
+  assert.deepEqual(seen(paid.id).sales, { cigares: cash.sale.id });
+  assert.deepEqual(seen(paid.id).tickets, { cigares: cash.payment.id });
+  assert.deepEqual(seen(onCredit.id).sales, { alcool: credit.sale.id });
+  assert.deepEqual(seen(onCredit.id).tickets, { alcool: null });
+});

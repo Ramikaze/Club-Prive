@@ -299,3 +299,47 @@ test('le client reçoit le nom, la monnaie, le fuseau et les règles de réserva
   ok(await client.post('/api/client/password', { new_password: PASSWORD }));
   assert.deepEqual(ok(await client.get('/api/client/me')).club, expected);
 });
+
+test('le code provisoire se tape en minuscules, avec des espaces autour', async () => {
+  const { server, code } = await setup();
+  // A phone keyboard types lowercase in a password field: the code is read in capitals, without the spaces around.
+  const typed = `  ${code.toLowerCase()} `;
+  const first = ok(await signIn(new Client(server), '06 123 45 67', typed, '10.0.2.1'));
+  assert.equal(first.must_set_password, true);
+  // A wrong code stays wrong, whatever its case.
+  const other = (code[0] === 'A' ? 'B' : 'A') + code.slice(1);
+  const wrong = await signIn(new Client(server), '06 123 45 67', other.toLowerCase(), '10.0.2.2');
+  assert.equal(wrong.status, 401);
+  assert.equal(wrong.data.error.code, 'IDENTIFIANTS');
+  // The password chosen afterwards is checked as typed: neither its capitals nor its spaces are touched.
+  const client = new Client(server);
+  ok(await signIn(client, '06 123 45 67', code, '10.0.2.3'));
+  ok(await client.post('/api/client/password', { new_password: ' Mon-Mot-De-Passe ' }));
+  assert.equal((await signIn(new Client(server), '06 123 45 67', ' Mon-Mot-De-Passe ', '10.0.2.4')).status, 200);
+  assert.equal((await signIn(new Client(server), '06 123 45 67', ' MON-MOT-DE-PASSE ', '10.0.2.5')).status, 401);
+  assert.equal((await signIn(new Client(server), '06 123 45 67', 'Mon-Mot-De-Passe', '10.0.2.6')).status, 401);
+});
+
+test('au démarrage : sessions client expirées et vieilles clés d’idempotence effacées', async () => {
+  const { server, member, code } = await setup();
+  const client = new Client(server);
+  ok(await signIn(client, '06 123 45 67', code));
+  const accountId = account(server, member.id).id;
+  const day = 86400000;
+  const iso = (ms) => new Date(Date.now() + ms).toISOString();
+  server.club.run(
+    'INSERT INTO client_sessions (token_hash, account_id, must_set_password, created_at, expires_at) VALUES (?, ?, 0, ?, ?)',
+    'session-expiree', accountId, iso(-31 * day), iso(-day),
+  );
+  const insertKey = (key, at) => server.club.run(
+    'INSERT INTO client_idempotency (key, account_id, request_hash, response, created_at) VALUES (?, ?, ?, ?, ?)', key, accountId, 'h', 'null', at,
+  );
+  insertKey('cle-ancienne-01', iso(-8 * day));
+  insertKey('cle-recente-001', iso(-6 * day));
+  await server.restart();
+  const sessions = server.club.all('SELECT token_hash FROM client_sessions').map((s) => s.token_hash);
+  assert.ok(!sessions.includes('session-expiree'));
+  assert.equal(sessions.length, 1); // the live session stays
+  assert.deepEqual(server.club.all('SELECT key FROM client_idempotency').map((k) => k.key), ['cle-recente-001']);
+  assert.equal(ok(await client.get('/api/client/me')).must_set_password, true);
+});

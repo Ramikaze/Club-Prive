@@ -1,6 +1,6 @@
 // « Boutique »: the cigars and the champagne he can order, to take at the club, and his orders. An order only sets the
 // products aside: nothing is paid or taken out of stock until the staff hands them over at the counter.
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import Icon from '../../components/ui/Icon.jsx';
 import { Loaded, Segmented } from '../../components/ui/ui.jsx';
 import { toast } from '../../components/ui/toast.jsx';
@@ -47,7 +47,12 @@ function Orders({ orders, reload }) {
           return (
             <li key={o.id}>
               <div className="cl-row-main">
-                <strong>{o.lines.map((l) => `${l.quantity} × ${l.name}`).join(', ')}</strong>
+                {/* A closed order tells which lines the client did not take (their products were let go). */}
+                <strong>{o.lines.map((l, i) => (
+                  <Fragment key={i}>
+                    {i > 0 && ', '}{l.quantity} × {l.name}{l.taken === false && <span className="cl-untaken"> (non retiré)</span>}
+                  </Fragment>
+                ))}</strong>
                 <span className="muted">{dateTime(o.created_at)} · {money(total)}</span>
                 {o.status === 'annulee' && o.cancel_reason && <span className="cl-reason">Motif : {o.cancel_reason}</span>}
                 {o.status === 'prete' && <span className="cl-reason">Votre commande vous attend au club.</span>}
@@ -107,6 +112,7 @@ export default function ClientShop() {
                       <Thumb product={p} />
                       <div className="cl-row-main">
                         <strong>{p.name}</strong>
+                        {p.description && <span className="cl-desc">{p.description}</span>}
                         <span className="muted">{money(p.price)}</span>
                       </div>
                       {p.available ? (

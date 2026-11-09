@@ -114,6 +114,51 @@ test('envoi : un POST chiffré et signé au service du navigateur', async () => 
   assert.deepEqual(JSON.parse(read.text), { title: 'T', body: 'B', url: '/#/commandes' });
 });
 
+// The secrets are pasted by hand (`wrangler secret put`): a space or a line break around a value must not stop the sends.
+test('secrets VAPID collés avec des espaces : clé et signature valides', async () => {
+  const { pair, vapid } = await vapidKeys();
+  const browser = await browserSubscription('https://push.test/colle');
+  const padded = new Server({
+    VAPID_PUBLIC_KEY: `    ${vapid.publicKey}\n`, VAPID_PRIVATE_KEY: ` ${vapid.privateKey} `, VAPID_SUBJECT: `  ${vapid.subject}\n`,
+  });
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  try {
+    await padded.start();
+    await padded.addUser('admin', 'Propriétaire', 'admin', 'pad-admin-password');
+    await padded.addUser('ger', 'Gérant', 'gerant', 'pad-ger-password');
+    const admin = new Client(padded);
+    const ger = new Client(padded);
+    await admin.login('admin', 'pad-admin-password');
+    await ger.login('ger', 'pad-ger-password');
+    assert.deepEqual(ok(await ger.get('/api/push/key')), { key: vapid.publicKey });
+    ok(await ger.post('/api/push/subscriptions', browser.subscription));
+    const cigar = ok(await admin.post('/api/products', { category: 'cigare', name: 'Robusto', reference: 'PAD-C', price: 5000 * UM, initial_stock: 10 }));
+    const m = ok(await ger.post('/api/clients', { first_name: 'awa', last_name: 'colle', phone: '06 790 00 00' }));
+    const { code } = ok(await admin.post(`/api/members/${m.id}/client-access`, {}));
+    const client = new Client(padded);
+    ok(await client.post('/api/client/login', { login: '06 790 00 00', password: code }));
+    ok(await client.post('/api/client/password', { new_password: 'mon-mot-de-passe-client' }));
+    globalThis.fetch = async (url, init) => {
+      calls.push({ url: String(url), init });
+      return new Response(null, { status: 201 });
+    };
+    ok(await client.post('/api/client/orders', { lines: [{ product_id: cigar.id, quantity: 1 }] }));
+  } finally {
+    globalThis.fetch = realFetch;
+    padded.destroy();
+  }
+  assert.equal(calls.length, 1);
+  const header = new Headers(calls[0].init.headers).get('authorization');
+  const m = /^vapid t=([\w-]+)\.([\w-]+)\.([\w-]+), k=([\w-]+)$/.exec(header);
+  assert.ok(m, header);
+  assert.equal(m[4], vapid.publicKey);
+  assert.equal(await subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, pair.publicKey, unb64u(m[3]), enc(`${m[1]}.${m[2]}`)), true);
+  assert.equal(JSON.parse(Buffer.from(m[2], 'base64url')).sub, vapid.subject);
+  const read = await browserReads(new Uint8Array(calls[0].init.body), browser);
+  assert.equal(JSON.parse(read.text).title, 'Nouvelle commande Boutique');
+});
+
 // ---------------------------------------------------------------- who is told
 
 const sent = [];

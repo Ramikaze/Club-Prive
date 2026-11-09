@@ -24,6 +24,22 @@ export const ACTION_LABELS = {
   'membre.reactiver': 'Membre réactivé',
   'client.creer': 'Client régulier créé',
   'client.passer_membre': 'Client régulier passé en membre',
+  'client.plafond': 'Plafond de crédit modifié',
+  'client.reglement': 'Règlement de créance',
+  'client.reglement.annuler': 'Règlement de créance annulé',
+  'client.acces.creer': 'Accès client créé',
+  'client.acces.code': 'Nouveau code provisoire du client',
+  'client.acces.couper': 'Accès client coupé',
+  'client.acces.retablir': 'Accès client rétabli',
+  'client.mot_de_passe': 'Mot de passe choisi par le client',
+  'client.commande': 'Commande Boutique du client',
+  'client.commande.annuler': 'Commande annulée par le client',
+  'client.demande.creer': 'Demande de réservation du client',
+  'client.demande.annuler': 'Demande de réservation annulée par le client',
+  'commande.prete': 'Commande prête',
+  'commande.annuler': 'Commande annulée',
+  'commande.cloturer': 'Commande clôturée (retrait partiel)',
+  'demande.refuser': 'Demande de réservation refusée',
   'boutique.vente': 'Vente Boutique',
   'boutique.vente.annuler': 'Vente Boutique annulée',
   'salle.creer': 'Salle créée',
@@ -77,12 +93,20 @@ export const ACTION_LABELS = {
   'fournisseur.achat': 'Achat fournisseur enregistré',
   'fournisseur.achat_annuler': 'Achat fournisseur annulé',
   'caisse.fermer': 'Caisse du jour fermée',
+  'caisse.verifier': 'Caisse du jour vérifiée',
   'caisse.rouvrir': 'Caisse du jour rouverte',
   'periode.cloturer': 'Mois clôturé',
   'periode.rouvrir': 'Mois rouvert',
   'donnees.effacer': 'Données effacées',
   'demo.remettre_a_neuf': 'Démo remise à neuf',
 };
+
+// Who did it: the staff member, or « Client » for what a client did in his space (no account, the client in the
+// details), else the club on its own (an automatic renewal).
+export function auditAuthor(a) {
+  if (a.user_name) return a.user_name;
+  return a.user_id == null && a.details?.client ? 'Client' : 'système';
+}
 
 const BUYER_LABEL = { journalier: 'client journalier', client: 'client régulier', membre: 'membre' };
 
@@ -128,6 +152,26 @@ export function auditSummary(a) {
       return `${d.nom ?? ''} (${d.member_no ?? ''})`;
     case 'client.passer_membre':
       return `${d.nom ?? ''} : ${d.ancien_numero ?? ''} → ${d.nouveau_numero ?? ''}`;
+    case 'client.plafond':
+      return `${d.nom ?? ''} : ${money(d.avant ?? 0)} → ${money(d.apres ?? 0)}`;
+    case 'client.reglement':
+      return `${money(d.montant)} — ${d.moyen}`;
+    case 'client.reglement.annuler':
+      return `${money(d.montant)} — ${d.motif}`;
+    case 'client.acces.creer':
+    case 'client.acces.code':
+    case 'client.acces.couper':
+    case 'client.acces.retablir':
+      return `${d.member_no ?? ''} · identifiant ${d.login ?? ''}`;
+    case 'client.commande':
+      return (d.lignes ?? []).map((l) => `${l.quantite} × ${l.produit}`).join(', ');
+    case 'client.demande.creer':
+      return `${dayLabel(d.date, 'short')} à ${d.debut}, ${fmtDuration(d.duree ?? 0)}`;
+    case 'commande.annuler':
+    case 'demande.refuser':
+      return d.motif ?? '';
+    case 'caisse.verifier':
+      return dayLabel(d.jour, 'short');
     case 'boutique.vente':
       return `${RAYON_LABEL[d.rayon] ?? d.rayon} · ${BUYER_LABEL[d.acheteur] ?? d.acheteur} · ${money(d.montant)}${d.carte > 0 ? ` (dont ${money(d.carte)} par carte)` : ''}`;
     case 'boutique.vente.annuler':

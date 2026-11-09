@@ -123,8 +123,12 @@ export function createApi({ db, env = {}, demo = false, sendPush: pushSender = n
   const club = new Club(db, { demo });
   club.bootstrap();
 
-  const vapid = env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY && env.VAPID_SUBJECT
-    ? { publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY, subject: env.VAPID_SUBJECT }
+  // The secrets are pasted by hand: a space or a line break around a value would break every send (and the key the
+  // devices subscribe with), so each is trimmed once here.
+  const [vapidPublic, vapidPrivate, vapidSubject] = [env.VAPID_PUBLIC_KEY, env.VAPID_PRIVATE_KEY, env.VAPID_SUBJECT]
+    .map((v) => String(v ?? '').trim());
+  const vapid = vapidPublic && vapidPrivate && vapidSubject
+    ? { publicKey: vapidPublic, privateKey: vapidPrivate, subject: vapidSubject }
     : null;
   // The demo space never sends: its accounts are the real club's, and so would be the devices told of a fictitious order.
   const sendPush = demo ? null : pushSender ?? (vapid ? (subscription, message) => sendWebPush(subscription, message, vapid) : null);

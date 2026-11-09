@@ -51,7 +51,9 @@ export function createClientRoutes({ club, helpers }) {
       let valid = false;
       let viaCode = false;
       if (account?.password_hash) valid = await verifyPassword(password, account.password_hash);
-      if (!valid && codeLive) valid = viaCode = await verifyPassword(password, account.temp_hash);
+      // The temporary code is printed in capitals, and a phone types lowercase in a password field: it is read in
+      // capitals, without the spaces around. The password is checked as typed.
+      if (!valid && codeLive) valid = viaCode = await verifyPassword(password.trim().toUpperCase(), account.temp_hash);
       // No account, or one with neither password nor a live code: a dummy hash is checked all the same, so the answer
       // takes as long, and says the same, whether the number is known or not.
       if (!account?.password_hash && !codeLive) await verifyPassword(password, await dummyHash());

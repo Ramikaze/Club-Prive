@@ -207,5 +207,5 @@ function StaffApp() {
 // /client is the client space: a separate application, with its own sign-in and its own API. Nothing of the staff
 // application runs there (no session check, no staff store, no demo header): the choice is made before StaffApp's hooks.
 export default function App() {
-  return window.location.pathname.startsWith('/client') ? <ClientApp /> : <StaffApp />;
+  return /^\/client(\/|$)/.test(window.location.pathname) ? <ClientApp /> : <StaffApp />;
 }

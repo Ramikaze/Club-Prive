@@ -55,7 +55,7 @@ Ouvrir ensuite `http://localhost:5173`. Les appels `/api` sont transmis au serve
 - **Produits et caisse** : cigares et bouteilles, avec leur photo (les administrateurs l’ajoutent, la changent ou la retirent depuis la fiche du produit), entrées de stock, ventes liées aux réservations, encaissements, remboursements et ventilation par activité. Chaque encaissement donne un ticket de caisse (voir « Ticket de caisse »).
 - **Administration** : dépenses, trésorerie, grand livre, clôtures mensuelles, rôles, journal d’audit, paramètres et exports Excel.
 - **Carte de débit** : un crédit en FCFA approvisionné sur la carte du membre, qui paie les consommations, les salles et le renouvellement de l’abonnement (voir « Carte de débit »).
-- **Espace client** : les membres et les clients à crédit ont leur propre espace sur téléphone, à l’adresse `/client` (voir « Espace client »).
+- **Espace client** : les membres et les clients réguliers ont leur propre espace sur téléphone, à l’adresse `/client` (voir « Espace client »).
 - **Commandes** : page du personnel qui reçoit les commandes Boutique et les demandes de réservation des clients (voir « Espace client »).
 - **Mode démo** : un espace d’entraînement qui part d’une base vide, séparé du vrai club.
 
@@ -105,10 +105,10 @@ Chaque membre a, en plus de son temps de salle, un **crédit en FCFA** : il appa
 
 ### Espace client
 
-Les membres et les clients à crédit peuvent avoir un accès à leur espace, à l’adresse `/client` du site (pensé pour le téléphone).
+Les membres et les clients réguliers (qu’ils achètent à crédit ou non) peuvent avoir un accès à leur espace, à l’adresse `/client` du site (pensé pour le téléphone).
 
 - **Créer l’accès** : le personnel l’ouvre depuis la fiche du client, qui affiche un code provisoire. Il l’envoie au client sur WhatsApp. Au premier passage, le client entre ce code puis choisit lui-même son mot de passe ; le code provisoire ne sert plus ensuite.
-- **Ce que voit le client** : son crédit carte (et, pour un client à crédit, ce qu’il doit, son plafond et son crédit disponible), le temps qui reste dans sa séance en cours, son historique avec ses tickets (à imprimer ou à télécharger) et ses réservations.
+- **Ce que voit le client** : pour un membre, son crédit carte, les heures qui restent sur son abonnement et sa date de fin, le temps qui reste dans sa séance en cours et ses réservations ; pour un client régulier : ce qu’il doit, son plafond et son crédit disponible. Chacun voit son historique avec ses tickets (à imprimer ou à télécharger).
 - **Ce qu’il peut faire** : demander une réservation (le personnel la confirme ou la refuse) et commander des produits de la Boutique. Une commande n’est pas payée en ligne : le client la retire et la règle au club.
 - **Page « Commandes » du personnel** : liste les commandes Boutique et les demandes de réservation, avec un compteur des éléments à traiter. « Encaisser » règle une commande au comptoir (elle devient « Retirée » côté client) ; une demande de réservation se confirme ou se refuse.
 

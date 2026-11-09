@@ -315,6 +315,8 @@ export class Club {
       this.ensureCategoryCodes();
       this.run('DELETE FROM idempotency_keys WHERE created_at < ?', new Date(Date.now() - 7 * 86400000).toISOString());
       this.run('DELETE FROM sessions WHERE expires_at < ?', new Date().toISOString());
+      this.run('DELETE FROM client_idempotency WHERE created_at < ?', new Date(Date.now() - 7 * 86400000).toISOString());
+      this.run('DELETE FROM client_sessions WHERE expires_at < ?', new Date().toISOString());
     });
     this.cachedSettings = null;
   }
@@ -1041,6 +1043,8 @@ export class Club {
     ).map((w) => ({
       id: w.id, kind: w.kind, amount: w.amount, balance_after: w.balance_after, at: w.created_at, by_name: w.by_name ?? null,
       payment_id: w.payment_id, number: w.payment_id ? formatTicketNumber(w.payment_id) : null, reason: w.reason,
+      // A refund of a paid line (writeRefund): the movement and the refund row are one and the same refund.
+      refund_id: w.refund_id ?? null,
     }));
     const payments = this.all(
       `SELECT p.*, mm.first_name, mm.last_name, mm.member_no, u.name AS created_by_name FROM payments p

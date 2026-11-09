@@ -10,6 +10,8 @@ import { DEPOSIT_FROM, depositFor } from '../shared/rules.js';
 // ticket prints them, and a client's reprint matches the original.
 const TICKET_HIDDEN = ['next_copy_no', 'cancel_reason', 'shop_cancel_reason'];
 const COPY_KINDS = ['impression', 'telechargement'];
+// A meal's label is free text typed by the staff (a restaurant, a dish): the client is shown this one (as publicTicket does).
+const MEAL_LABEL = 'Repas commandé à l’extérieur';
 const CHARGE_STATUS = { due: 'a_regler', payee: 'valide', annulee: 'annule', remboursee: 'rembourse' };
 const SESSION_STATUS = { reservee: 'reservee', en_cours: 'en_cours', terminee: 'valide', annulee: 'annule' };
 // How far back a refused request stays visible.
@@ -70,9 +72,10 @@ export const clientViewMethods = {
     };
   },
 
-  // The deposit still due for a pending request of 3 hours or more, as planning it now gives it (a member
-  // without a plan pays by card); 0 for any other request,
-  // or when the slot can no longer be planned (the staff decides then).
+  // The deposit still to pay, at the club or by recharging the card, for a pending request of 3 hours or more, as
+  // planning it now gives it (a member without a plan pays by card). 0 when the card's balance covers it (owner's
+  // decision 8: the confirmation then takes it from the card, as createReservation does), for any other request, or
+  // when the slot can no longer be planned (the staff decides then).
   requestDeposit(q) {
     if (q.status !== 'en_attente' || q.duration_min < DEPOSIT_FROM) return 0;
     try {
@@ -80,7 +83,8 @@ export const clientViewMethods = {
         member_id: q.member_id, room_id: q.room_id, date: q.date, start_time: q.start_time, duration_min: q.duration_min,
         party_size: q.party_size, pay_with_card: true,
       });
-      return depositFor(p.duration, p.supplement);
+      const deposit = depositFor(p.duration, p.supplement);
+      return this.walletBalance(q.member_id) >= deposit ? 0 : deposit;
     } catch {
       return 0;
     }
@@ -98,13 +102,18 @@ export const clientViewMethods = {
     for (const w of statement.wallet) {
       if (w.kind === 'recharge') {
         item(w.at, 'recharge', 'Recharge de la carte', w.amount, w.payment_id, w.number, payments.get(w.payment_id)?.cancelled_at ? 'annule' : 'valide');
-      } else if (w.kind === 'remboursement') {
+      } else if (w.kind === 'remboursement' && !w.refund_id) {
+        // A card refund with no refund row (a cancelled outside meal). One that has a row is listed once, below, with
+        // its line's label.
         item(w.at, 'remboursement', 'Remboursement sur la carte', w.amount, w.payment_id, w.number, 'valide');
       }
     }
     for (const r of statement.refunds) item(r.at, 'remboursement', `Remboursement — ${r.label}`, r.amount, r.payment_id, r.number, 'valide');
     for (const p of statement.payments) {
-      if (p.settlement) item(p.paid_at, 'reglement', 'Règlement', p.amount, p.id, p.number, p.cancelled_at ? 'annule' : 'valide');
+      const status = p.cancelled_at ? 'annule' : 'valide';
+      if (p.settlement) item(p.paid_at, 'reglement', 'Règlement', p.amount, p.id, p.number, status);
+      // An outside meal: never the restaurant or the dish the staff typed, as on the public ticket.
+      else if (p.kind === 'repas') item(p.paid_at, 'repas', MEAL_LABEL, p.amount, p.id, p.number, status);
     }
     for (const r of statement.reservations) {
       if (r.status === 'reservee') continue;
@@ -135,6 +144,7 @@ export const clientViewMethods = {
     // ticketFor reads its actor for isBoss only: a client is never one, so the staff's journal of copies is not built.
     const { ticket } = this.ticketFor({ role: 'client' }, paymentId);
     for (const key of TICKET_HIDDEN) delete ticket[key];
+    if (ticket.kind === 'repas') ticket.label = MEAL_LABEL;
     return { ticket };
   },
 

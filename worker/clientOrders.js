@@ -150,9 +150,14 @@ export const clientOrderMethods = {
   staffOrders(user) {
     const orders = this.all(`SELECT * FROM client_orders WHERE status IN ${OPEN} ORDER BY created_at, id`).map((o) => {
       const m = this.get('SELECT id, first_name, last_name, member_no, kind, phone FROM members WHERE id = ?', o.member_id);
-      const sales = Object.fromEntries(this.all('SELECT account, sale_id FROM client_order_sales WHERE order_id = ?', o.id).map((s) => [s.account, s.sale_id]));
+      const sold = this.all('SELECT account, sale_id FROM client_order_sales WHERE order_id = ?', o.id);
+      const sales = Object.fromEntries(sold.map((s) => [s.account, s.sale_id]));
+      // The ticket of each rayon sold is its sale's payment (a credit sale has none until it is settled: null).
+      const tickets = Object.fromEntries(sold.map((s) => [
+        s.account, this.get('SELECT id FROM payments WHERE shop_sale_id = ? ORDER BY id LIMIT 1', s.sale_id)?.id ?? null,
+      ]));
       return {
-        id: o.id, status: o.status, created_at: o.created_at, ready_at: o.ready_at, sales,
+        id: o.id, status: o.status, created_at: o.created_at, ready_at: o.ready_at, sales, tickets,
         member: { id: m.id, name: `${m.first_name} ${m.last_name}`, member_no: m.member_no, kind: m.kind, phone: m.phone },
         lines: this.all(
           `SELECT l.product_id, l.account, l.quantity, l.unit_price, p.name, p.stock_qty FROM client_order_lines l
