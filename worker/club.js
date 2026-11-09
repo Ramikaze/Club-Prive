@@ -12,6 +12,7 @@ import { caisseMethods } from './caisses.js';
 import { supplierMethods } from './suppliers.js';
 import { creditMethods } from './credit.js';
 import { clientAccessMethods } from './clientAccess.js';
+import { clientViewMethods } from './clientView.js';
 import { billedMethods, DRINK_PART_SQL } from './billed.js';
 import {
   newTicketCode, formatTicketNumber, normalizeTicketCode, memberInitials, paymentLines, TICKET_CODE_LENGTH,
@@ -3859,4 +3860,5 @@ Object.assign(Club.prototype, caisseMethods);
 Object.assign(Club.prototype, supplierMethods);
 Object.assign(Club.prototype, creditMethods);
 Object.assign(Club.prototype, clientAccessMethods);
+Object.assign(Club.prototype, clientViewMethods);
 Object.assign(Club.prototype, billedMethods);

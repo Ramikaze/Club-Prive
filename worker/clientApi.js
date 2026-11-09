@@ -88,6 +88,11 @@ export function createClientRoutes({ club, helpers }) {
     return me(club.clientSessionAccount(ctx.tokenHash));
   });
 
+  add('GET', '/api/client/account', {}, (ctx) => club.clientAccountView(ctx.member.id));
+  add('GET', '/api/client/history', {}, (ctx) => club.clientHistory(ctx.member.id, ctx.query.from || undefined, ctx.query.to || undefined));
+  add('GET', '/api/client/tickets/:id', {}, (ctx) => club.clientTicket(ctx.member.id, ctx.params.id));
+  add('POST', '/api/client/tickets/:id/copies', {}, (ctx) => club.recordClientTicketCopy(ctx.member.id, ctx.params.id, ctx.body));
+
   async function handleClient(request, url) {
     const cookies = [];
     const secure = url.protocol === 'https:';
