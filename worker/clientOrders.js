@@ -161,7 +161,7 @@ export const clientOrderMethods = {
       };
     });
     const mine = user.role === 'associe' ? orders.filter((o) => o.lines.some((l) => l.account === user.rayon)) : orders;
-    const requests = [];
+    const requests = this.staffRequests();
     return { orders, requests, counts: { orders: mine.length, requests: requests.length } };
   },
 

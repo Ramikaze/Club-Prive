@@ -318,6 +318,7 @@ export function createApi({ db, env = {}, demo = false }) {
   // Orders placed by the clients (worker/clientOrders.js): every staff member sees them all; the counter turns one into
   // a Boutique sale (POST /api/shop/sales with order_id).
   add('GET', '/api/orders', {}, (ctx) => club.staffOrders(ctx.user));
+  add('POST', '/api/reservation-requests/:id/refuse', {}, (ctx) => club.refuseRequest(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/orders/:id/ready', {}, (ctx) => club.markOrderReady(ctx.user, ctx.params.id));
   add('POST', '/api/orders/:id/cancel', {}, (ctx) => club.cancelOrder(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/orders/:id/close', {}, (ctx) => club.closeOrder(ctx.user, ctx.params.id));

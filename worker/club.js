@@ -14,6 +14,7 @@ import { creditMethods } from './credit.js';
 import { clientAccessMethods } from './clientAccess.js';
 import { clientViewMethods } from './clientView.js';
 import { clientOrderMethods } from './clientOrders.js';
+import { clientRequestMethods } from './clientRequests.js';
 import { billedMethods, DRINK_PART_SQL } from './billed.js';
 import {
   newTicketCode, formatTicketNumber, normalizeTicketCode, memberInitials, paymentLines, TICKET_CODE_LENGTH,
@@ -1972,6 +1973,10 @@ export class Club {
   createReservation(actor, input) {
     const p = this.planReservation(input);
     const s = this.settings();
+    // Confirming a client's request: it must still be pending and the booking the same member's. It is only marked
+    // answered at the very end, so any refusal below leaves it untouched.
+    const requestId = input.request_id === undefined || input.request_id === null || input.request_id === '' ? null : toId(input.request_id, 'Demande');
+    if (requestId) this.assertRequestMatches(requestId, p.member.id);
     if (p.conflicts.length) throw this.overlapError(p.conflicts, p.room.name);
     if (p.gap_conflicts.length) throw this.gapError(p.gap_conflicts, { startMs: p.startMs, endMs: p.endMs });
     if (p.paid > 0 && !p.tariff.validated && !s.demo_mode) {
@@ -2036,6 +2041,7 @@ export class Club {
     });
     if (payWithCard) this.insertTimeLinesPaidByCard(actor, line, timeLines, { method: depositMethod, reference: null });
     if (paidNow.length) this.recordPayment(actor, { charge_ids: paidNow, method: depositMethod, reference: null });
+    if (requestId) this.linkRequestToReservation(actor, requestId, id);
     return this.reservationDetail(id);
   }
 
@@ -3863,4 +3869,5 @@ Object.assign(Club.prototype, creditMethods);
 Object.assign(Club.prototype, clientAccessMethods);
 Object.assign(Club.prototype, clientViewMethods);
 Object.assign(Club.prototype, clientOrderMethods);
+Object.assign(Club.prototype, clientRequestMethods);
 Object.assign(Club.prototype, billedMethods);

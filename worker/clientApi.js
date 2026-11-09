@@ -100,6 +100,12 @@ export function createClientRoutes({ club, helpers }) {
   add('POST', '/api/client/orders', {}, (ctx) => club.createClientOrder(ctx.member.id, ctx.body));
   add('POST', '/api/client/orders/:id/cancel', {}, (ctx) => club.cancelClientOrder(ctx.member.id, ctx.params.id));
 
+  // Reservation requests (worker/clientRequests.js): the free slots, the quote, the request and its cancellation.
+  add('GET', '/api/client/slots', {}, (ctx) => club.clientSlots(ctx.member.id, ctx.query));
+  add('POST', '/api/client/reservation-requests/quote', {}, (ctx) => club.clientRequestQuote(ctx.member.id, ctx.body));
+  add('POST', '/api/client/reservation-requests', {}, (ctx) => club.createClientRequest(ctx.member.id, ctx.body));
+  add('POST', '/api/client/reservation-requests/:id/cancel', {}, (ctx) => club.cancelClientRequest(ctx.member.id, ctx.params.id));
+
   async function handleClient(request, url) {
     const cookies = [];
     const secure = url.protocol === 'https:';
