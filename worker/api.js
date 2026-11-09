@@ -13,6 +13,7 @@ import { DEMO_ACCOUNTS } from './seed.js';
 import { AppError, forbidden, invalid, conflict, notSignedIn } from './errors.js';
 import { hashPassword, verifyPassword, sha256Hex, newToken, newClientCode, checkPasswordStrength, parseCookies } from './auth.js';
 import { ALWAYS_REAL } from './space.js';
+import { createClientRoutes } from './clientApi.js';
 import { isBoss } from '../shared/roles.js';
 
 const MAX_BODY = 256 * 1024;
@@ -62,6 +63,40 @@ async function readJson(request, limit = MAX_BODY) {
   }
 }
 
+// A route table: `add` registers a method and a path (its `:name` parts become `params`), `match` finds the route of a
+// request: null for an unknown path, 405 for a known path asked with another method. The staff's routes and the
+// client's (worker/clientApi.js) each have their own.
+function routeTable() {
+  const routes = [];
+  const add = (method, pattern, opts, handler) => {
+    const keys = [];
+    const re = new RegExp(`^${pattern.replace(/:(\w+)/g, (_, k) => { keys.push(k); return '([^/]+)'; })}$`);
+    routes.push({ method, re, keys, opts, handler });
+  };
+  const match = (method, pathname) => {
+    let pathMatched = false;
+    for (const r of routes) {
+      const m = r.re.exec(pathname);
+      if (!m) continue;
+      pathMatched = true;
+      if (r.method !== method) continue;
+      let params;
+      try {
+        params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
+      } catch {
+        throw invalid('Adresse invalide.');
+      }
+      return { route: r, params };
+    }
+    if (pathMatched) throw new AppError(405, 'METHODE', 'Méthode non autorisée.');
+    return null;
+  };
+  return { add, match };
+}
+
+// The client space's paths (worker/clientApi.js): served by their own route table, with their own sessions.
+const CLIENT_PATH = /^\/api\/client(\/|$)/;
+
 // `demo`: this API is the demo space's. Everything that differs there (accounts refused, exported file
 // names, the reset route, the two entry points below) follows this option, never `club.demo`, which
 // the tests also set on a real club to relax the tariffs.
@@ -72,7 +107,9 @@ export function createApi({ db, env = {}, demo = false }) {
 
   const allowedOrigins = String(env.ALLOWED_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   const throttle = new Map();
-  let dummyHash = null;
+  let dummyHashPromise = null;
+  // A password hash no account has: an unknown login is checked against it, so the answer takes as long as for a real one.
+  const dummyHash = () => (dummyHashPromise ??= hashPassword('mot-de-passe-factice-pour-egaliser-le-temps'));
 
   // Five failures in a row lock the key (address + login) for one minute.
   const checkThrottle = (key) => {
@@ -84,6 +121,7 @@ export function createApi({ db, env = {}, demo = false }) {
     throttle.set(key, { fails: fails >= 5 ? 0 : fails, until: fails >= 5 ? Date.now() + 60000 : 0 });
     if (throttle.size > 5000) throttle.clear();
   };
+  const clearFailures = (key) => throttle.delete(key);
 
   // Hashes a new password after the strength check (the business layer only stores hashes).
   const preparePassword = async (ctx, field) => {
@@ -110,12 +148,7 @@ export function createApi({ db, env = {}, demo = false }) {
     return club.bundle(res.user);
   };
 
-  const routes = [];
-  const add = (method, pattern, opts, handler) => {
-    const keys = [];
-    const re = new RegExp(`^${pattern.replace(/:(\w+)/g, (_, k) => { keys.push(k); return '([^/]+)'; })}$`);
-    routes.push({ method, re, keys, opts, handler });
-  };
+  const { add, match } = routeTable();
   const ADMIN = { roles: ['admin'] };
   // Club management: the administrator and the associés (ADMIN stays for the application itself).
   const CLUB = { roles: ['admin', 'associe'] };
@@ -139,8 +172,7 @@ export function createApi({ db, env = {}, demo = false }) {
       const key = `${ctx.ip}|${String(ctx.body.login ?? '').trim().toLowerCase().slice(0, 41)}`;
       checkThrottle(key);
       const user = club.userByLogin(ctx.body.login);
-      dummyHash ??= hashPassword('mot-de-passe-factice-pour-egaliser-le-temps');
-      const valid = await verifyPassword(String(ctx.body.password ?? ''), user?.password_hash ?? await dummyHash);
+      const valid = await verifyPassword(String(ctx.body.password ?? ''), user?.password_hash ?? await dummyHash());
       if (!user || !valid || !user.active) {
         recordFailure(key);
         throw new AppError(401, 'IDENTIFIANTS', 'Identifiant ou mot de passe incorrect.');
@@ -417,25 +449,6 @@ export function createApi({ db, env = {}, demo = false }) {
   add('DELETE', '/api/products/:id/photo', { ...CLUB, ...PHOTOS }, (ctx) => club.removeProductPhoto(ctx.user, ctx.params.id));
   add('GET', '/api/stock-movements', {}, (ctx) => club.stockMovements(ctx.query));
 
-  function match(method, pathname) {
-    let pathMatched = false;
-    for (const r of routes) {
-      const m = r.re.exec(pathname);
-      if (!m) continue;
-      pathMatched = true;
-      if (r.method !== method) continue;
-      let params;
-      try {
-        params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
-      } catch {
-        throw invalid('Adresse invalide.');
-      }
-      return { route: r, params };
-    }
-    if (pathMatched) throw new AppError(405, 'METHODE', 'Méthode non autorisée.');
-    return null;
-  }
-
   // Cross-site writes are refused: browsers cannot send application/json cross-origin without a
   // CORS preflight (which this API never grants), and a present Origin must be this site.
   function checkCsrf(request, url) {
@@ -445,11 +458,19 @@ export function createApi({ db, env = {}, demo = false }) {
     if (origin && origin !== url.origin && !allowedOrigins.includes(origin)) throw forbidden('Requête refusée : origine inconnue.');
   }
 
+  // The client space exists in the real club only, as the staff's accounts do: the demo space has none.
+  const clientRoutes = demo ? null : createClientRoutes({
+    club, env, helpers: { routeTable, checkThrottle, recordFailure, clearFailures, dummyHash, readJson, checkCsrf, json, errorResponse },
+  });
+
   // `user` (the signed-in account's row) and `demoConfig` come from handleDemo alone, never from the
   // network: the demo space reads no cookie and looks up no session, it serves the request as `user`.
   async function handle(request, { user = null, demoConfig = null } = {}) {
     if ((user || demoConfig) && !demo) throw new Error('handle: only the demo space is given an identity.');
     const url = new URL(request.url);
+    // A client path never reaches the staff's routes, nor reads their `sid`: worker/clientApi.js serves it whole. In the
+    // demo space, which has no client routes, it is an unknown path like any other (and the Worker's router keeps it away).
+    if (clientRoutes && CLIENT_PATH.test(url.pathname)) return clientRoutes.handleClient(request, url);
     const cookies = [];
     const secure = url.protocol === 'https:';
     const cookieHeader = (value, maxAge) => [
