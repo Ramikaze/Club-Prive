@@ -11,7 +11,7 @@ import { Club } from './club.js';
 import { migrate } from './schema.js';
 import { DEMO_ACCOUNTS } from './seed.js';
 import { AppError, forbidden, invalid, conflict, notSignedIn } from './errors.js';
-import { hashPassword, verifyPassword, sha256Hex, newToken, checkPasswordStrength, parseCookies } from './auth.js';
+import { hashPassword, verifyPassword, sha256Hex, newToken, newClientCode, checkPasswordStrength, parseCookies } from './auth.js';
 import { ALWAYS_REAL } from './space.js';
 import { isBoss } from '../shared/roles.js';
 
@@ -91,6 +91,14 @@ export function createApi({ db, env = {}, demo = false }) {
     if (weak) throw invalid(weak);
     ctx.passwordHash = await hashPassword(ctx.body[field]);
   };
+  // A temporary client code: shown once to the staff member, only its hash is kept. Valid 7 days.
+  const prepareClientCode = async (ctx) => {
+    ctx.tempCode = newClientCode();
+    ctx.tempHash = await hashPassword(ctx.tempCode);
+  };
+  const CLIENT_CODE_DAYS = 7;
+  const clientCode = (ctx) => ({ tempHash: ctx.tempHash, expiresAt: new Date(club.nowMs() + CLIENT_CODE_DAYS * 86400000).toISOString() });
+  const clientCodeAnswer = (ctx, res) => ({ ...res, code: ctx.tempCode, expires_at: res.status.temp_expires_at });
   const prepareSession = async (ctx) => {
     ctx.newToken = newToken();
     ctx.newTokenHash = await sha256Hex(ctx.newToken);
@@ -274,6 +282,14 @@ export function createApi({ db, env = {}, demo = false }) {
   add('PUT', '/api/members/:id', {}, (ctx) => club.updateMember(ctx.user, ctx.params.id, ctx.body));
   // Members are deactivated, never deleted: their payments and transactions stay in the books.
   add('POST', '/api/members/:id/deactivate', {}, (ctx) => club.deactivateMember(ctx.user, ctx.params.id, ctx.body));
+  // Client space access, handed out by the staff (every role); the temporary code is returned once, never logged.
+  add('GET', '/api/members/:id/client-access', { ...ACCOUNTS }, (ctx) => club.clientAccessStatus(club.fileRow(ctx.params.id).id));
+  add('POST', '/api/members/:id/client-access', { ...ACCOUNTS, prepare: prepareClientCode },
+    (ctx) => clientCodeAnswer(ctx, club.createClientAccess(ctx.user, ctx.params.id, clientCode(ctx))));
+  add('POST', '/api/members/:id/client-access/code', { ...ACCOUNTS, prepare: prepareClientCode },
+    (ctx) => clientCodeAnswer(ctx, club.renewClientCode(ctx.user, ctx.params.id, clientCode(ctx))));
+  add('POST', '/api/members/:id/client-access/disable', { ...ACCOUNTS }, (ctx) => club.setClientAccessActive(ctx.user, ctx.params.id, false));
+  add('POST', '/api/members/:id/client-access/enable', { ...ACCOUNTS }, (ctx) => club.setClientAccessActive(ctx.user, ctx.params.id, true));
   add('POST', '/api/members/:id/reactivate', {}, (ctx) => club.reactivateMember(ctx.user, ctx.params.id));
   add('POST', '/api/members/:id/subscriptions', {}, (ctx) => club.activateSubscription(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/subscriptions/:id/cancel', CLUB, (ctx) => club.cancelSubscription(ctx.user, ctx.params.id, ctx.body));

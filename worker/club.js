@@ -11,6 +11,7 @@ import { shopMethods, buyerShown } from './shop.js';
 import { caisseMethods } from './caisses.js';
 import { supplierMethods } from './suppliers.js';
 import { creditMethods } from './credit.js';
+import { clientAccessMethods } from './clientAccess.js';
 import { billedMethods, DRINK_PART_SQL } from './billed.js';
 import {
   newTicketCode, formatTicketNumber, normalizeTicketCode, memberInitials, paymentLines, TICKET_CODE_LENGTH,
@@ -776,6 +777,7 @@ export class Club {
       'UPDATE members SET active = 0, deactivated_at = ?, deactivated_by = ?, deactivation_reason = ?, updated_at = ?, updated_by = ? WHERE id = ?',
       this.nowIso(), actor.id, reason, this.nowIso(), actor.id, m.id,
     );
+    this.closeClientSessions(m.id);
     this.audit(actor, 'membre.desactiver', 'member', m.id, { member_no: m.member_no, nom: `${m.first_name} ${m.last_name}`, motif: reason });
     return this.memberDetail(m.id);
   }
@@ -3856,4 +3858,5 @@ Object.assign(Club.prototype, shopMethods);
 Object.assign(Club.prototype, caisseMethods);
 Object.assign(Club.prototype, supplierMethods);
 Object.assign(Club.prototype, creditMethods);
+Object.assign(Club.prototype, clientAccessMethods);
 Object.assign(Club.prototype, billedMethods);
