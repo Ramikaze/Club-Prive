@@ -890,7 +890,105 @@ const V23 = [
   'ALTER TABLE day_closings ADD COLUMN verified_by INTEGER REFERENCES users(id)',
 ];
 
-export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23];
+// V24: the client space (spec docs/superpowers/specs/2026-11-09-espace-client-design.md). A member gets a login of their
+// own (account, sessions, replay protection of their requests), orders products to collect at the club (order, its lines,
+// the shop sales it becomes at pickup), asks for a room (request, linked to the reservation once confirmed) and may print
+// or download a payment ticket (a log of the copies). Staff devices subscribe to push notifications. It comes after the
+// till verification (V23).
+const V24 = [
+  `CREATE TABLE client_accounts (
+    id INTEGER PRIMARY KEY,
+    member_id INTEGER NOT NULL UNIQUE REFERENCES members(id),
+    login TEXT NOT NULL UNIQUE,
+    password_hash TEXT,
+    temp_hash TEXT,
+    temp_expires_at TEXT,
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    last_login_at TEXT
+  )`,
+  `CREATE TABLE client_sessions (
+    token_hash TEXT PRIMARY KEY,
+    account_id INTEGER NOT NULL REFERENCES client_accounts(id),
+    must_set_password INTEGER NOT NULL DEFAULT 0 CHECK (must_set_password IN (0, 1)),
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+  )`,
+  'CREATE INDEX client_sessions_account ON client_sessions(account_id)',
+  `CREATE TABLE client_idempotency (
+    key TEXT NOT NULL,
+    account_id INTEGER NOT NULL REFERENCES client_accounts(id),
+    request_hash TEXT NOT NULL,
+    response TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (key, account_id)
+  )`,
+  `CREATE TABLE client_orders (
+    id INTEGER PRIMARY KEY,
+    member_id INTEGER NOT NULL REFERENCES members(id),
+    status TEXT NOT NULL CHECK (status IN ('en_attente', 'prete', 'retiree', 'annulee')),
+    created_at TEXT NOT NULL,
+    ready_at TEXT,
+    ready_by INTEGER REFERENCES users(id),
+    closed_at TEXT,
+    closed_by INTEGER REFERENCES users(id),
+    cancel_reason TEXT,
+    cancelled_by_client INTEGER NOT NULL DEFAULT 0 CHECK (cancelled_by_client IN (0, 1))
+  )`,
+  'CREATE INDEX client_orders_member ON client_orders(member_id)',
+  'CREATE INDEX client_orders_status ON client_orders(status)',
+  `CREATE TABLE client_order_lines (
+    id INTEGER PRIMARY KEY,
+    order_id INTEGER NOT NULL REFERENCES client_orders(id),
+    product_id INTEGER NOT NULL REFERENCES products(id),
+    account TEXT NOT NULL CHECK (account IN ('cigares', 'alcool')),
+    quantity INTEGER NOT NULL CHECK (quantity BETWEEN 1 AND 20),
+    unit_price INTEGER NOT NULL CHECK (unit_price >= 0),
+    UNIQUE (order_id, product_id)
+  )`,
+  'CREATE INDEX client_order_lines_order ON client_order_lines(order_id)',
+  `CREATE TABLE client_order_sales (
+    order_id INTEGER NOT NULL REFERENCES client_orders(id),
+    account TEXT NOT NULL CHECK (account IN ('cigares', 'alcool')),
+    sale_id INTEGER NOT NULL UNIQUE REFERENCES shop_sales(id),
+    PRIMARY KEY (order_id, account)
+  )`,
+  `CREATE TABLE reservation_requests (
+    id INTEGER PRIMARY KEY,
+    member_id INTEGER NOT NULL REFERENCES members(id),
+    room_id INTEGER NOT NULL REFERENCES rooms(id),
+    date TEXT NOT NULL,
+    start_time TEXT NOT NULL,
+    duration_min INTEGER NOT NULL CHECK (duration_min > 0),
+    party_size INTEGER NOT NULL CHECK (party_size >= 1),
+    status TEXT NOT NULL CHECK (status IN ('en_attente', 'confirmee', 'refusee', 'annulee')),
+    created_at TEXT NOT NULL,
+    decided_at TEXT,
+    decided_by INTEGER REFERENCES users(id),
+    message TEXT,
+    reservation_id INTEGER UNIQUE REFERENCES reservations(id)
+  )`,
+  'CREATE INDEX reservation_requests_status ON reservation_requests(status)',
+  'CREATE INDEX reservation_requests_member ON reservation_requests(member_id)',
+  `CREATE TABLE client_ticket_copies (
+    id INTEGER PRIMARY KEY,
+    payment_id INTEGER NOT NULL REFERENCES payments(id),
+    member_id INTEGER NOT NULL REFERENCES members(id),
+    kind TEXT NOT NULL CHECK (kind IN ('impression', 'telechargement')),
+    at TEXT NOT NULL
+  )`,
+  `CREATE TABLE push_subscriptions (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    endpoint TEXT NOT NULL UNIQUE,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`,
+];
+
+export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24];
 
 export function migrate(db) {
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');

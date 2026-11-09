@@ -54,6 +54,8 @@ const WIPE_ORDER = [
   // Tables of the former cigar-cave tracking, no longer in the app: kept in the database, still cleared by a reset.
   'humidor_readings', 'humidors',
   'idempotency_keys', 'wallet_movements', 'payment_allocations', 'refunds', 'stock_movements', 'credit_movements', 'charges',
+  'client_ticket_copies', 'client_order_sales', 'client_order_lines', 'client_orders', 'reservation_requests',
+  'client_idempotency', 'client_sessions', 'client_accounts',
   'ticket_events', 'payments', 'shop_sales',
   'reservation_attendees', 'reservations', 'cards', 'subscriptions', 'members', 'product_photos', 'products',
   'ledger_entries', 'supplier_purchases', 'suppliers', 'closed_periods', 'day_closings', 'audit_log',
