@@ -36,7 +36,7 @@ export function ClientLogin({ onSignedIn }) {
               type="text" autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="username" autoFocus required
               aria-describedby={`${helpId}-help`} value={login} onChange={(e) => setLogin(e.target.value)}
             />
-            <span className="help" id={`${helpId}-help`}>La première fois : votre numéro de membre (M-… ou C-…) et le code reçu du club.</span>
+            <span className="help" id={`${helpId}-help`}>La première fois : votre numéro de membre (M-… ou C-…) et le code reçu du club. Si votre accès date d’avant, votre numéro de téléphone marche encore jusqu’à votre choix d’identifiant.</span>
           </label>
           <PasswordField label="Mot de passe ou code" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
           <FormError error={error} />
@@ -53,13 +53,17 @@ const LOGIN_RULES = '4 à 30 caractères : lettres sans accent, chiffres, point 
 // password is asked and the new one comes with the identifier; without it (an access made with the phone, signed in
 // with its password) only the identifier is chosen. `login`: the identifier already chosen, offered for a change.
 // Not `first`: « Changer mon mot de passe » (the identifier does not change there).
-export function ClientPassword({ first, mustSetPassword = true, login = null, onDone, onCancel }) {
+export function ClientPassword({ first, mustSetPassword = true, login = null, onDone, onCancel, onLogout }) {
   const loginId = useId();
   const [name, setName] = useState(login ?? '');
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [again, setAgain] = useState('');
   const { busy, error, submit } = useSubmit();
+  const leave = async () => {
+    try { await clientApi.post('/api/client/logout', {}); } catch { /* the session is dropped here whatever the server says */ }
+    onLogout();
+  };
   const onlyLogin = first && !mustSetPassword;
   const withPassword = !onlyLogin;
   const clear = () => { setCurrent(''); setNext(''); setAgain(''); };
@@ -107,6 +111,7 @@ export function ClientPassword({ first, mustSetPassword = true, login = null, on
       {withPassword && <PasswordField label="Nouveau mot de passe, une seconde fois" autoComplete="new-password" required value={again} onChange={(e) => setAgain(e.target.value)} />}
       <FormError error={error} />
       <button className="btn btn-primary btn-block" type="submit" disabled={busy} aria-busy={busy}>Enregistrer</button>
+      {first && onLogout && <button type="button" className="login-link" onClick={leave}>Se déconnecter</button>}
       {onCancel && <button type="button" className="login-link" onClick={() => { clear(); onCancel(); }}>Annuler</button>}
     </form>
   );

@@ -993,10 +993,12 @@ const V24 = [
 // for a new access, his phone for the accesses made before (0). The existing accesses are all phone logins: they stay at
 // 0, and their clients choose an identifier at their next sign-in. Temporary codes still live are voided: handed out
 // before this update (possibly by a gérant, who may no longer give them), they must not stay usable; an associé or the
-// administrator issues them again. Passwords and open sessions are not touched. It comes after the client space (V24).
+// administrator issues them again; the sessions opened with such a code (not yet finished) are closed with them, so
+// their holder cannot go on choosing an identifier and password. Passwords and the sessions opened with one stay. It comes after the client space (V24).
 const V25 = [
   'ALTER TABLE client_accounts ADD COLUMN login_chosen INTEGER NOT NULL DEFAULT 0 CHECK (login_chosen IN (0, 1))',
   'UPDATE client_accounts SET temp_hash = NULL, temp_expires_at = NULL',
+  'DELETE FROM client_sessions WHERE must_set_password = 1',
 ];
 
 export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25];

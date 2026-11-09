@@ -16,7 +16,9 @@ import { clientAccessText } from '../../../shared/whatsapp.js';
 
 const STATE_LINE = {
   aucun: () => 'Pas d’accès client.',
-  en_attente: (s) => `En attente de première connexion${s.temp_expires_at ? ` · code valable jusqu’au ${dateTime(s.temp_expires_at)}` : ''}.`,
+  en_attente: (s) => (s.temp_expires_at && String(s.temp_expires_at) > new Date().toISOString()
+    ? `En attente de première connexion · code valable jusqu’au ${dateTime(s.temp_expires_at)}.`
+    : 'En attente de première connexion · code expiré ou annulé : à redonner (administrateur ou associé).'),
   actif: (s) => `Accès actif${s.last_login_at ? ` · dernière connexion le ${dateTime(s.last_login_at)}` : ' · jamais connecté'}.`,
   coupe: () => 'Accès coupé : le client ne peut plus se connecter.',
 };
@@ -96,7 +98,9 @@ export default function ClientAccessBlock({ member }) {
           {!boss && s.state === 'aucun' ? <p className="subtle">Seuls l’administrateur et les associés créent un accès client.</p> : null}
           {s.state === 'aucun' ? null : s.login_chosen
             ? <p className="subtle">Identifiant : <span className="mono">{s.login}</span></p>
-            : <p className="subtle">Identifiant : pas encore choisi (provisoire : <span className="mono">{member.member_no}</span>)</p>}
+            : /^[mc]-\d+$/i.test(s.login ?? '')
+              ? <p className="subtle">Identifiant : pas encore choisi (provisoire : <span className="mono">{member.member_no}</span>)</p>
+              : <p className="subtle">Identifiant : pas encore choisi — le client se connecte encore avec son téléphone jusqu’à son choix</p>}
           <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
             {s.state === 'aucun' ? (
               boss ? <button type="button" className="btn btn-primary" disabled={action.busy} onClick={create}><Icon name="key" /> Créer l’accès client</button> : null

@@ -164,7 +164,7 @@ export default function ClientApp() {
   else if (phase === 'offline') {
     screen = <Message title="Serveur injoignable" text={error?.message} action="Réessayer" onAction={() => window.location.reload()} />;
   } else if (phase === 'login') screen = <ClientLogin onSignedIn={enter} />;
-  else if (phase === 'password') screen = <ClientPassword first mustSetPassword={choose.mustSetPassword} login={choose.login} onDone={enter} />;
+  else if (phase === 'password') screen = <ClientPassword first mustSetPassword={choose.mustSetPassword} login={choose.login} onDone={enter} onLogout={leave} />;
   else {
     screen = (
       <HashRouter>

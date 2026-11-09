@@ -51,6 +51,15 @@ test('migration V25 : les accès existants gardent leur identifiant, non choisi'
     ok(await admin.post(`/api/members/${other.id}/client-access`, {}));
     assert.ok(source.db.get('SELECT temp_hash FROM client_accounts WHERE member_id = ?', other.id).temp_hash);
 
+    // Two open sessions: one opened with a password, one opened with a temporary code (pre-update code).
+    const accountId = (id) => source.db.get('SELECT id FROM client_accounts WHERE member_id = ?', id).id;
+    for (const [token, id, must] of [['pwd-session', member.id, 0], ['code-session', other.id, 1]]) {
+      source.db.run(
+        "INSERT INTO client_sessions (token_hash, account_id, must_set_password, created_at, expires_at) VALUES (?, ?, ?, '2026-11-09T10:00:00.000Z', '2099-01-01T00:00:00.000Z')",
+        token, accountId(id), must,
+      );
+    }
+
     v24Copy(source.file, old.file);
     await old.start(); // migrates 24 -> 25
     assert.equal(old.db.get("SELECT value FROM meta WHERE key = 'schema_version'").value, String(MIGRATIONS.length));
@@ -63,6 +72,8 @@ test('migration V25 : les accès existants gardent leur identifiant, non choisi'
     const voided = old.db.get('SELECT temp_hash, temp_expires_at FROM client_accounts WHERE member_id = ?', other.id);
     assert.equal(voided.temp_hash, null);
     assert.equal(voided.temp_expires_at, null);
+    // Code sessions are closed (the pre-update code must not let its holder finish choosing); password sessions stay.
+    assert.deepEqual(old.db.all('SELECT token_hash FROM client_sessions').map((r) => r.token_hash), ['pwd-session']);
     assert.throws(() => old.db.run('UPDATE client_accounts SET login_chosen = 2 WHERE id = ?', row.id), /constraint/i);
 
     // The client signs in with his phone and password as before, and is asked for an identifier first.

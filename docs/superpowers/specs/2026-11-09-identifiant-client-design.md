@@ -37,8 +37,12 @@ en donner.
 - **Droits sur la fiche** : créer l'accès, « Nouveau code provisoire », « Rétablir l'accès » : associés et administrateur.
   « Couper l'accès » : tout le personnel, gérant compris, car cela protège le client **(mon choix)**. Le gérant voit
   l'état de l'accès et l'identifiant.
-- **Accès déjà créés avec le téléphone** : à leur prochaine connexion (téléphone ou numéro de membre, avec leur mot de
-  passe ou leur code), le client doit choisir un identifiant avant tout le reste ; ensuite le téléphone ne marche plus.
+- **Accès déjà créés avec le téléphone** : un ancien accès se connecte avec son téléphone et son mot de passe, ou avec
+  son téléphone ou son numéro de membre et un code donné par un associé ou l'administrateur ; un numéro de membre avec
+  un mot de passe est refusé (les numéros de membre se suivent : l'autoriser avec un mot de passe laisserait n'importe
+  qui les essayer un par un). À sa prochaine connexion, le client doit choisir un identifiant avant tout le reste ;
+  ensuite le téléphone ne marche plus. Les codes donnés avant la mise à jour sont annulés par elle (V25) et les
+  sessions ouvertes avec un code sont fermées.
 - Le journal note chaque création, chaque code donné, chaque coupure ou rétablissement, avec la personne ; et le choix
   ou changement d'identifiant par le client.
 
