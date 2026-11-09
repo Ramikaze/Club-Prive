@@ -3270,8 +3270,9 @@ export class Club {
 
   // ---------------------------------------------------------------- catalogue import
 
-  // Next free reference of a series: CIG-001, CIG-002... for cigars, BOU-001... for bottles, after the
-  // highest number in use (a reference of another shape, such as CIG-DEMO-01, is not counted).
+  // Next free reference of a series: CIG-001, CIG-002... for cigars, BOU-001... for bottles (champagne and the
+  // other drinks share that series, as the demo's BOU-DEMO-xx do), after the highest number in use (a reference
+  // of another shape, such as CIG-DEMO-01, is not counted).
   nextReference(category) {
     const prefix = category === 'cigare' ? 'CIG' : 'BOU';
     const numbered = new RegExp(`^${prefix}-(\\d+)$`, 'i');
@@ -3294,7 +3295,7 @@ export class Club {
   importCatalogItem(item) {
     if (item === null || typeof item !== 'object' || Array.isArray(item)) throw invalid('Fiche produit invalide.');
     const name = text(item.name, 'Nom du produit', { required: true, max: 80 }).normalize('NFC');
-    if (!['cigare', 'bouteille'].includes(item.category)) throw invalid('Catégorie invalide (cigare ou bouteille).');
+    if (!CATEGORIES.includes(item.category)) throw invalid('Catégorie invalide (cigare, champagne ou autre boisson).');
     const price = int(item.price, 'Prix de vente (en francs)', { min: 0, max: MAX_IMPORT_PRICE }) * 100;
     const description = item.description === undefined ? undefined : text(item.description, 'Description', { max: 300 });
     const photo = item.photo === undefined || item.photo === null ? null : decodePhoto(item.photo);
