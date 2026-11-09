@@ -32,6 +32,7 @@ import AuditJournal from './pages/AuditJournal.jsx';
 import Suppliers from './pages/Suppliers.jsx';
 import Supplier from './pages/Supplier.jsx';
 import PublicTicket, { isPublicTicketHash } from './pages/PublicTicket.jsx';
+import ClientApp from './client/ClientApp.jsx';
 import { api, setUnauthorizedHandler } from './lib/api.js';
 import { isDemoSpace, leaveDemo } from './lib/space.js';
 import { applyTheme } from './lib/theme.js';
@@ -117,7 +118,7 @@ async function boot() {
   }
 }
 
-export default function App() {
+function StaffApp() {
   // The receipt check is public: a customer has no account, so it is drawn whatever the session says and
   // follows the address bar (a scan, a typed number) without waiting for boot().
   const [hash, setHash] = useState(() => window.location.hash);
@@ -201,4 +202,10 @@ export default function App() {
       </HashRouter>
     </CrashBoundary>
   );
+}
+
+// /client is the client space: a separate application, with its own sign-in and its own API. Nothing of the staff
+// application runs there (no session check, no staff store, no demo header): the choice is made before StaffApp's hooks.
+export default function App() {
+  return window.location.pathname.startsWith('/client') ? <ClientApp /> : <StaffApp />;
 }

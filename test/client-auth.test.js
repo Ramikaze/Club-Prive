@@ -283,3 +283,19 @@ test('l’espace client va toujours au vrai club, même avec l’en-tête démo'
   // The staff's regular clients (/api/clients) are not the client space: they follow the header.
   assert.ok(!ALWAYS_REAL.test('/api/clients'));
 });
+
+test('le client reçoit le nom, la monnaie, le fuseau et les règles de réservation du club, rien d’autre', async () => {
+  const { server, code } = await setup();
+  const client = new Client(server);
+  const signedIn = ok(await signIn(client, '06 123 45 67', code));
+  const { booking } = server.club.settings();
+  const expected = {
+    name: 'Limen', currency: { label: 'FCFA', decimals: 0 }, timezone: 'Africa/Brazzaville',
+    booking: { slot_min: booking.slot_min, min_duration_min: booking.min_duration_min, weekend_min_duration_min: booking.weekend_min_duration_min },
+    room_capacity: server.club.rooms()[0].capacity,
+  };
+  assert.deepEqual(signedIn.club, expected);
+  assert.deepEqual(ok(await client.get('/api/client/me')).club, expected);
+  ok(await client.post('/api/client/password', { new_password: PASSWORD }));
+  assert.deepEqual(ok(await client.get('/api/client/me')).club, expected);
+});

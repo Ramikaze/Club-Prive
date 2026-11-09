@@ -15,17 +15,26 @@ import { clientLogin } from './clientAccess.js';
 const badCredentials = () => new AppError(401, 'IDENTIFIANTS', 'Identifiant ou mot de passe incorrect.');
 const passwordFirst = () => new AppError(403, 'MOT_DE_PASSE_A_CHOISIR', 'Choisissez d’abord votre mot de passe.');
 
-// What the client learns of himself on signing in and on GET /api/client/me, field by field.
-const me = ({ member, mustSetPassword }) => ({
-  must_set_password: mustSetPassword,
-  member: { first_name: member.first_name, last_name: member.last_name, member_no: member.member_no, kind: member.kind },
-});
-
 export function createClientRoutes({ club, helpers }) {
   const {
     routeTable, checkThrottle, recordFailure, clearFailures, dummyHash, readJson, checkCsrf, json, errorResponse, imageResponse, runClientWrite,
   } = helpers;
   const { add, match } = routeTable();
+
+  // What the client learns of himself on signing in and on GET /api/client/me, field by field: himself, and the club's
+  // name, currency, time zone and booking rules (the screens write money and dates, and offer durations, with them).
+  const me = ({ member, mustSetPassword }) => {
+    const { club_name: name, currency, timezone, booking } = club.settings();
+    return {
+      must_set_password: mustSetPassword,
+      member: { first_name: member.first_name, last_name: member.last_name, member_no: member.member_no, kind: member.kind },
+      club: {
+        name, currency: { label: currency.label, decimals: currency.decimals }, timezone,
+        booking: { slot_min: booking.slot_min, min_duration_min: booking.min_duration_min, weekend_min_duration_min: booking.weekend_min_duration_min },
+        room_capacity: club.rooms()[0]?.capacity ?? null,
+      },
+    };
+  };
   // The routes a session opened with the temporary code may reach.
   const BEFORE_PASSWORD = { beforePassword: true };
 
