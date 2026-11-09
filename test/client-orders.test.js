@@ -30,8 +30,8 @@ async function person(kind = 'client') {
   const m = ok(await ger.post(kind === 'client' ? '/api/clients' : '/api/members', { first_name: 'awa', last_name: `commande${n}`, phone }));
   const { code } = ok(await admin.post(`/api/members/${m.id}/client-access`, {}));
   const client = new Client(server);
-  ok(await client.post('/api/client/login', { login: phone, password: code }));
-  ok(await client.post('/api/client/password', { new_password: PASSWORD }));
+  ok(await client.post('/api/client/login', { login: m.member_no, password: code }));
+  ok(await client.post('/api/client/password', { login: `awa.commande${n}`, new_password: PASSWORD }));
   return { member: m, client };
 }
 const order = (who, lines, headers) => who.client.post('/api/client/orders', { lines }, headers);

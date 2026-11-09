@@ -32,8 +32,8 @@ async function person(kind = 'membre', { balance = 0 } = {}) {
   if (kind === 'membre' && balance) ok(await ger.post(`/api/members/${m.id}/wallet/recharge`, { amount: balance, method: 'Espèces' }));
   const { code } = ok(await admin.post(`/api/members/${m.id}/client-access`, {}));
   const client = new Client(server);
-  ok(await client.post('/api/client/login', { login: phone, password: code }));
-  ok(await client.post('/api/client/password', { new_password: PASSWORD }));
+  ok(await client.post('/api/client/login', { login: m.member_no, password: code }));
+  ok(await client.post('/api/client/password', { login: `awa.demande${n}`, new_password: PASSWORD }));
   return { member: m, client };
 }
 const confirm = (who, request, patch = {}) => ger.post('/api/reservations', {

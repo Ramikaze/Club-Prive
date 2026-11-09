@@ -24,19 +24,26 @@ export function waLink(digits, text) {
   return `https://wa.me/${clean(digits).replace(/\D/g, '')}?text=${encodeURIComponent(String(text ?? ''))}`;
 }
 
-// The message that gives a client his access to the client space: the address, his identifier and the temporary code
-// (valid 7 days, it only opens the « choose your password » screen). `url` is the space's address, `${origin}/client`.
-export function clientAccessText({ first_name, url, login, code }) {
+// The message that gives a client his access to the client space: the address, the identifier and the temporary code
+// (valid 7 days, it only opens the screen where he chooses his password, and his identifier if he has none yet).
+// `url` is the space's address, `${origin}/client`. Identifier not chosen yet: his member number is the provisional
+// identifier (never his phone). Already chosen (a renewed code): he may use it or his member number.
+export function clientAccessText({ first_name, url, member_no, code, login_chosen = false, login = '' }) {
   const name = clean(first_name);
+  const chosen = login_chosen && clean(login);
   return [
     name ? `Bonjour ${name},` : 'Bonjour,',
     '',
     'Votre espace client Limen est prêt : vous pouvez y commander à la Boutique et demander une réservation.',
     `Adresse : ${url}`,
-    `Identifiant : ${login}`,
+    ...(chosen
+      ? [`Identifiant : « ${clean(login)} » (ou votre numéro de membre ${clean(member_no)})`]
+      : [`Identifiant provisoire : ${clean(member_no)}`]),
     `Code provisoire : ${code} (valable 7 jours)`,
     '',
-    'À votre première connexion, vous choisirez votre mot de passe.',
+    chosen
+      ? 'Vous vous connectez avec ce code, puis vous choisirez un nouveau mot de passe.'
+      : 'Vous choisirez votre identifiant et votre mot de passe à la première connexion.',
     '',
     'L’équipe Limen',
   ].join('\n');

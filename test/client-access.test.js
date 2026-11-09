@@ -1,5 +1,6 @@
-// Client access from the staff side: the staff creates the access of a member or regular client (login = his
-// phone, temporary code shown once), renews the code, cuts and restores the access.
+// Client access from the staff side: the administrator or an associé creates the access of a member or regular client
+// (provisional identifier = his member number, temporary code shown once), renews the code and restores the access;
+// every staff member, the manager included, sees the access and may cut it.
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sha256Hex } from '../worker/auth.js';
@@ -17,12 +18,15 @@ async function setup(env = {}, opts = {}) {
   servers.push(server);
   await server.start();
   await server.addUser('proprietaire', 'Propriétaire', 'admin', 'mot-de-passe-proprio');
+  await server.addUser('cigares', 'Associé cigares', 'associe', 'mot-de-passe-associe', 'cigares');
   await server.addUser('gerant', 'Gérant', 'gerant', 'mot-de-passe-gerant');
   const admin = new Client(server);
   await admin.login('proprietaire', 'mot-de-passe-proprio');
+  const associate = new Client(server);
+  await associate.login('cigares', 'mot-de-passe-associe');
   const manager = new Client(server);
   await manager.login('gerant', 'mot-de-passe-gerant');
-  return { server, admin, manager };
+  return { server, admin, associate, manager };
 }
 
 let n = 0;
@@ -34,47 +38,90 @@ const addSession = (server, accountId) => server.club.run(
   `tok${++n}`, accountId,
 );
 
-test('créer l’accès : identifiant = téléphone normalisé, code de 8 caractères', async () => {
+test('créer l’accès : identifiant provisoire = numéro de membre en minuscules, code de 8 caractères', async () => {
   const { server, admin } = await setup();
   const m = await newMember(admin);
-  assert.equal(ok(await admin.get(`/api/members/${m.id}/client-access`)).state, 'aucun');
+  const none = ok(await admin.get(`/api/members/${m.id}/client-access`));
+  assert.equal(none.state, 'aucun');
+  assert.equal(none.login_chosen, false);
   const res = ok(await admin.post(`/api/members/${m.id}/client-access`, {}));
-  assert.equal(res.login, '242061234567');
+  assert.match(res.login, /^m-\d{4}$/);
+  assert.equal(res.login, m.member_no.toLowerCase());
   assert.match(res.code, CODE_RE);
   assert.equal(res.status.state, 'en_attente');
+  assert.equal(res.status.login_chosen, false);
   assert.ok(res.expires_at);
   const row = account(server, m.id);
+  assert.equal(row.login, m.member_no.toLowerCase());
+  assert.equal(row.login_chosen, 0);
   assert.ok(row.temp_hash.startsWith('pbkdf2-sha256$'));
   assert.ok(!row.temp_hash.includes(res.code));
   assert.equal(row.password_hash, null);
-  assert.equal(ok(await admin.get(`/api/members/${m.id}/client-access`)).login, '242061234567');
+  const status = ok(await admin.get(`/api/members/${m.id}/client-access`));
+  assert.equal(status.login, m.member_no.toLowerCase());
+  assert.equal(status.login_chosen, false);
 });
 
-test('le gérant peut créer un accès, pour un client régulier aussi', async () => {
-  const { manager } = await setup();
-  const c = await newClient(manager, '06 555 00 11');
-  const res = await manager.post(`/api/members/${c.id}/client-access`, {});
-  assert.equal(res.status, 200);
-  assert.equal(res.data.login, '242065550011');
+test('un associé crée l’accès d’un client régulier ; le téléphone de la fiche ne compte plus', async () => {
+  const { associate } = await setup();
+  const c = await newClient(associate, '06 555 00 11');
+  const res = ok(await associate.post(`/api/members/${c.id}/client-access`, {}));
+  assert.match(res.login, /^c-\d{4}$/);
+  assert.equal(res.login, c.member_no.toLowerCase());
+  // A file without a usable phone, or with the phone of another file, gets its access all the same.
+  const noPhone = await newMember(associate, '++++++');
+  assert.equal(ok(await associate.post(`/api/members/${noPhone.id}/client-access`, {})).login, noPhone.member_no.toLowerCase());
+  const twin = await newClient(associate, '+242 06 555 00 11');
+  assert.equal(ok(await associate.post(`/api/members/${twin.id}/client-access`, {})).login, twin.member_no.toLowerCase());
 });
 
-test('refus : deuxième accès, téléphone inutilisable, numéro déjà pris, fiche désactivée', async () => {
+test('le gérant ne crée pas d’accès, ne donne pas de code et ne rétablit pas ; il voit l’accès et le coupe', async () => {
+  const { server, admin, manager } = await setup();
+  const m = await newMember(manager);
+  const create = await manager.post(`/api/members/${m.id}/client-access`, {});
+  assert.equal(create.status, 403);
+  assert.equal(create.data.error.code, 'INTERDIT');
+  assert.equal(create.data.code, undefined);
+  assert.ok(!account(server, m.id));
+
+  ok(await admin.post(`/api/members/${m.id}/client-access`, {}));
+  const before = account(server, m.id);
+  const renew = await manager.post(`/api/members/${m.id}/client-access/code`, {});
+  assert.equal(renew.status, 403);
+  assert.equal(renew.data.error.code, 'INTERDIT');
+  assert.equal(account(server, m.id).temp_hash, before.temp_hash);
+
+  const seen = ok(await manager.get(`/api/members/${m.id}/client-access`));
+  assert.equal(seen.state, 'en_attente');
+  assert.equal(seen.login, m.member_no.toLowerCase());
+  assert.equal(seen.login_chosen, false);
+  assert.equal(ok(await manager.post(`/api/members/${m.id}/client-access/disable`, {})).state, 'coupe');
+  const enable = await manager.post(`/api/members/${m.id}/client-access/enable`, {});
+  assert.equal(enable.status, 403);
+  assert.equal(enable.data.error.code, 'INTERDIT');
+  assert.equal(ok(await manager.get(`/api/members/${m.id}/client-access`)).state, 'coupe');
+
+  const actions = server.club.all("SELECT action FROM audit_log WHERE action LIKE 'client.acces%' ORDER BY id").map((r) => r.action);
+  assert.deepEqual(actions, ['client.acces.creer', 'client.acces.couper']);
+});
+
+test('un associé renouvelle le code et rétablit l’accès', async () => {
+  const { server, admin, associate } = await setup();
+  const m = await newMember(admin);
+  ok(await admin.post(`/api/members/${m.id}/client-access`, {}));
+  assert.match(ok(await associate.post(`/api/members/${m.id}/client-access/code`, {})).code, CODE_RE);
+  assert.equal(ok(await associate.post(`/api/members/${m.id}/client-access/disable`, {})).state, 'coupe');
+  assert.equal(ok(await associate.post(`/api/members/${m.id}/client-access/enable`, {})).state, 'en_attente');
+  assert.equal(account(server, m.id).active, 1);
+});
+
+test('refus : deuxième accès, fiche désactivée', async () => {
   const { admin } = await setup();
   const m = await newMember(admin);
   ok(await admin.post(`/api/members/${m.id}/client-access`, {}));
   const again = await admin.post(`/api/members/${m.id}/client-access`, {});
   assert.equal(again.status, 409);
   assert.equal(again.data.error.code, 'ACCES_EXISTE');
-
-  const bad = await newMember(admin, '++++++');
-  const noPhone = await admin.post(`/api/members/${bad.id}/client-access`, {});
-  assert.equal(noPhone.status, 400);
-  assert.equal(noPhone.data.error.code, 'TELEPHONE');
-
-  const twin = await newClient(admin, '+242 06 123 45 67');
-  const taken = await admin.post(`/api/members/${twin.id}/client-access`, {});
-  assert.equal(taken.status, 409);
-  assert.equal(taken.data.error.code, 'IDENTIFIANT_PRIS');
 
   const off = await newMember(admin, '06 999 88 77');
   ok(await admin.post(`/api/members/${off.id}/deactivate`, { reason: 'Départ' }));
@@ -94,24 +141,34 @@ test('le journal ne contient jamais le code', async () => {
   assert.deepEqual(rows.map((r) => r.action), ['client.acces.creer', 'client.acces.code', 'client.acces.couper', 'client.acces.retablir']);
   for (const r of rows) {
     for (const code of codes) assert.ok(!r.details.includes(code));
-    assert.ok(r.details.includes('242061234567'));
+    assert.ok(r.details.includes(m.member_no.toLowerCase()));
   }
 });
 
-test('nouveau code : l’ancien mot de passe et les sessions disparaissent', async () => {
+test('nouveau code : l’ancien mot de passe et les sessions disparaissent, l’identifiant reste', async () => {
   const { server, admin } = await setup();
   const m = await newMember(admin);
   const first = ok(await admin.post(`/api/members/${m.id}/client-access`, {}));
   const acc = account(server, m.id);
-  server.club.run("UPDATE client_accounts SET password_hash = 'x', temp_hash = NULL WHERE id = ?", acc.id);
+  server.club.run("UPDATE client_accounts SET login = 'jean.m', login_chosen = 1, password_hash = 'x', temp_hash = NULL WHERE id = ?", acc.id);
   addSession(server, acc.id);
-  assert.equal(ok(await admin.get(`/api/members/${m.id}/client-access`)).state, 'actif');
+  const active = ok(await admin.get(`/api/members/${m.id}/client-access`));
+  assert.equal(active.state, 'actif');
+  assert.equal(active.login, 'jean.m');
+  assert.equal(active.login_chosen, true);
+  // The file's phone changes: the identifier does not follow it.
+  ok(await admin.put(`/api/members/${m.id}`, { phone: '06 777 66 55' }));
   const second = ok(await admin.post(`/api/members/${m.id}/client-access/code`, {}));
   assert.match(second.code, CODE_RE);
   assert.notEqual(second.code, first.code);
+  assert.equal(second.login, 'jean.m');
   assert.equal(second.status.state, 'en_attente');
+  assert.equal(second.status.login_chosen, true);
   assert.equal(server.club.get('SELECT COUNT(*) AS n FROM client_sessions').n, 0);
-  assert.equal(account(server, m.id).password_hash, null);
+  const row = account(server, m.id);
+  assert.equal(row.password_hash, null);
+  assert.equal(row.login, 'jean.m');
+  assert.equal(row.login_chosen, 1);
 });
 
 test('couper l’accès ferme les sessions, le rétablir le rend', async () => {

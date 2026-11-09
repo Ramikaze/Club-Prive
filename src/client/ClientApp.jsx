@@ -124,15 +124,17 @@ function Message({ title, text, action, onAction }) {
 }
 
 export default function ClientApp() {
-  // phase: boot | login | password (the temporary code opened the session) | ready | offline
+  // phase: boot | login | password (the identifier and/or the password are still to choose) | ready | offline
   const [phase, setPhase] = useState('boot');
+  const [choose, setChoose] = useState({ mustSetPassword: true, login: null });
   const [session, setSession] = useState(null);
   const [error, setError] = useState(null);
 
   const enter = (me) => {
     applyClub(me.club);
     setSession({ member: me.member, club: me.club });
-    setPhase(me.must_set_password ? 'password' : 'ready');
+    setChoose({ mustSetPassword: Boolean(me.must_set_password), login: me.login ?? null });
+    setPhase(me.must_set_password || me.login_chosen === false ? 'password' : 'ready');
   };
   const leave = () => {
     setSession(null);
@@ -143,7 +145,11 @@ export default function ClientApp() {
   useEffect(() => {
     applyClientTheme();
     applyClientManifest();
-    setClientHandlers({ signedOut: leave, passwordFirst: () => setPhase('password') });
+    // A 403 « to choose first » (identifier or password): ask the server which, then show that screen.
+    setClientHandlers({
+      signedOut: leave,
+      passwordFirst: () => { clientApi.get('/api/client/me').then(enter, () => {}); },
+    });
     let cancelled = false;
     clientApi.get('/api/client/me').then((me) => { if (!cancelled) enter(me); }, (e) => {
       if (cancelled || e.status === 401) return;
@@ -158,7 +164,7 @@ export default function ClientApp() {
   else if (phase === 'offline') {
     screen = <Message title="Serveur injoignable" text={error?.message} action="Réessayer" onAction={() => window.location.reload()} />;
   } else if (phase === 'login') screen = <ClientLogin onSignedIn={enter} />;
-  else if (phase === 'password') screen = <ClientPassword first onDone={enter} />;
+  else if (phase === 'password') screen = <ClientPassword first mustSetPassword={choose.mustSetPassword} login={choose.login} onDone={enter} onLogout={leave} />;
   else {
     screen = (
       <HashRouter>

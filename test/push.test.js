@@ -137,8 +137,8 @@ test('secrets VAPID collés avec des espaces : clé et signature valides', async
     const m = ok(await ger.post('/api/clients', { first_name: 'awa', last_name: 'colle', phone: '06 790 00 00' }));
     const { code } = ok(await admin.post(`/api/members/${m.id}/client-access`, {}));
     const client = new Client(padded);
-    ok(await client.post('/api/client/login', { login: '06 790 00 00', password: code }));
-    ok(await client.post('/api/client/password', { new_password: 'mon-mot-de-passe-client' }));
+    ok(await client.post('/api/client/login', { login: m.member_no, password: code }));
+    ok(await client.post('/api/client/password', { login: 'awa.colle', new_password: 'mon-mot-de-passe-client' }));
     globalThis.fetch = async (url, init) => {
       calls.push({ url: String(url), init });
       return new Response(null, { status: 201 });
@@ -197,8 +197,8 @@ async function person(kind = 'client') {
   const m = ok(await ger.post(kind === 'client' ? '/api/clients' : '/api/members', { first_name: 'awa', last_name: `push${n}`, phone }));
   const { code } = ok(await admin.post(`/api/members/${m.id}/client-access`, {}));
   const client = new Client(server);
-  ok(await client.post('/api/client/login', { login: phone, password: code }));
-  ok(await client.post('/api/client/password', { new_password: PASSWORD }));
+  ok(await client.post('/api/client/login', { login: m.member_no, password: code }));
+  ok(await client.post('/api/client/password', { login: `awa.push${n}`, new_password: PASSWORD }));
   return { member: m, client, name: `${m.first_name} ${m.last_name}` };
 }
 const order = (who, lines, headers) => who.client.post('/api/client/orders', { lines }, headers);

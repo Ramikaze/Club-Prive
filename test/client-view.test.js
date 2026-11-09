@@ -18,12 +18,13 @@ let bruno;
 
 const tomorrowOf = (day) => new Date(Date.parse(`${day}T12:00:00Z`) + 86400000).toISOString().slice(0, 10);
 
-// Opens a client access for the member and signs him in with a password of his own, on a client of his own.
-async function signedIn(memberId, phone) {
-  const { code } = ok(await admin.post(`/api/members/${memberId}/client-access`, {}));
+// Opens a client access for the member (the administrator), signs him in with his member number and the code, and lets
+// him choose his identifier and a password of his own, on a client of his own.
+async function signedIn(member, login) {
+  const { code } = ok(await admin.post(`/api/members/${member.id}/client-access`, {}));
   const client = new Client(server);
-  ok(await client.post('/api/client/login', { login: phone, password: code }));
-  ok(await client.post('/api/client/password', { new_password: PASSWORD }));
+  ok(await client.post('/api/client/login', { login: member.member_no, password: code }));
+  ok(await client.post('/api/client/password', { login, new_password: PASSWORD }));
   return client;
 }
 
@@ -52,8 +53,8 @@ before(async () => {
   const saleB = await sell(b.id);
   alice = { member: a, rechargeId: recharge.payment_id ?? recharge.payment?.id, saleId: saleA.payment?.id };
   bruno = { member: b, saleId: saleB.payment?.id };
-  alice.client = await signedIn(a.id, '06 111 11 11');
-  bruno.client = await signedIn(b.id, '06 222 22 22');
+  alice.client = await signedIn(a, 'alice.vue');
+  bruno.client = await signedIn(b, 'bruno.autre');
 });
 after(() => server.destroy());
 
@@ -86,7 +87,7 @@ test('compte d’un membre : crédit carte, abonnement, séance en cours', async
 
 test('compte d’un client régulier : ce qu’il doit, plafond, disponible', async () => {
   const c = ok(await manager.post('/api/clients', { first_name: 'awa', last_name: 'credit', phone: '06 333 33 33' }));
-  const client = await signedIn(c.id, '06 333 33 33');
+  const client = await signedIn(c, 'awa.credit');
   assert.equal(ok(await client.get('/api/client/account')).credit, null);
   ok(await admin.put(`/api/clients/${c.id}/credit-limit`, { credit_limit: 60000 * UM }));
   ok(await manager.post('/api/shop/sales', {
@@ -214,7 +215,7 @@ test('copie client : notée à part, ne change pas les duplicatas', async () => 
 test('vente payée par carte puis annulée : un seul remboursement dans l’historique', async () => {
   const c = ok(await manager.post('/api/members', { first_name: 'carla', last_name: 'rembourse', phone: '06 444 44 44' }));
   ok(await manager.post(`/api/members/${c.id}/wallet/recharge`, { amount: 100000 * UM, method: 'Espèces' }));
-  const client = await signedIn(c.id, '06 444 44 44');
+  const client = await signedIn(c, 'carla.rembourse');
   const sale = await sell(c.id, { card: true, method: undefined });
   assert.equal(sale.payment.card_amount, 20000 * UM);
   ok(await admin.post(`/api/shop/sales/${sale.sale.id}/cancel`, { reason: 'Erreur de rayon' }));
@@ -235,7 +236,7 @@ test('vente payée par carte puis annulée : un seul remboursement dans l’hist
 test('repas commandé à l’extérieur payé par carte : dans l’historique, sans le libellé du personnel', async () => {
   const d = ok(await manager.post('/api/members', { first_name: 'dora', last_name: 'repas', phone: '06 555 55 55' }));
   ok(await manager.post(`/api/members/${d.id}/wallet/recharge`, { amount: 100000 * UM, method: 'Espèces' }));
-  const client = await signedIn(d.id, '06 555 55 55');
+  const client = await signedIn(d, 'dora.repas');
   const meal = ok(await manager.post(`/api/members/${d.id}/outside-meal`, { amount: 15000 * UM, label: 'Pizzeria Secrète' })).payment;
   assert.equal(ok(await client.get('/api/client/account')).wallet.balance, 85000 * UM);
   const history = ok(await client.get('/api/client/history'));
@@ -262,7 +263,7 @@ test('repas commandé à l’extérieur payé par carte : dans l’historique, s
 test('acompte d’une demande : rien à payer quand la carte le couvre', async () => {
   const room = server.club.get('SELECT id FROM rooms LIMIT 1').id;
   const e = ok(await manager.post('/api/members', { first_name: 'eva', last_name: 'acompte', phone: '06 666 66 66' }));
-  const client = await signedIn(e.id, '06 666 66 66');
+  const client = await signedIn(e, 'eva.acompte');
   const id = server.club.run(
     `INSERT INTO reservation_requests (member_id, room_id, date, start_time, duration_min, party_size, status, created_at)
      VALUES (?, ?, ?, '14:00', 180, 2, 'en_attente', ?)`, e.id, room, tomorrowOf(tomorrowOf(today)), new Date().toISOString(),
