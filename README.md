@@ -55,6 +55,8 @@ Ouvrir ensuite `http://localhost:5173`. Les appels `/api` sont transmis au serve
 - **Produits et caisse** : cigares et bouteilles, avec leur photo (les administrateurs l’ajoutent, la changent ou la retirent depuis la fiche du produit), entrées de stock, ventes liées aux réservations, encaissements, remboursements et ventilation par activité. Chaque encaissement donne un ticket de caisse (voir « Ticket de caisse »).
 - **Administration** : dépenses, trésorerie, grand livre, clôtures mensuelles, rôles, journal d’audit, paramètres et exports Excel.
 - **Carte de débit** : un crédit en FCFA approvisionné sur la carte du membre, qui paie les consommations, les salles et le renouvellement de l’abonnement (voir « Carte de débit »).
+- **Espace client** : les membres et les clients réguliers ont leur propre espace sur téléphone, à l’adresse `/client` (voir « Espace client »).
+- **Commandes** : page du personnel qui reçoit les commandes Boutique et les demandes de réservation des clients (voir « Espace client »).
 - **Mode démo** : un espace d’entraînement qui part d’une base vide, séparé du vrai club.
 
 ### Réservations et salles
@@ -101,6 +103,28 @@ Chaque membre a, en plus de son temps de salle, un **crédit en FCFA** : il appa
 - **Imprimer la carte** : « Imprimer la carte » (page « Carte & QR ») imprime le **recto** (logo The Limen, nom, numéro) et le **verso** (QR code) côte à côte, au format carte bancaire (85,6 × 54 mm), sans effet 3D. Une carte désactivée n’imprime que son recto.
 - **Mode démo** : tout fonctionne dans la démo (approvisionnement, paiement par la carte, renouvellement) sans toucher au vrai club ; WhatsApp y montre le message sans rien ouvrir.
 
+### Espace client
+
+Les membres et les clients réguliers (qu’ils achètent à crédit ou non) peuvent avoir un accès à leur espace, à l’adresse `/client` du site (pensé pour le téléphone).
+
+- **Créer l’accès** : le personnel l’ouvre depuis la fiche du client, qui affiche un code provisoire. Il l’envoie au client sur WhatsApp. Au premier passage, le client entre ce code puis choisit lui-même son mot de passe ; le code provisoire ne sert plus ensuite.
+- **Ce que voit le client** : pour un membre, son crédit carte, les heures qui restent sur son abonnement et sa date de fin, le temps qui reste dans sa séance en cours et ses réservations ; pour un client régulier : ce qu’il doit, son plafond et son crédit disponible. Chacun voit son historique avec ses tickets (à imprimer ou à télécharger).
+- **Ce qu’il peut faire** : demander une réservation (le personnel la confirme ou la refuse) et commander des produits de la Boutique. Une commande n’est pas payée en ligne : le client la retire et la règle au club.
+- **Page « Commandes » du personnel** : liste les commandes Boutique et les demandes de réservation, avec un compteur des éléments à traiter. « Encaisser » règle une commande au comptoir (elle devient « Retirée » côté client) ; une demande de réservation se confirme ou se refuse.
+
+#### Notifications push du personnel
+
+Chaque appareil du personnel peut être prévenu d’une nouvelle commande ou demande. Cela demande trois secrets du Worker, à créer une seule fois sur l’ordinateur du propriétaire :
+
+```sh
+node scripts/vapid-keys.mjs mailto:adresse@du-club.com
+npx wrangler secret put VAPID_PUBLIC_KEY
+npx wrangler secret put VAPID_PRIVATE_KEY
+npx wrangler secret put VAPID_SUBJECT
+```
+
+Le script affiche les trois valeurs ; coller chacune quand `wrangler` la demande. La clé privée n’est écrite dans aucun fichier et ne doit jamais entrer dans le dépôt (public). Sans ces secrets, tout fonctionne sauf les notifications. Ensuite, chaque membre du personnel les active sur chaque appareil depuis la page « Commandes » (sur iPhone, ajouter d’abord le site à l’écran d’accueil). Générer une nouvelle paire oblige chaque appareil à les réactiver.
+
 ### Mode démo (entraînement)
 
 Le mode démo est un espace d’entraînement intégré au site : on y apprend l’application, ou on essaie une manipulation, sans risque pour le vrai club. Il a sa **propre base de données**. Il part d’une **base vide** : aucun client, aucune réservation, aucun encaissement, aucune dépense ni historique de trésorerie, pour essayer le déroulement du début à la fin. On y retrouve le **catalogue réel du club** (les mêmes produits, avec leurs photos et un stock fictif de 10 pour chacun, pour pouvoir vendre tout de suite). Il reprend aussi les réglages du club : prix, formules, salles, moyens de paiement et catégories.
@@ -117,7 +141,7 @@ Le mode démo est un espace d’entraînement intégré au site : on y apprend l
 
 React 18 + Vite, React Router et Zustand pour l’interface. L’API tourne dans un **Cloudflare Worker**, avec SQLite dans un **Durable Object** ; un second Durable Object, avec sa propre base, porte le mode démo. La même logique métier s’exécute dans les tests Node.
 
-- `worker/schema.js` : migrations transactionnelles et contraintes SQL. La v2 ajoutait les caves et leurs relevés (tables gardées en base, plus utilisées par l’application) ; la v3 supprime les anciennes tables de casiers ; la v4 ajoute salles et participants ; la v5 conserve les salles retirées pour l’historique et met à niveau les premières bases v4 sans table de participants.
+- `worker/schema.js` : migrations transactionnelles et contraintes SQL. La v2 ajoutait les caves et leurs relevés (tables gardées en base, plus utilisées par l’application) ; la v3 supprime les anciennes tables de casiers ; la v4 ajoute salles et participants ; la v5 conserve les salles retirées pour l’historique et met à niveau les premières bases v4 sans table de participants ; la v24 ajoute l’espace client (accès, commandes, demandes de réservation et abonnements aux notifications).
 - `worker/api.js` : authentification, contrôle des rôles, vérification des origines et idempotence.
 - `worker/club.js`, `worker/ledger.js` : règles métier côté serveur.
 - `worker/space.js` : aiguille chaque requête vers le vrai club ou vers la démo (en-tête `X-Club-Espace`). La session reste celle du vrai club, qui garantit à la démo l’identité de la personne connectée ; la démo n’ouvre jamais de session.

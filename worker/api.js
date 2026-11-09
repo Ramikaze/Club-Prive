@@ -11,8 +11,10 @@ import { Club } from './club.js';
 import { migrate } from './schema.js';
 import { DEMO_ACCOUNTS } from './seed.js';
 import { AppError, forbidden, invalid, conflict, notSignedIn } from './errors.js';
-import { hashPassword, verifyPassword, sha256Hex, newToken, checkPasswordStrength, parseCookies } from './auth.js';
+import { hashPassword, verifyPassword, sha256Hex, newToken, newClientCode, checkPasswordStrength, parseCookies } from './auth.js';
 import { ALWAYS_REAL } from './space.js';
+import { createClientRoutes } from './clientApi.js';
+import { sendWebPush, PUSH_TIMEOUT_MS } from './push.js';
 import { isBoss } from '../shared/roles.js';
 
 const MAX_BODY = 256 * 1024;
@@ -31,6 +33,21 @@ function json(status, payload, { cookies = [], replayed = false } = {}) {
   for (const c of cookies) headers.append('Set-Cookie', c);
   if (replayed) headers.set('Idempotent-Replayed', 'true');
   return new Response(JSON.stringify(payload ?? null), { status, headers });
+}
+
+// A photo never changes at its address (the version in it changes with the photo): kept a year, by the signed-in
+// browser alone. This answer's Cache-Control replaces the no-store of the other answers. It is a picture and nothing
+// else: opened as a page, it would be allowed to load and run nothing.
+function imageResponse({ mime, data }) {
+  return new Response(data, {
+    status: 200,
+    headers: {
+      ...SECURITY_HEADERS,
+      'Content-Type': mime,
+      'Cache-Control': 'private, max-age=31536000, immutable',
+      'Content-Security-Policy': "default-src 'none'; sandbox",
+    },
+  });
 }
 
 function errorResponse(err) {
@@ -62,17 +79,65 @@ async function readJson(request, limit = MAX_BODY) {
   }
 }
 
+// A route table: `add` registers a method and a path (its `:name` parts become `params`), `match` finds the route of a
+// request: null for an unknown path, 405 for a known path asked with another method. The staff's routes and the
+// client's (worker/clientApi.js) each have their own.
+function routeTable() {
+  const routes = [];
+  const add = (method, pattern, opts, handler) => {
+    const keys = [];
+    const re = new RegExp(`^${pattern.replace(/:(\w+)/g, (_, k) => { keys.push(k); return '([^/]+)'; })}$`);
+    routes.push({ method, re, keys, opts, handler });
+  };
+  const match = (method, pathname) => {
+    let pathMatched = false;
+    for (const r of routes) {
+      const m = r.re.exec(pathname);
+      if (!m) continue;
+      pathMatched = true;
+      if (r.method !== method) continue;
+      let params;
+      try {
+        params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
+      } catch {
+        throw invalid('Adresse invalide.');
+      }
+      return { route: r, params };
+    }
+    if (pathMatched) throw new AppError(405, 'METHODE', 'Méthode non autorisée.');
+    return null;
+  };
+  return { add, match };
+}
+
+// The client space's paths (worker/clientApi.js): served by their own route table, with their own sessions.
+const CLIENT_PATH = /^\/api\/client(\/|$)/;
+
 // `demo`: this API is the demo space's. Everything that differs there (accounts refused, exported file
 // names, the reset route, the two entry points below) follows this option, never `club.demo`, which
 // the tests also set on a real club to relax the tariffs.
-export function createApi({ db, env = {}, demo = false }) {
+// `sendPush(subscription, message)`: sends one notification to one staff device and gives { status }. The tests pass a
+// recorder; otherwise it is Web Push (worker/push.js) with the three VAPID secrets, and without them nothing is sent.
+export function createApi({ db, env = {}, demo = false, sendPush: pushSender = null }) {
   migrate(db);
   const club = new Club(db, { demo });
   club.bootstrap();
 
+  // The secrets are pasted by hand: a space or a line break around a value would break every send (and the key the
+  // devices subscribe with), so each is trimmed once here.
+  const [vapidPublic, vapidPrivate, vapidSubject] = [env.VAPID_PUBLIC_KEY, env.VAPID_PRIVATE_KEY, env.VAPID_SUBJECT]
+    .map((v) => String(v ?? '').trim());
+  const vapid = vapidPublic && vapidPrivate && vapidSubject
+    ? { publicKey: vapidPublic, privateKey: vapidPrivate, subject: vapidSubject }
+    : null;
+  // The demo space never sends: its accounts are the real club's, and so would be the devices told of a fictitious order.
+  const sendPush = demo ? null : pushSender ?? (vapid ? (subscription, message) => sendWebPush(subscription, message, vapid) : null);
+
   const allowedOrigins = String(env.ALLOWED_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   const throttle = new Map();
-  let dummyHash = null;
+  let dummyHashPromise = null;
+  // A password hash no account has: an unknown login is checked against it, so the answer takes as long as for a real one.
+  const dummyHash = () => (dummyHashPromise ??= hashPassword('mot-de-passe-factice-pour-egaliser-le-temps'));
 
   // Five failures in a row lock the key (address + login) for one minute.
   const checkThrottle = (key) => {
@@ -84,6 +149,7 @@ export function createApi({ db, env = {}, demo = false }) {
     throttle.set(key, { fails: fails >= 5 ? 0 : fails, until: fails >= 5 ? Date.now() + 60000 : 0 });
     if (throttle.size > 5000) throttle.clear();
   };
+  const clearFailures = (key) => throttle.delete(key);
 
   // Hashes a new password after the strength check (the business layer only stores hashes).
   const preparePassword = async (ctx, field) => {
@@ -91,6 +157,14 @@ export function createApi({ db, env = {}, demo = false }) {
     if (weak) throw invalid(weak);
     ctx.passwordHash = await hashPassword(ctx.body[field]);
   };
+  // A temporary client code: shown once to the staff member, only its hash is kept. Valid 7 days.
+  const prepareClientCode = async (ctx) => {
+    ctx.tempCode = newClientCode();
+    ctx.tempHash = await hashPassword(ctx.tempCode);
+  };
+  const CLIENT_CODE_DAYS = 7;
+  const clientCode = (ctx) => ({ tempHash: ctx.tempHash, expiresAt: new Date(club.nowMs() + CLIENT_CODE_DAYS * 86400000).toISOString() });
+  const clientCodeAnswer = (ctx, res) => ({ ...res, code: ctx.tempCode, expires_at: res.status.temp_expires_at });
   const prepareSession = async (ctx) => {
     ctx.newToken = newToken();
     ctx.newTokenHash = await sha256Hex(ctx.newToken);
@@ -102,12 +176,7 @@ export function createApi({ db, env = {}, demo = false }) {
     return club.bundle(res.user);
   };
 
-  const routes = [];
-  const add = (method, pattern, opts, handler) => {
-    const keys = [];
-    const re = new RegExp(`^${pattern.replace(/:(\w+)/g, (_, k) => { keys.push(k); return '([^/]+)'; })}$`);
-    routes.push({ method, re, keys, opts, handler });
-  };
+  const { add, match } = routeTable();
   const ADMIN = { roles: ['admin'] };
   // Club management: the administrator and the associés (ADMIN stays for the application itself).
   const CLUB = { roles: ['admin', 'associe'] };
@@ -131,8 +200,7 @@ export function createApi({ db, env = {}, demo = false }) {
       const key = `${ctx.ip}|${String(ctx.body.login ?? '').trim().toLowerCase().slice(0, 41)}`;
       checkThrottle(key);
       const user = club.userByLogin(ctx.body.login);
-      dummyHash ??= hashPassword('mot-de-passe-factice-pour-egaliser-le-temps');
-      const valid = await verifyPassword(String(ctx.body.password ?? ''), user?.password_hash ?? await dummyHash);
+      const valid = await verifyPassword(String(ctx.body.password ?? ''), user?.password_hash ?? await dummyHash());
       if (!user || !valid || !user.active) {
         recordFailure(key);
         throw new AppError(401, 'IDENTIFIANTS', 'Identifiant ou mot de passe incorrect.');
@@ -260,6 +328,13 @@ export function createApi({ db, env = {}, demo = false }) {
   add('POST', '/api/clients', {}, (ctx) => club.createClient(ctx.user, ctx.body));
   // Open to every signed-in user: the rights (gérant, or the boss of the rayon) are checked inside.
   add('POST', '/api/shop/sales', {}, (ctx) => club.createShopSale(ctx.user, ctx.body));
+  // Orders placed by the clients (worker/clientOrders.js): every staff member sees them all; the counter turns one into
+  // a Boutique sale (POST /api/shop/sales with order_id).
+  add('GET', '/api/orders', {}, (ctx) => club.staffOrders(ctx.user));
+  add('POST', '/api/reservation-requests/:id/refuse', {}, (ctx) => club.refuseRequest(ctx.user, ctx.params.id, ctx.body));
+  add('POST', '/api/orders/:id/ready', {}, (ctx) => club.markOrderReady(ctx.user, ctx.params.id));
+  add('POST', '/api/orders/:id/cancel', {}, (ctx) => club.cancelOrder(ctx.user, ctx.params.id, ctx.body));
+  add('POST', '/api/orders/:id/close', {}, (ctx) => club.closeOrder(ctx.user, ctx.params.id));
   add('POST', '/api/shop/sales/:id/cancel', {}, (ctx) => club.cancelShopSale(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/clients/:id/convert', {}, (ctx) => club.convertClient(ctx.user, ctx.params.id));
   // Credit of the regular clients (worker/credit.js): the account and the settlements are open to every signed-in user
@@ -274,6 +349,14 @@ export function createApi({ db, env = {}, demo = false }) {
   add('PUT', '/api/members/:id', {}, (ctx) => club.updateMember(ctx.user, ctx.params.id, ctx.body));
   // Members are deactivated, never deleted: their payments and transactions stay in the books.
   add('POST', '/api/members/:id/deactivate', {}, (ctx) => club.deactivateMember(ctx.user, ctx.params.id, ctx.body));
+  // Client space access, handed out by the staff (every role); the temporary code is returned once, never logged.
+  add('GET', '/api/members/:id/client-access', { ...ACCOUNTS }, (ctx) => club.clientAccessStatus(club.fileRow(ctx.params.id).id));
+  add('POST', '/api/members/:id/client-access', { ...ACCOUNTS, noIdempotency: true, prepare: prepareClientCode },
+    (ctx) => clientCodeAnswer(ctx, club.createClientAccess(ctx.user, ctx.params.id, clientCode(ctx))));
+  add('POST', '/api/members/:id/client-access/code', { ...ACCOUNTS, noIdempotency: true, prepare: prepareClientCode },
+    (ctx) => clientCodeAnswer(ctx, club.renewClientCode(ctx.user, ctx.params.id, clientCode(ctx))));
+  add('POST', '/api/members/:id/client-access/disable', { ...ACCOUNTS }, (ctx) => club.setClientAccessActive(ctx.user, ctx.params.id, false));
+  add('POST', '/api/members/:id/client-access/enable', { ...ACCOUNTS }, (ctx) => club.setClientAccessActive(ctx.user, ctx.params.id, true));
   add('POST', '/api/members/:id/reactivate', {}, (ctx) => club.reactivateMember(ctx.user, ctx.params.id));
   add('POST', '/api/members/:id/subscriptions', {}, (ctx) => club.activateSubscription(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/subscriptions/:id/cancel', CLUB, (ctx) => club.cancelSubscription(ctx.user, ctx.params.id, ctx.body));
@@ -389,6 +472,15 @@ export function createApi({ db, env = {}, demo = false }) {
   add('POST', '/api/closings', CLUB, (ctx) => club.closeMonth(ctx.user, ctx.body));
   add('POST', '/api/closings/:month/reopen', CLUB, (ctx) => club.reopenMonth(ctx.user, ctx.params.month, ctx.body));
 
+  // Push notifications on the staff's devices (worker/push.js): the public key a browser subscribes with (null while the
+  // VAPID secrets are missing: notifications are off), and the device's subscription, kept for the signed-in account. Any
+  // role may subscribe a device; pushRecipients decides who is told (never the administrator). The real club's alone.
+  if (!demo) {
+    add('GET', '/api/push/key', {}, () => ({ key: vapid?.publicKey ?? null }));
+    add('POST', '/api/push/subscriptions', {}, (ctx) => club.subscribePush(ctx.user, ctx.body));
+    add('DELETE', '/api/push/subscriptions', {}, (ctx) => club.unsubscribePush(ctx.user, ctx.body));
+  }
+
   // Products & stock
   add('GET', '/api/products', {}, (ctx) => club.listProducts({ includeInactive: ctx.query.all === '1' }));
   add('POST', '/api/products', CLUB, (ctx) => club.createProduct(ctx.user, ctx.body));
@@ -401,25 +493,6 @@ export function createApi({ db, env = {}, demo = false }) {
   add('DELETE', '/api/products/:id/photo', { ...CLUB, ...PHOTOS }, (ctx) => club.removeProductPhoto(ctx.user, ctx.params.id));
   add('GET', '/api/stock-movements', {}, (ctx) => club.stockMovements(ctx.query));
 
-  function match(method, pathname) {
-    let pathMatched = false;
-    for (const r of routes) {
-      const m = r.re.exec(pathname);
-      if (!m) continue;
-      pathMatched = true;
-      if (r.method !== method) continue;
-      let params;
-      try {
-        params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
-      } catch {
-        throw invalid('Adresse invalide.');
-      }
-      return { route: r, params };
-    }
-    if (pathMatched) throw new AppError(405, 'METHODE', 'Méthode non autorisée.');
-    return null;
-  }
-
   // Cross-site writes are refused: browsers cannot send application/json cross-origin without a
   // CORS preflight (which this API never grants), and a present Origin must be this site.
   function checkCsrf(request, url) {
@@ -429,11 +502,108 @@ export function createApi({ db, env = {}, demo = false }) {
     if (origin && origin !== url.origin && !allowedOrigins.includes(origin)) throw forbidden('Requête refusée : origine inconnue.');
   }
 
+  // Every write, the staff's (handle) and the client's (worker/clientApi.js), runs here; `records` says where the
+  // idempotency records of `ownerId` (the staff account, or the client access) are kept. With an Idempotency-Key, a retry
+  // of a write that already succeeded is answered from its record at once (`replayed`), without redoing the preparation;
+  // the same key with other data is refused. Otherwise the route's preparation runs, then the handler and the record in
+  // one transaction: the whole write commits or rolls back as one unit. A route that answers a secret shown once
+  // (noIdempotency) never records nor replays: the answer would sit in the table. Once the transaction has committed, the
+  // notifications the handler queued in `ctx.after` go out (notify); a replay, which runs no handler, queues none.
+  async function runWrite(request, url, route, ctx, records, ownerId) {
+    const key = route.opts.noIdempotency ? undefined : request.headers.get('idempotency-key') ?? undefined;
+    if (key !== undefined && !/^[A-Za-z0-9_-]{8,100}$/.test(key)) throw invalid("Clé d'idempotence invalide.");
+    const hash = key && ownerId ? await sha256Hex(JSON.stringify([request.method, url.pathname, ctx.body])) : null;
+    const replay = () => {
+      const prev = club.get(records.find, key, ownerId);
+      if (!prev) return undefined;
+      if (prev.request_hash !== hash) {
+        throw new AppError(422, 'CLE_REUTILISEE', "Cette opération a déjà été enregistrée avec d'autres données. Rechargez la page.");
+      }
+      return JSON.parse(prev.response);
+    };
+    if (hash) {
+      const previous = replay();
+      if (previous !== undefined) return { payload: previous, replayed: true };
+    }
+    if (route.opts.prepare) await route.opts.prepare(ctx);
+    let replayed = false;
+    const payload = club.tx(() => {
+      if (!hash) return route.handler(ctx);
+      const previous = replay();
+      if (previous !== undefined) {
+        replayed = true;
+        return previous;
+      }
+      const result = route.handler(ctx);
+      club.run(records.insert, key, ownerId, hash, JSON.stringify(result ?? null), new Date().toISOString());
+      return result;
+    });
+    if (!replayed) await notify(ctx.after).catch((err) => console.error('Notifications push :', err));
+    return { payload, replayed };
+  }
+
+  // The notifications a committed write queued: each is a function, called now, that gives the messages to send
+  // ([{ userIds, title, body, url }]). Every device of every recipient is sent its message, all at once, and the answer
+  // waits for them PUSH_TIMEOUT_MS at most. Nothing here fails the write nor throws: an error is logged (never a key, nor
+  // a device's address beyond its push service), and a device its push service no longer knows (404, 410) is forgotten.
+  async function notify(after) {
+    if (!sendPush || !after?.length) return;
+    const sends = [];
+    for (const messages of after) {
+      try {
+        for (const { userIds, title, body, url } of messages()) {
+          for (const subscription of club.pushSubscriptionsOf(userIds)) sends.push(pushOne(subscription, { title, body, url }));
+        }
+      } catch (err) {
+        console.error('Notifications push non préparées :', err);
+      }
+    }
+    if (!sends.length) return;
+    let timer;
+    const late = new Promise((resolve) => { timer = setTimeout(() => resolve(true), PUSH_TIMEOUT_MS); });
+    const timedOut = await Promise.race([Promise.allSettled(sends).then(() => false), late]);
+    clearTimeout(timer);
+    if (timedOut) console.error(`Notifications push : pas de réponse en ${PUSH_TIMEOUT_MS / 1000} s, la réponse part sans les attendre.`);
+  }
+
+  async function pushOne(subscription, message) {
+    let service = 'un service de notification';
+    try {
+      service = new URL(subscription.endpoint).origin;
+      const status = (await sendPush(subscription, message))?.status;
+      if (status === 404 || status === 410) club.forgetPushSubscription(subscription.endpoint);
+      else if (!(status >= 200 && status < 300)) console.error(`Notification push refusée par ${service} (statut ${status}).`);
+    } catch (err) {
+      console.error(`Notification push non envoyée à ${service} : ${err?.message ?? err}`);
+    }
+  }
+  // Where each space keeps its idempotency records: the staff's per account (with the answer's status, always 200), the
+  // client's per client access.
+  const STAFF_RECORDS = {
+    find: 'SELECT * FROM idempotency_keys WHERE key = ? AND user_id = ?',
+    insert: 'INSERT INTO idempotency_keys (key, user_id, request_hash, response, created_at, status) VALUES (?, ?, ?, ?, ?, 200)',
+  };
+  const CLIENT_RECORDS = {
+    find: 'SELECT * FROM client_idempotency WHERE key = ? AND account_id = ?',
+    insert: 'INSERT INTO client_idempotency (key, account_id, request_hash, response, created_at) VALUES (?, ?, ?, ?, ?)',
+  };
+
+  // The client space exists in the real club only, as the staff's accounts do: the demo space has none.
+  const clientRoutes = demo ? null : createClientRoutes({
+    club, env, helpers: {
+      routeTable, checkThrottle, recordFailure, clearFailures, dummyHash, readJson, checkCsrf, json, errorResponse, imageResponse,
+      runClientWrite: (request, url, route, ctx) => runWrite(request, url, route, ctx, CLIENT_RECORDS, ctx.account?.id),
+    },
+  });
+
   // `user` (the signed-in account's row) and `demoConfig` come from handleDemo alone, never from the
   // network: the demo space reads no cookie and looks up no session, it serves the request as `user`.
   async function handle(request, { user = null, demoConfig = null } = {}) {
     if ((user || demoConfig) && !demo) throw new Error('handle: only the demo space is given an identity.');
     const url = new URL(request.url);
+    // A client path never reaches the staff's routes, nor reads their `sid`: worker/clientApi.js serves it whole. In the
+    // demo space, which has no client routes, it is an unknown path like any other (and the Worker's router keeps it away).
+    if (clientRoutes && CLIENT_PATH.test(url.pathname)) return clientRoutes.handleClient(request, url);
     const cookies = [];
     const secure = url.protocol === 'https:';
     const cookieHeader = (value, maxAge) => [
@@ -454,6 +624,7 @@ export function createApi({ db, env = {}, demo = false }) {
         ip: request.headers.get('cf-connecting-ip') ?? 'local',
         query: Object.fromEntries(url.searchParams),
         setCookie: (value, maxAge) => cookies.push(cookieHeader(value, maxAge)),
+        after: [],
       };
       // A credential that is not in the body is checked before the body is read, so that a caller without it
       // makes the Worker read and parse nothing (the import door's body may be up to 300 KB). The guard finds no
@@ -474,39 +645,7 @@ export function createApi({ db, env = {}, demo = false }) {
         return respond(route.handler(ctx), cookies, false);
       }
 
-      const key = request.headers.get('idempotency-key') ?? undefined;
-      if (key !== undefined && !/^[A-Za-z0-9_-]{8,100}$/.test(key)) throw invalid("Clé d'idempotence invalide.");
-      const hash = key && ctx.user ? await sha256Hex(JSON.stringify([request.method, url.pathname, ctx.body])) : null;
-      const replay = () => {
-        const prev = club.get('SELECT * FROM idempotency_keys WHERE key = ? AND user_id = ?', key, ctx.user.id);
-        if (!prev) return undefined;
-        if (prev.request_hash !== hash) {
-          throw new AppError(422, 'CLE_REUTILISEE', "Cette opération a déjà été enregistrée avec d'autres données. Rechargez la page.");
-        }
-        return JSON.parse(prev.response);
-      };
-      // A retry that already succeeded is answered at once, without redoing the preparation.
-      if (hash) {
-        const previous = replay();
-        if (previous !== undefined) return respond(previous, cookies, true);
-      }
-      if (route.opts.prepare) await route.opts.prepare(ctx);
-      let replayed = false;
-      // The whole write, including the idempotency record, commits or rolls back as one unit.
-      const payload = club.tx(() => {
-        if (!hash) return route.handler(ctx);
-        const previous = replay();
-        if (previous !== undefined) {
-          replayed = true;
-          return previous;
-        }
-        const result = route.handler(ctx);
-        club.run(
-          'INSERT INTO idempotency_keys (key, user_id, request_hash, status, response, created_at) VALUES (?, ?, ?, 200, ?, ?)',
-          key, ctx.user.id, hash, JSON.stringify(result ?? null), new Date().toISOString(),
-        );
-        return result;
-      });
+      const { payload, replayed } = await runWrite(request, url, route, ctx, STAFF_RECORDS, ctx.user?.id);
       return respond(payload, cookies, replayed);
     } catch (err) {
       return errorResponse(err);
@@ -525,21 +664,7 @@ export function createApi({ db, env = {}, demo = false }) {
         },
       });
     }
-    if (payload?.__image) {
-      // A photo never changes at its address (the version in it changes with the photo): kept a year, by the
-      // signed-in browser alone. This answer's Cache-Control replaces the no-store of the other answers. It is
-      // a picture and nothing else: opened as a page, it would be allowed to load and run nothing.
-      const { mime, data } = payload.__image;
-      return new Response(data, {
-        status: 200,
-        headers: {
-          ...SECURITY_HEADERS,
-          'Content-Type': mime,
-          'Cache-Control': 'private, max-age=31536000, immutable',
-          'Content-Security-Policy': "default-src 'none'; sandbox",
-        },
-      });
-    }
+    if (payload?.__image) return imageResponse(payload.__image);
     return json(200, payload, { cookies, replayed });
   }
 

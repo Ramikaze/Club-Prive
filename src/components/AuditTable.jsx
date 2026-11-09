@@ -1,6 +1,6 @@
 // The « Journal des opérations » table: date, user, operation (linked to its reservation or member) and detail.
 import { Link } from 'react-router-dom';
-import { ACTION_LABELS, auditSummary } from '../lib/audit.js';
+import { ACTION_LABELS, auditAuthor, auditSummary } from '../lib/audit.js';
 import { dateTime } from '../lib/format.js';
 
 export default function AuditTable({ audit }) {
@@ -16,7 +16,7 @@ export default function AuditTable({ audit }) {
         return (
           <tr key={a.id}>
             <td data-label="Date" className="nowrap">{dateTime(a.at)}</td>
-            <td data-label="Utilisateur">{a.user_name ?? 'système'}</td>
+            <td data-label="Utilisateur">{auditAuthor(a)}</td>
             <td data-label="Opération">{operation}</td>
             <td data-label="Détail" className="subtle">{auditSummary(a)}</td>
           </tr>

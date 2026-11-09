@@ -24,7 +24,7 @@ function TicketQr({ value }) {
   );
 }
 
-export default function TicketSheet({ ticket, copyNo }) {
+export default function TicketSheet({ ticket, copyNo, copyText = copyLabel(copyNo) }) {
   const verifiable = !ticket.demo && Boolean(ticket.ticket_code);
   const verifyUrl = verifiable ? ticketVerifyUrl(window.location.origin, ticket.id, ticket.ticket_code) : null;
   const header = String(ticket.header ?? '').trim();
@@ -46,7 +46,7 @@ export default function TicketSheet({ ticket, copyNo }) {
 
       <div className="ts-title">
         <strong>TICKET DE CAISSE</strong>
-        <span className="ts-copy">{copyLabel(copyNo)}</span>
+        <span className="ts-copy">{copyText}</span>
       </div>
 
       <dl className="ts-facts">

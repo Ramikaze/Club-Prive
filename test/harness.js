@@ -23,9 +23,11 @@ export async function fundCaisse(client, account, amount, method = 'Espèces') {
 export class Server {
   // `demo`: the club runs as the demo space. `lenientTariffs`: see start(). `dayVerification`: the daily till is
   // verified from the real start day on (see start()); otherwise every day counts as verified, as before the feature.
-  constructor(env = {}, { demo = false, lenientTariffs = false, dayVerification = false } = {}) {
+  // `sendPush`: what the API calls in place of the push service (worker/push.js), so a test records the notifications.
+  constructor(env = {}, { demo = false, lenientTariffs = false, dayVerification = false, sendPush = null } = {}) {
     this.env = env;
     this.demo = demo;
+    this.sendPush = sendPush;
     this.lenientTariffs = lenientTariffs;
     this.dayVerification = dayVerification;
     this.dir = fs.mkdtempSync(path.join(os.tmpdir(), 'club-test-'));
@@ -34,7 +36,7 @@ export class Server {
 
   async start() {
     this.db = nodeDb(this.file);
-    this.api = createApi({ db: this.db, env: this.env, demo: this.demo });
+    this.api = createApi({ db: this.db, env: this.env, demo: this.demo, sendPush: this.sendPush });
     await this.api.init();
     // The scenarios run with unvalidated tariffs usable, as in the demo space: the default tariffs
     // are unvalidated and the real club refuses to charge with them. Tests of the real club's own

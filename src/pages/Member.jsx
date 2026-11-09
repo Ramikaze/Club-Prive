@@ -12,6 +12,7 @@ import { useLoad } from '../lib/hooks.js';
 import { useIsBoss } from '../store/useStore.js';
 import PurchaseHistory from '../components/members/PurchaseHistory.jsx';
 import ClientAccount from '../components/members/ClientAccount.jsx';
+import ClientAccessBlock from '../components/members/ClientAccessBlock.jsx';
 import {
   openClientDialog, openConvertClientDialog, openDeactivateClientDialog, openReactivateClientDialog,
 } from '../dialogs/clientDialogs.jsx';
@@ -258,6 +259,7 @@ function ClientDetail({ m, reload }) {
           </dl>
         </section>
         <ClientAccount clientId={m.id} file={m} onChanged={reload} />
+        <ClientAccessBlock member={m} />
         <PurchaseHistory memberId={m.id} file={m} />
       </div>
     </>
@@ -346,6 +348,8 @@ function MemberDetail({ m, reload }) {
               {m.former_client_no ? <><dt>Origine</dt><dd>ancien client régulier {m.former_client_no}, passé membre le {dateTime(m.became_member_at)}</dd></> : null}
             </dl>
           </section>
+
+          <ClientAccessBlock member={m} />
 
           <section className="card">
             <div className="card-head"><h2>À encaisser</h2>{due.length ? <button type="button" className="btn btn-sm btn-primary" onClick={() => openPaymentDialog({ lines: due, memberName: m.name }, reload)}>Encaisser {money(dueTotal)}</button> : null}</div>

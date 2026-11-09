@@ -31,5 +31,10 @@
   // x-import-token). Created for the import, deleted right after: without it the door answers 503.
   //   npx wrangler secret put IMPORT_TOKEN
   //   npx wrangler secret delete IMPORT_TOKEN
+  // Secrets of the push notifications on the staff's devices (worker/push.js), made by `node scripts/vapid-keys.mjs
+  // mailto:<address>`: without them notifications are off (GET /api/push/key answers null) and the rest works.
+  //   npx wrangler secret put VAPID_PUBLIC_KEY    (the public key, base64url)
+  //   npx wrangler secret put VAPID_PRIVATE_KEY   (the private key, base64url: never in this repository)
+  //   npx wrangler secret put VAPID_SUBJECT       (mailto:… or https://…, the contact given to the push services)
   // Local development reads .dev.vars (DEMO_ACCOUNTS=1 creates the demonstration accounts).
 }

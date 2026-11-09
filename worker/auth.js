@@ -56,6 +56,19 @@ export function newToken() {
   return toBase64(crypto.getRandomValues(new Uint8Array(32))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
+// A temporary client code: 8 characters without the look-alikes (0 O 1 I L), read out or typed by hand.
+const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+export function newClientCode() {
+  // 248 is the largest multiple of the alphabet's length (31 x 8) below 256: rejecting above it keeps every letter equally likely.
+  const out = [];
+  while (out.length < 8) {
+    for (const b of crypto.getRandomValues(new Uint8Array(16))) {
+      if (b < 248 && out.length < 8) out.push(CODE_ALPHABET[b % CODE_ALPHABET.length]);
+    }
+  }
+  return out.join('');
+}
+
 export function checkPasswordStrength(password) {
   if (typeof password !== 'string' || password.length < 10) return 'Le mot de passe doit contenir au moins 10 caractères.';
   if (password.length > 200) return 'Mot de passe trop long.';

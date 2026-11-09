@@ -166,11 +166,12 @@ function BookingDialog({ close, preset, onDone }) {
   });
   const [member, setMember] = useState(preset.member ?? null);
   const [roomId, setRoomId] = useState(init.roomId);
-  const [partySize, setPartySize] = useState(1);
+  const [partySize, setPartySize] = useState(() => Number(preset.party_size) || 1);
   const [startNow, setStartNow] = useState(init.startNow);
   const [date, setDate] = useState(init.date);
   const [start, setStart] = useState(init.start);
-  const [duration, setDuration] = useState(() => minDurationFor(s.booking, init.date, startRelOf(init.start)));
+  // A request from the client space brings its own duration (never below the minimum of that day and time).
+  const [duration, setDuration] = useState(() => Math.max(Number(preset.duration_min) || 0, minDurationFor(s.booking, init.date, startRelOf(init.start))));
   // Friday and Saturday from 18:00 the minimum is longer (2 h by default).
   const minDur = minDurationFor(s.booking, date, startRelOf(start));
   const [notes, setNotes] = useState('');
@@ -209,6 +210,7 @@ function BookingDialog({ close, preset, onDone }) {
       // Without the card, used only when a deposit is due (3 h or more with paid time); with it, the method that
       // pays now what the card cannot (none: it stays on the note).
       deposit_method: v.payWithCard ? (v.restMethod || undefined) : v.depositMethod,
+      ...(preset.request_id ? { request_id: preset.request_id } : {}),
     };
   };
 

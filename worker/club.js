@@ -11,7 +11,12 @@ import { shopMethods, buyerShown } from './shop.js';
 import { caisseMethods } from './caisses.js';
 import { supplierMethods } from './suppliers.js';
 import { creditMethods } from './credit.js';
+import { clientAccessMethods } from './clientAccess.js';
+import { clientViewMethods } from './clientView.js';
+import { clientOrderMethods } from './clientOrders.js';
+import { clientRequestMethods } from './clientRequests.js';
 import { billedMethods, DRINK_PART_SQL } from './billed.js';
+import { pushMethods } from './push.js';
 import {
   newTicketCode, formatTicketNumber, normalizeTicketCode, memberInitials, paymentLines, TICKET_CODE_LENGTH,
 } from '../shared/ticket.js';
@@ -54,6 +59,8 @@ const WIPE_ORDER = [
   // Tables of the former cigar-cave tracking, no longer in the app: kept in the database, still cleared by a reset.
   'humidor_readings', 'humidors',
   'idempotency_keys', 'wallet_movements', 'payment_allocations', 'refunds', 'stock_movements', 'credit_movements', 'charges',
+  'client_ticket_copies', 'client_order_sales', 'client_order_lines', 'client_orders', 'reservation_requests',
+  'client_idempotency', 'client_sessions', 'client_accounts',
   'ticket_events', 'payments', 'shop_sales',
   'reservation_attendees', 'reservations', 'cards', 'subscriptions', 'members', 'product_photos', 'products',
   'ledger_entries', 'supplier_purchases', 'suppliers', 'closed_periods', 'day_closings', 'audit_log',
@@ -308,6 +315,8 @@ export class Club {
       this.ensureCategoryCodes();
       this.run('DELETE FROM idempotency_keys WHERE created_at < ?', new Date(Date.now() - 7 * 86400000).toISOString());
       this.run('DELETE FROM sessions WHERE expires_at < ?', new Date().toISOString());
+      this.run('DELETE FROM client_idempotency WHERE created_at < ?', new Date(Date.now() - 7 * 86400000).toISOString());
+      this.run('DELETE FROM client_sessions WHERE expires_at < ?', new Date().toISOString());
     });
     this.cachedSettings = null;
   }
@@ -774,6 +783,7 @@ export class Club {
       'UPDATE members SET active = 0, deactivated_at = ?, deactivated_by = ?, deactivation_reason = ?, updated_at = ?, updated_by = ? WHERE id = ?',
       this.nowIso(), actor.id, reason, this.nowIso(), actor.id, m.id,
     );
+    this.closeClientSessions(m.id);
     this.audit(actor, 'membre.desactiver', 'member', m.id, { member_no: m.member_no, nom: `${m.first_name} ${m.last_name}`, motif: reason });
     return this.memberDetail(m.id);
   }
@@ -1033,6 +1043,8 @@ export class Club {
     ).map((w) => ({
       id: w.id, kind: w.kind, amount: w.amount, balance_after: w.balance_after, at: w.created_at, by_name: w.by_name ?? null,
       payment_id: w.payment_id, number: w.payment_id ? formatTicketNumber(w.payment_id) : null, reason: w.reason,
+      // A refund of a paid line (writeRefund): the movement and the refund row are one and the same refund.
+      refund_id: w.refund_id ?? null,
     }));
     const payments = this.all(
       `SELECT p.*, mm.first_name, mm.last_name, mm.member_no, u.name AS created_by_name FROM payments p
@@ -1966,6 +1978,10 @@ export class Club {
   createReservation(actor, input) {
     const p = this.planReservation(input);
     const s = this.settings();
+    // Confirming a client's request: it must still be pending and the booking the same member's. It is only marked
+    // answered at the very end, so any refusal below leaves it untouched.
+    const requestId = input.request_id === undefined || input.request_id === null || input.request_id === '' ? null : toId(input.request_id, 'Demande');
+    if (requestId) this.assertRequestMatches(requestId, p.member.id);
     if (p.conflicts.length) throw this.overlapError(p.conflicts, p.room.name);
     if (p.gap_conflicts.length) throw this.gapError(p.gap_conflicts, { startMs: p.startMs, endMs: p.endMs });
     if (p.paid > 0 && !p.tariff.validated && !s.demo_mode) {
@@ -2030,6 +2046,7 @@ export class Club {
     });
     if (payWithCard) this.insertTimeLinesPaidByCard(actor, line, timeLines, { method: depositMethod, reference: null });
     if (paidNow.length) this.recordPayment(actor, { charge_ids: paidNow, method: depositMethod, reference: null });
+    if (requestId) this.linkRequestToReservation(actor, requestId, id);
     return this.reservationDetail(id);
   }
 
@@ -3118,7 +3135,9 @@ export class Club {
     const rows = includeInactive
       ? this.all(`${PRODUCT_SELECT} ORDER BY ${PRODUCT_ORDER}, p.name`)
       : this.all(`${PRODUCT_SELECT} WHERE p.active = 1 ORDER BY ${PRODUCT_ORDER}, p.name`);
-    return rows.map((p) => this.productDTO(p));
+    // `held`: units set aside by open client orders (staff only: the Boutique card says « N mis de côté »).
+    const held = this.heldQuantities();
+    return rows.map((p) => ({ ...this.productDTO(p), held: held.get(p.id) ?? 0 }));
   }
 
   productFields(input, current = {}) {
@@ -3855,4 +3874,9 @@ Object.assign(Club.prototype, shopMethods);
 Object.assign(Club.prototype, caisseMethods);
 Object.assign(Club.prototype, supplierMethods);
 Object.assign(Club.prototype, creditMethods);
+Object.assign(Club.prototype, clientAccessMethods);
+Object.assign(Club.prototype, clientViewMethods);
+Object.assign(Club.prototype, clientOrderMethods);
+Object.assign(Club.prototype, clientRequestMethods);
 Object.assign(Club.prototype, billedMethods);
+Object.assign(Club.prototype, pushMethods);
