@@ -34,6 +34,21 @@ function json(status, payload, { cookies = [], replayed = false } = {}) {
   return new Response(JSON.stringify(payload ?? null), { status, headers });
 }
 
+// A photo never changes at its address (the version in it changes with the photo): kept a year, by the signed-in
+// browser alone. This answer's Cache-Control replaces the no-store of the other answers. It is a picture and nothing
+// else: opened as a page, it would be allowed to load and run nothing.
+function imageResponse({ mime, data }) {
+  return new Response(data, {
+    status: 200,
+    headers: {
+      ...SECURITY_HEADERS,
+      'Content-Type': mime,
+      'Cache-Control': 'private, max-age=31536000, immutable',
+      'Content-Security-Policy': "default-src 'none'; sandbox",
+    },
+  });
+}
+
 function errorResponse(err) {
   if (err instanceof AppError) {
     return json(err.status, { error: { code: err.code, message: err.message, details: err.details ?? null } });
@@ -300,6 +315,12 @@ export function createApi({ db, env = {}, demo = false }) {
   add('POST', '/api/clients', {}, (ctx) => club.createClient(ctx.user, ctx.body));
   // Open to every signed-in user: the rights (gérant, or the boss of the rayon) are checked inside.
   add('POST', '/api/shop/sales', {}, (ctx) => club.createShopSale(ctx.user, ctx.body));
+  // Orders placed by the clients (worker/clientOrders.js): every staff member sees them all; the counter turns one into
+  // a Boutique sale (POST /api/shop/sales with order_id).
+  add('GET', '/api/orders', {}, (ctx) => club.staffOrders(ctx.user));
+  add('POST', '/api/orders/:id/ready', {}, (ctx) => club.markOrderReady(ctx.user, ctx.params.id));
+  add('POST', '/api/orders/:id/cancel', {}, (ctx) => club.cancelOrder(ctx.user, ctx.params.id, ctx.body));
+  add('POST', '/api/orders/:id/close', {}, (ctx) => club.closeOrder(ctx.user, ctx.params.id));
   add('POST', '/api/shop/sales/:id/cancel', {}, (ctx) => club.cancelShopSale(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/clients/:id/convert', {}, (ctx) => club.convertClient(ctx.user, ctx.params.id));
   // Credit of the regular clients (worker/credit.js): the account and the settlements are open to every signed-in user
@@ -460,7 +481,7 @@ export function createApi({ db, env = {}, demo = false }) {
 
   // The client space exists in the real club only, as the staff's accounts do: the demo space has none.
   const clientRoutes = demo ? null : createClientRoutes({
-    club, env, helpers: { routeTable, checkThrottle, recordFailure, clearFailures, dummyHash, readJson, checkCsrf, json, errorResponse },
+    club, env, helpers: { routeTable, checkThrottle, recordFailure, clearFailures, dummyHash, readJson, checkCsrf, json, errorResponse, imageResponse },
   });
 
   // `user` (the signed-in account's row) and `demoConfig` come from handleDemo alone, never from the
@@ -563,21 +584,7 @@ export function createApi({ db, env = {}, demo = false }) {
         },
       });
     }
-    if (payload?.__image) {
-      // A photo never changes at its address (the version in it changes with the photo): kept a year, by the
-      // signed-in browser alone. This answer's Cache-Control replaces the no-store of the other answers. It is
-      // a picture and nothing else: opened as a page, it would be allowed to load and run nothing.
-      const { mime, data } = payload.__image;
-      return new Response(data, {
-        status: 200,
-        headers: {
-          ...SECURITY_HEADERS,
-          'Content-Type': mime,
-          'Cache-Control': 'private, max-age=31536000, immutable',
-          'Content-Security-Policy': "default-src 'none'; sandbox",
-        },
-      });
-    }
+    if (payload?.__image) return imageResponse(payload.__image);
     return json(200, payload, { cookies, replayed });
   }
 

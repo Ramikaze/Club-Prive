@@ -22,7 +22,7 @@ const me = ({ member, mustSetPassword }) => ({
 });
 
 export function createClientRoutes({ club, helpers }) {
-  const { routeTable, checkThrottle, recordFailure, clearFailures, dummyHash, readJson, checkCsrf, json, errorResponse } = helpers;
+  const { routeTable, checkThrottle, recordFailure, clearFailures, dummyHash, readJson, checkCsrf, json, errorResponse, imageResponse } = helpers;
   const { add, match } = routeTable();
   // The routes a session opened with the temporary code may reach.
   const BEFORE_PASSWORD = { beforePassword: true };
@@ -93,6 +93,13 @@ export function createClientRoutes({ club, helpers }) {
   add('GET', '/api/client/tickets/:id', {}, (ctx) => club.clientTicket(ctx.member.id, ctx.params.id));
   add('POST', '/api/client/tickets/:id/copies', {}, (ctx) => club.recordClientTicketCopy(ctx.member.id, ctx.params.id, ctx.body));
 
+  // Boutique orders (worker/clientOrders.js): the products he can order, his orders, and the order itself.
+  add('GET', '/api/client/products', {}, () => club.clientProducts());
+  add('GET', '/api/client/products/:id/photo', {}, (ctx) => ({ __image: club.clientProductPhoto(ctx.params.id) }));
+  add('GET', '/api/client/orders', {}, (ctx) => club.clientOrders(ctx.member.id));
+  add('POST', '/api/client/orders', {}, (ctx) => club.createClientOrder(ctx.member.id, ctx.body));
+  add('POST', '/api/client/orders/:id/cancel', {}, (ctx) => club.cancelClientOrder(ctx.member.id, ctx.params.id));
+
   async function handleClient(request, url) {
     const cookies = [];
     const secure = url.protocol === 'https:';
@@ -126,7 +133,8 @@ export function createClientRoutes({ club, helpers }) {
 
       if (!writes) {
         if (route.opts.prepare) await route.opts.prepare(ctx);
-        return json(200, route.handler(ctx), { cookies });
+        const payload = route.handler(ctx);
+        return payload?.__image ? imageResponse(payload.__image) : json(200, payload, { cookies });
       }
 
       // Every client write runs below: the same idempotency rules as the staff's (worker/api.js), recorded per client

@@ -122,6 +122,9 @@ export const shopMethods = {
     if (credit && card) throw invalid('Une vente à crédit ne se paie pas avec une carte.');
     const method = credit ? null : text(input.method, 'Moyen de paiement', { max: 40 });
     this.assertOpen(this.bizToday(), 'Cette vente');
+    // A sale made for a client's order: his own order, his rayon, once (worker/clientOrders.js).
+    const orderId = input.order_id === undefined || input.order_id === null ? null : toId(input.order_id, 'Commande');
+    if (orderId) this.assertSaleMatchesOrder(orderId, account, buyer);
 
     let memberId;
     if (buyer.kind === 'journalier') {
@@ -138,6 +141,7 @@ export const shopMethods = {
       'INSERT INTO shop_sales (account, member_id, buyer_kind, created_at, created_by, on_credit) VALUES (?, ?, ?, ?, ?, ?)',
       account, memberId, buyer.kind, this.nowIso(), actor.id, credit ? 1 : 0,
     );
+    if (orderId) this.linkSaleToOrder(actor, orderId, account, saleId);
     const chargeIds = [];
     for (const { p, quantity } of products) {
       const chargeId = this.insertCharge(actor, {
