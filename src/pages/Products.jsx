@@ -16,6 +16,8 @@ import { CATEGORIES, CATEGORY_LABEL, CATEGORY_PLURAL, accountOfCategory, canSell
 
 // A boss works only on the products of his rayon (the administrator owns both).
 const ownsProduct = (me, p) => ownsAccount(me, accountOfCategory(p.category));
+// Whoever may move a product's stock: the manager, and the boss of its rayon.
+const canStockProduct = (me, p) => canSellIn(me, accountOfCategory(p.category));
 
 const formValues = (form) => Object.fromEntries(new FormData(form));
 
@@ -131,7 +133,7 @@ function ProductDialog({ close, product, onDone }) {
   );
 }
 
-function StockDialog({ close, product, kind, onDone }) {
+function StockDialog({ close, product, kind, onDone, onStale }) {
   const [key] = useState(newKey);
   const entry = kind === 'entree';
   const me = useMe();
@@ -143,13 +145,20 @@ function StockDialog({ close, product, kind, onDone }) {
     e.preventDefault();
     const v = formValues(e.currentTarget);
     submit(async () => {
+      // The form does not check its fields itself: an empty count must not leave as 0 and empty the stock.
+      if (!entry && v.target_qty.trim() === '') throw new Error('Indiquez la quantité constatée (nombre entier).');
       if (!entry && !canLower && Number(v.target_qty) < product.stock_qty) {
         throw new Error('Le gérant peut seulement ajouter des quantités. Pour en retirer, adressez-vous à l’administrateur ou à l’associé du rayon.');
       }
       const body = entry
         ? { kind: 'entree', quantity: Number(v.quantity), reason: v.reason }
         : { kind: 'ajustement', target_qty: Number(v.target_qty), expected_qty: product.stock_qty, reason: v.reason };
-      const res = await api.post(`/api/products/${product.id}/stock`, body, key);
+      const res = await api.post(`/api/products/${product.id}/stock`, body, key).catch((err) => {
+        // Someone moved this stock meanwhile (a sale at the bar): whoever opened this window takes the current stock,
+        // so that the next try starts from it.
+        if (err.code === 'STOCK_MODIFIE') onStale?.();
+        throw err;
+      });
       close();
       toast(`Stock de « ${res.name} » : ${res.stock_qty}.`);
       onDone?.(res);
@@ -181,6 +190,21 @@ function StockDialog({ close, product, kind, onDone }) {
   );
 }
 
+// The two stock buttons of a product, small in the list and large on its sheet. The caller checks canStockProduct.
+function StockButtons({ p, large = false, disabled = false, onDone, onStale }) {
+  const open = (kind) => stockDialog(p, kind, onDone, onStale);
+  return (
+    <>
+      <button type="button" className={large ? 'btn btn-primary' : 'btn btn-sm'} disabled={disabled} onClick={() => open('entree')}>
+        {large ? <><Icon name="plus" /> Entrée de stock</> : 'Entrée'}
+      </button>
+      <button type="button" className={large ? 'btn' : 'btn btn-sm btn-ghost'} disabled={disabled} onClick={() => open('ajustement')}>
+        {large ? 'Ajuster le stock' : 'Ajuster'}
+      </button>
+    </>
+  );
+}
+
 function HistoryDialog({ close, product }) {
   const { data, error } = useLoad(() => api.get(`/api/stock-movements?product_id=${product.id}&limit=200`), []);
   const excel = useBusy();
@@ -205,20 +229,32 @@ function HistoryDialog({ close, product }) {
 
 // The sheet of a product, open to everyone: its photo large, its description, its price and stock. Whoever may move
 // its stock (the manager, the boss of its rayon) adds to it or adjusts it from here, as from the list; the sheet then
-// shows the new stock. The boss of its rayon outside the demo also keeps the photo up here. A picture is saved the moment it is chosen (not with the Save
-// button of a form), and the list behind is refreshed so that its thumbnail follows.
+// shows the new stock. The boss of its rayon outside the demo also keeps the photo up here. A picture is saved the
+// moment it is chosen (not with the Save button of a form), and the list behind is refreshed so that its thumbnail
+// follows.
 function ProductSheet({ close, product, onDone }) {
   const me = useMe();
-  const admin = ownsProduct(me, product);
-  const demo = useStore((s) => s.demo);
   const [p, setP] = useState(product);
+  const admin = ownsProduct(me, p);
+  const demo = useStore((s) => s.demo);
   const { busy, error, submit } = useSubmit();
   const picker = useRef(null);
-  const canStock = canSellIn(me, accountOfCategory(p.category));
+  const canStock = canStockProduct(me, p);
   // The stock window opens over the sheet; once saved, the sheet and the list behind show the new stock.
   const onStock = (res) => {
-    if (res) setP(res);
+    setP(res);
     onDone?.();
+  };
+  // The stock changed meanwhile and the server refused: the sheet and the list behind take the current stock. If
+  // reading it fails, the sheet keeps what it had (the refusal already shows).
+  const onStale = () => {
+    onDone?.();
+    api.get('/api/products?all=1')
+      .then((all) => {
+        const fresh = all.find((x) => x.id === p.id);
+        if (fresh) setP(fresh);
+      })
+      .catch(() => {});
   };
   // The server refuses photos in the demo space anyway: the buttons are not even offered there.
   const canEditPhoto = admin && !demo;
@@ -271,10 +307,8 @@ function ProductSheet({ close, product, onDone }) {
               <dt>Stock</dt><dd><StockChip p={p} /></dd>
             </dl>
             {canStock && (
-              <div className="row">
-                <button type="button" className="btn btn-primary" onClick={() => stockDialog(p, 'entree', onStock)}><Icon name="plus" /> Entrée de stock</button>
-                <button type="button" className="btn" onClick={() => stockDialog(p, 'ajustement', onStock)}>Ajuster le stock</button>
-              </div>
+              // Not while a photo is being sent: both answers rewrite the sheet, and the older one must not come last.
+              <div className="row"><StockButtons p={p} large disabled={busy} onDone={onStock} onStale={onStale} /></div>
             )}
             {canEditPhoto && (
               <div className="row">
@@ -298,7 +332,7 @@ function ProductSheet({ close, product, onDone }) {
 
 const productDialog = (product, onDone) => openDialog(ProductDialog, { product, onDone });
 const sheetDialog = (product, onDone) => openDialog(ProductSheet, { product, onDone });
-const stockDialog = (product, kind, onDone) => openDialog(StockDialog, { product, kind, onDone });
+const stockDialog = (product, kind, onDone, onStale) => openDialog(StockDialog, { product, kind, onDone, onStale });
 const historyDialog = (product) => openDialog(HistoryDialog, { product });
 
 export default function Products() {
@@ -390,12 +424,7 @@ export default function Products() {
                     <td data-label="Stock"><StockChip p={p} /> <span className="subtle">seuil {p.low_stock_threshold}</span></td>
                     <td className="actions">
                       <div className="product-actions">
-                        {canSellIn(me, accountOfCategory(p.category)) && (
-                          <>
-                            <button type="button" className="btn btn-sm" onClick={() => stockDialog(p, 'entree', reload)}>Entrée</button>
-                            <button type="button" className="btn btn-sm btn-ghost" onClick={() => stockDialog(p, 'ajustement', reload)}>Ajuster</button>
-                          </>
-                        )}
+                        {canStockProduct(me, p) && <StockButtons p={p} onDone={reload} onStale={reload} />}
                         <button type="button" className="btn btn-sm btn-ghost" onClick={() => historyDialog(p)}>Historique</button>
                         {ownsProduct(me, p) && <button type="button" className="btn btn-sm btn-ghost" onClick={() => productDialog(p, reload)}><Icon name="edit" /><span className="sr-only">Modifier {p.name}</span></button>}
                       </div>
