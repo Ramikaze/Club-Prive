@@ -156,8 +156,11 @@ test('aucune donnée interne dans les réponses', async () => {
   ok(await admin.post(`/api/shop/sales/${sale.sale.id}/cancel`, { reason: 'Motif interne du gérant' }));
   const account = ok(await alice.client.get('/api/client/account'));
   const history = ok(await alice.client.get('/api/client/history'));
-  const ticket = ok(await alice.client.get(`/api/client/tickets/${alice.saleId}`));
-  const text = JSON.stringify({ account, history, ticket });
+  // The cancelled sale's own ticket: the staff's reasons are in the staff's view of it, not in the client's.
+  const staffTicket = ok(await manager.get(`/api/payments/${sale.payment.id}/ticket`)).ticket;
+  assert.equal(staffTicket.shop_cancel_reason, 'Motif interne du gérant');
+  const ticket = ok(await alice.client.get(`/api/client/tickets/${sale.payment.id}`));
+  const text = JSON.stringify({ account, history });
   for (const key of ['notes', 'by_name', 'created_by_name', 'cancel_reason', 'shop_cancel_reason', 'reason']) {
     assert.ok(!text.includes(`"${key}"`), `clé ${key}`);
   }
@@ -166,6 +169,13 @@ test('aucune donnée interne dans les réponses', async () => {
   for (const secret of [STAFF_NAME, FILE_NOTES, 'Motif interne du gérant', 'REF-INTERNE-77', 'Propriétaire']) {
     assert.ok(!text.includes(secret), secret);
   }
+  // The ticket keeps the cashier and the reference (the paper ticket prints them) but none of the staff's reasons.
+  const ticketText = JSON.stringify(ticket);
+  for (const key of ['cancel_reason', 'shop_cancel_reason', 'next_copy_no', 'notes', 'by_name']) {
+    assert.ok(!ticketText.includes(`"${key}"`), `ticket, clé ${key}`);
+  }
+  assert.ok(!ticketText.includes('Motif interne du gérant'));
+  assert.equal(ticket.ticket.created_by_name, STAFF_NAME);
 });
 
 test('ticket : A ouvre le sien, pas celui de B (404), pas un numéro inconnu (404)', async () => {

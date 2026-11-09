@@ -6,8 +6,9 @@ import { localParts } from '../shared/time.js';
 import { DEPOSIT_FROM, depositFor } from '../shared/rules.js';
 
 // The ticket fields a client never gets: the next duplicate's number (the staff's count of copies), the reasons typed
-// by staff when the sale or payment was cancelled, and the cashier's name.
-const TICKET_HIDDEN = ['next_copy_no', 'cancel_reason', 'shop_cancel_reason', 'created_by_name'];
+// by staff when the sale or payment was cancelled. The cashier's name and the payment reference stay: the paper
+// ticket prints them, and a client's reprint matches the original.
+const TICKET_HIDDEN = ['next_copy_no', 'cancel_reason', 'shop_cancel_reason'];
 const COPY_KINDS = ['impression', 'telechargement'];
 const CHARGE_STATUS = { due: 'a_regler', payee: 'valide', annulee: 'annule', remboursee: 'rembourse' };
 const SESSION_STATUS = { reservee: 'reservee', en_cours: 'en_cours', terminee: 'valide', annulee: 'annule' };
