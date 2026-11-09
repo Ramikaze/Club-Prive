@@ -270,3 +270,24 @@ test('côté équipe : toutes les commandes ouvertes, compteur par rôle, annula
   assert.equal((await new Client(server).get('/api/orders')).status, 401);
   assert.ok(server.club.get("SELECT 1 AS x FROM audit_log WHERE action = 'commande.annuler' AND user_id IS NOT NULL"));
 });
+
+test('une commande à moitié encaissée : le rayon vendu ne retient plus de stock, le client ne l’annule plus', async () => {
+  const c = await newProduct('cigare', 5);
+  const b = await newProduct('bouteille', 5);
+  const a = await person();
+  const other = await person();
+  ok(await order(other, [{ product_id: c.id, quantity: 1 }]));
+  const o = ok(await order(a, [{ product_id: c.id, quantity: 2 }, { product_id: b.id, quantity: 1 }]));
+  ok(await ger.post('/api/shop/sales', {
+    account: 'cigares', buyer: { kind: 'client', member_id: a.member.id }, lines: [{ product_id: c.id, quantity: 2 }], method: 'Espèces', order_id: o.id,
+  }));
+  assert.equal(stockOf(c.id), 3);
+  const list = ok(await other.client.get('/api/client/products'));
+  // Real stock 3, minus the other client's hold of 1; the sold lines hold nothing any more.
+  assert.equal(list.find((x) => x.id === c.id).max_order, 2);
+  assert.equal(list.find((x) => x.id === b.id).max_order, 4);
+  assert.equal(server.club.heldQuantities().get(c.id), 1);
+  const r = await a.client.post(`/api/client/orders/${o.id}/cancel`, {});
+  refused(r, 409, 'COMMANDE_DEJA_ENCAISSEE');
+  assert.equal(server.club.get('SELECT status FROM client_orders WHERE id = ?', o.id).status, 'en_attente');
+});

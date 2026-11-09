@@ -15,11 +15,13 @@ const MAX_LINES = 30;
 const ORDERABLE = ['cigare', 'bouteille'];
 
 export const clientOrderMethods = {
-  // What open orders hold, per product. `excludeOrderId` leaves one order out (its own hold).
+  // What open orders hold, per product; a rayon already sold holds nothing (its stock is already out). `excludeOrderId` leaves one order out (its own hold).
   heldQuantities(excludeOrderId = null) {
     const rows = this.all(
       `SELECT l.product_id, SUM(l.quantity) AS qty FROM client_order_lines l JOIN client_orders o ON o.id = l.order_id
-       WHERE o.status IN ${OPEN} AND o.id <> ? GROUP BY l.product_id`, excludeOrderId ?? 0,
+       WHERE o.status IN ${OPEN} AND o.id <> ?
+         AND NOT EXISTS (SELECT 1 FROM client_order_sales s WHERE s.order_id = l.order_id AND s.account = l.account)
+       GROUP BY l.product_id`, excludeOrderId ?? 0,
     );
     return new Map(rows.map((r) => [r.product_id, r.qty]));
   },
@@ -124,6 +126,9 @@ export const clientOrderMethods = {
   cancelClientOrder(memberId, orderId) {
     const o = this.clientOrderRow(memberId, orderId);
     if (o.status !== 'en_attente') throw conflict('COMMANDE_NON_ANNULABLE', 'Cette commande n’est plus annulable : contactez le club.');
+    if (this.get('SELECT 1 AS x FROM client_order_sales WHERE order_id = ?', o.id)) {
+      throw conflict('COMMANDE_DEJA_ENCAISSEE', 'Votre commande est en cours de retrait : contactez le club pour la modifier.');
+    }
     this.run(
       "UPDATE client_orders SET status = 'annulee', closed_at = ?, cancelled_by_client = 1 WHERE id = ?", this.nowIso(), o.id,
     );
