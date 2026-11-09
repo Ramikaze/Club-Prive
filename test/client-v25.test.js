@@ -46,6 +46,11 @@ test('migration V25 : les accès existants gardent leur identifiant, non choisi'
       await hashPassword('mot-de-passe-ancien'), member.id,
     );
 
+    // A second access still holds a live temporary code (possibly handed out by a gérant before this update).
+    const other = ok(await admin.post('/api/members', { first_name: 'awa', last_name: 'code', phone: '06 765 43 21' }));
+    ok(await admin.post(`/api/members/${other.id}/client-access`, {}));
+    assert.ok(source.db.get('SELECT temp_hash FROM client_accounts WHERE member_id = ?', other.id).temp_hash);
+
     v24Copy(source.file, old.file);
     await old.start(); // migrates 24 -> 25
     assert.equal(old.db.get("SELECT value FROM meta WHERE key = 'schema_version'").value, String(MIGRATIONS.length));
@@ -54,6 +59,10 @@ test('migration V25 : les accès existants gardent leur identifiant, non choisi'
     assert.equal(row.login, '242061234567');
     assert.equal(row.login_chosen, 0);
     assert.ok(row.password_hash);
+    // Live temporary codes are void: an associé or the administrator issues them again.
+    const voided = old.db.get('SELECT temp_hash, temp_expires_at FROM client_accounts WHERE member_id = ?', other.id);
+    assert.equal(voided.temp_hash, null);
+    assert.equal(voided.temp_expires_at, null);
     assert.throws(() => old.db.run('UPDATE client_accounts SET login_chosen = 2 WHERE id = ?', row.id), /constraint/i);
 
     // The client signs in with his phone and password as before, and is asked for an identifier first.

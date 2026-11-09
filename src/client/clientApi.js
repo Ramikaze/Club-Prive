@@ -1,7 +1,7 @@
 // API client of the client space (/api/client/*): the same retry and idempotency rules as src/lib/api.js (a write
 // carries one Idempotency-Key per action, so a retried request is applied once), but it never carries the demo-space
 // header: a client always talks to the real club. A 401 sends back to the client's own sign-in, a 403
-// MOT_DE_PASSE_A_CHOISIR to the « choose your password » screen; the staff's sign-in is never involved.
+// MOT_DE_PASSE_A_CHOISIR or IDENTIFIANT_A_CHOISIR to the « choose » screen; the staff's sign-in is never involved.
 import { ApiError, newKey } from '../lib/api.js';
 
 export { ApiError };
@@ -42,7 +42,7 @@ async function request(method, url, body, key) {
     let data = null;
     try { data = await res.json(); } catch { /* empty body */ }
     if (res.status === 401 && !NO_SIGNOUT.has(url)) onSignedOut();
-    if (res.status === 403 && data?.error?.code === 'MOT_DE_PASSE_A_CHOISIR') onPasswordFirst();
+    if (res.status === 403 && (data?.error?.code === 'MOT_DE_PASSE_A_CHOISIR' || data?.error?.code === 'IDENTIFIANT_A_CHOISIR')) onPasswordFirst();
     if (!res.ok) {
       throw new ApiError(res.status, data?.error?.code ?? 'ERREUR', data?.error?.message ?? `Erreur ${res.status}.`, data?.error?.details);
     }

@@ -31,6 +31,7 @@ export const ACTION_LABELS = {
   'client.acces.code': 'Nouveau code provisoire du client',
   'client.acces.couper': 'Accès client coupé',
   'client.acces.retablir': 'Accès client rétabli',
+  'client.identifiant': 'Identifiant choisi par le client',
   'client.mot_de_passe': 'Mot de passe choisi par le client',
   'client.commande': 'Commande Boutique du client',
   'client.commande.annuler': 'Commande annulée par le client',
@@ -163,6 +164,8 @@ export function auditSummary(a) {
     case 'client.acces.couper':
     case 'client.acces.retablir':
       return `${d.member_no ?? ''} · identifiant ${d.login ?? ''}`;
+    case 'client.identifiant':
+      return `${d.avant ?? ''} → ${d.apres ?? ''}`;
     case 'client.commande':
       return (d.lignes ?? []).map((l) => `${l.quantite} × ${l.produit}`).join(', ');
     case 'client.demande.creer':

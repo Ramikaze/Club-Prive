@@ -211,3 +211,15 @@ test('le message d’accès client porte l’adresse, le numéro de membre comme
   // The phone is never the identifier: the message has no field for it.
   assert.ok(!/t[ée]l[ée]phone/i.test(text));
 });
+
+test('le message d’un nouveau code, identifiant déjà choisi, le rappelle sans demander d’en choisir un', () => {
+  const text = clientAccessText({
+    first_name: 'Awa', url: 'https://club.example/client', member_no: 'M-0012', code: 'ABCD2345', login_chosen: true, login: 'awa.k',
+  });
+  assert.ok(text.includes('« awa.k »'));
+  assert.ok(text.includes('M-0012'));
+  assert.ok(text.includes('ABCD2345'));
+  assert.ok(text.toLowerCase().includes('nouveau mot de passe'));
+  assert.ok(!/vous choisirez votre identifiant/i.test(text));
+  assert.ok(!/identifiant provisoire/i.test(text));
+});
