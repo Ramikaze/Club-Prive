@@ -27,6 +27,7 @@ const Shop = lazy(() => import('./pages/Shop.jsx'));
 const Orders = lazy(() => import('./pages/Orders.jsx'));
 const Cash = lazy(() => import('./pages/Cash.jsx'));
 const ShopTab = lazy(() => import('./components/cash/ShopTab.jsx'));
+const GiftsTab = lazy(() => import('./components/cash/GiftsTab.jsx'));
 const Ticket = lazy(() => import('./pages/Ticket.jsx'));
 const TicketHistory = lazy(() => import('./pages/TicketHistory.jsx'));
 const Treasury = lazy(() => import('./pages/Treasury.jsx'));
@@ -206,6 +207,7 @@ function StaffApp() {
             <Route path="grand-livre" element={<BossOnly><Ledger /></BossOnly>} />
             <Route path="cloture" element={<BossOnly><Closing /></BossOnly>} />
             <Route path="caisse/boutique" element={<BossOnly><ShopTab /></BossOnly>} />
+            <Route path="caisse/offerts" element={<BossOnly><GiftsTab /></BossOnly>} />
             <Route path="journal" element={<BossOnly><AuditJournal /></BossOnly>} />
             <Route path="fournisseurs" element={<BossOnly><Suppliers /></BossOnly>} />
             <Route path="fournisseurs/:id" element={<BossOnly><Supplier /></BossOnly>} />
