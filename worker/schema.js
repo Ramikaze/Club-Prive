@@ -1021,7 +1021,50 @@ const V27 = [
   'DELETE FROM idempotency_keys',
 ];
 
-export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26, V27];
+// V28: products given away by an associé (« Offert », spec docs/superpowers/specs/2026-11-10-offert-design.md): the
+// cost price of a product (null while unknown), the gifts, each keeping the cost price and the giver's name of its day,
+// and two stock movements. A CHECK cannot change in SQLite: stock_movements is rebuilt, every row kept as it was.
+const V28 = [
+  'ALTER TABLE products ADD COLUMN cost_price INTEGER CHECK (cost_price IS NULL OR cost_price >= 0)',
+  `CREATE TABLE gifts (
+    id INTEGER PRIMARY KEY,
+    product_id INTEGER NOT NULL REFERENCES products(id),
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    unit_cost INTEGER CHECK (unit_cost IS NULL OR unit_cost >= 0),
+    unit_price INTEGER NOT NULL CHECK (unit_price >= 0),
+    account TEXT NOT NULL CHECK (account IN ('cigares', 'alcool')),
+    given_by INTEGER NOT NULL REFERENCES users(id),
+    given_by_name TEXT NOT NULL,
+    member_id INTEGER REFERENCES members(id),
+    reason TEXT,
+    biz_date TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    cancelled_at TEXT,
+    cancelled_by INTEGER REFERENCES users(id),
+    cancel_reason TEXT
+  )`,
+  'CREATE INDEX gifts_date ON gifts(biz_date)',
+  'CREATE TABLE stock_movements_v28 AS SELECT * FROM stock_movements',
+  'DROP TABLE stock_movements',
+  `CREATE TABLE stock_movements (
+    id INTEGER PRIMARY KEY,
+    product_id INTEGER NOT NULL REFERENCES products(id),
+    kind TEXT NOT NULL CHECK (kind IN ('stock_initial', 'entree', 'vente', 'annulation_vente', 'retour', 'ajustement', 'offert', 'annulation_offert')),
+    quantity INTEGER NOT NULL CHECK (quantity <> 0),
+    stock_after INTEGER NOT NULL CHECK (stock_after >= 0),
+    charge_id INTEGER REFERENCES charges(id),
+    reason TEXT,
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    gift_id INTEGER REFERENCES gifts(id)
+  )`,
+  `INSERT INTO stock_movements (id, product_id, kind, quantity, stock_after, charge_id, reason, created_at, created_by)
+   SELECT id, product_id, kind, quantity, stock_after, charge_id, reason, created_at, created_by FROM stock_movements_v28`,
+  'DROP TABLE stock_movements_v28',
+  'CREATE INDEX stock_movements_product ON stock_movements(product_id)',
+];
+
+export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28];
 
 export function migrate(db) {
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');

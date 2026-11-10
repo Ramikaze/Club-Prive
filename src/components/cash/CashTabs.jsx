@@ -1,5 +1,5 @@
-// The two tabs of the cash desk, for the administrator and the associés: « Caisse » (everything) and « Boutique »
-// (the counter sales). « Caisse » is exact: /caisse/boutique must not light it up as well.
+// The tabs of the cash desk, for the administrator and the associés: « Caisse » (everything), « Boutique » (the
+// counter sales) and « Offerts » (the products given away, at cost price). « Caisse » is exact: /caisse/boutique must not light it up as well.
 import { RouteTabs } from '../ui/ui.jsx';
 
 export default function CashTabs() {
@@ -9,6 +9,7 @@ export default function CashTabs() {
       items={[
         ['/caisse', 'Caisse', 'cash', true],
         ['/caisse/boutique', 'Boutique', 'shop'],
+        ['/caisse/offerts', 'Offerts', 'receipt'],
       ]}
     />
   );
