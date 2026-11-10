@@ -1,11 +1,11 @@
 // Application shell: side navigation (desktop), top bar and tab bar (phone), the signal of the demo
 // space (frame, watermark, banner) and its entry, account menu, password change and the guided tour.
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import BrandLogo from '../ui/BrandLogo.jsx';
 import Icon from '../ui/Icon.jsx';
 import { Modal, openDialog, closeAllDialogs } from '../ui/Modal.jsx';
-import { FormError, PasswordField } from '../ui/ui.jsx';
+import { FormError, PasswordField, Skeleton } from '../ui/ui.jsx';
 import { toast } from '../ui/toast.jsx';
 import GuidedTour, { TOUR_DEMO_DONE_KEY } from '../ui/GuidedTour.jsx';
 import { api } from '../../lib/api.js';
@@ -249,7 +249,8 @@ export default function AppShell() {
             <button type="button" className="btn btn-sm" onClick={leaveDemo}>Quitter</button>
           </div>
         )}
-        <main id="main" tabIndex={-1}><Outlet /></main>
+        {/* Pages are downloaded when first opened (App.jsx): the shell stays while one loads. */}
+        <main id="main" tabIndex={-1}><Suspense fallback={<div className="card"><Skeleton /></div>}><Outlet /></Suspense></main>
       </div>
       <nav className="tabbar" aria-label="Navigation" data-tour="nav-mobile">
         {NAV.filter((n) => n.tab).map((n) => (

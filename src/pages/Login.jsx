@@ -9,6 +9,20 @@ import { api } from '../lib/api.js';
 import { useSubmit } from '../lib/hooks.js';
 import { useStore } from '../store/useStore.js';
 
+// Whether the club is installed (first administrator still to create). The app asks it at start-up, alongside the
+// session check (prefetchSetup in App.jsx boot), so the sign-in screen does not wait for that check first. The answer
+// is used once: a later sign-in screen (after signing out) asks again.
+let earlySetup = null;
+export function prefetchSetup() {
+  earlySetup = api.get('/api/setup');
+  earlySetup.catch(() => {});
+}
+function loadSetup() {
+  const answer = earlySetup ?? api.get('/api/setup');
+  earlySetup = null;
+  return answer;
+}
+
 function LoginForm({ onSignedIn, onForgot }) {
   const [v, setV] = useState({ login: '', password: '' });
   const { busy, error, submit } = useSubmit();
@@ -136,7 +150,7 @@ export default function Login() {
     if (!prefersReducedMotion() && !navigator.connection?.saveData) video.play().catch(() => {});
   }, []);
   useEffect(() => {
-    api.get('/api/setup').then(setSetup).catch(() => setSetup({ needed: false }));
+    loadSetup().then(setSetup).catch(() => setSetup({ needed: false }));
   }, []);
   return (
     <div className={`login-page${leaving ? ' is-leaving' : ''}`}>
