@@ -77,11 +77,11 @@ const STEPS = [
   },
   {
     route: '/caisse', targets: ['#caisse-recettes', '[data-tour="cash"]'], icon: 'wallet', title: 'Caisse',
-    body: 'Une seule page : l’argent reçu et les dépenses de la période, chacun détaillé avec son total (« Recettes du jour » pour le gérant ; « Argent encaissé » pour l’administrateur et les associés). En haut, « Soldes » partage la caisse en six tuiles : fond de caisse, crédit des cartes, Réservation de séance (l’argent commun des deux associés), Champagne et autres boissons, Cigare, et le solde en caisse, qui est leur somme. L’argent reçu compte aussi les approvisionnements de cartes, les repas extérieurs et les entrées diverses ; la recette par catégorie est dans « Par catégorie » (administrateurs).',
+    body: 'Une seule page : l’argent reçu et les dépenses de la période, chacun détaillé avec son total (« Recettes du jour » pour le gérant ; « Argent encaissé » pour l’administrateur et les associés). En haut, « Soldes » partage la caisse en six tuiles : fond de caisse, crédit des cartes, Réservation de séance (l’argent commun des deux associés), Champagne et autres boissons, Cigare, et le solde en caisse, qui est leur somme. L’argent reçu compte aussi les approvisionnements de cartes, les repas extérieurs et les entrées diverses ; la recette par catégorie est dans « Recette du jour par catégorie » (administrateurs).',
     features: ['« Payer un fournisseur », « Prendre des bénéfices » et « Faire un apport » sur chaque caisse', 'Une caisse ne passe jamais sous zéro', 'Remboursement tracé avec son motif'],
   },
   {
-    boss: true, route: '/caisse', targets: ['#caisse-categories', '[data-tour="cash"]'], icon: 'list', title: 'Par catégorie',
+    boss: true, route: '/caisse', targets: ['#caisse-categories', '[data-tour="cash"]'], icon: 'list', title: 'Recette du jour par catégorie',
     body: 'Trois colonnes, chacune sous sa caisse : Réservation de séance, Champagne et autres boissons (Champagne et Autres boissons) et Cigare. En haut de chacune, sa recette (ventes payées par carte membre comprises) ; leur somme est la recette du jour ; dessous, tout ce qui a été facturé, payé ou non. Une ligne explique l’écart avec l’argent encaissé.',
     features: ['« à encaisser » : facturé, pas encore payé', 'Une ligne annulée ou remboursée reste visible, barrée', 'Les ventes Boutique sont marquées « Boutique »'],
   },
