@@ -122,8 +122,36 @@ function LiveRoom({ rm, bizDay, onReload }) {
 }
 
 // The automatic renewals the card's money does not cover: soon (3 days ahead) or already blocked (up to 30 days
-// after the end). Each one has its message to the member, one click away.
+// after the end). Each one has its message to the member, one click away. Apart, those the card covers but the
+// automatic run could not make: staff renew them by hand from the member's page, which says what is wrong.
 function RenewalAlerts({ alerts }) {
+  const failed = alerts.filter((a) => a.state === 'echec');
+  const toTopUp = alerts.filter((a) => a.state !== 'echec');
+  return (
+    <>
+      {failed.length ? (
+        <section className="card">
+          <div className="card-head">
+            <h2>Renouvellements non faits</h2>
+            <span className="chip chip-danger">{`${failed.length} à renouveler à la main`}</span>
+          </div>
+          <div className="list">{failed.map((a) => (
+            <div className="list-item list-item-wrap" key={a.member_id}>
+              <div className="grow">
+                <div className="title"><Link to={`/membres/${a.member_id}`}>{a.member_name}</Link></div>
+                <div className="meta">{`Formule ${a.plan_name} terminée le ${dayLabel(a.end_date, 'short')} · ${money(a.balance)} sur la carte, assez pour ${money(a.price)}, mais le renouvellement automatique n’a pas abouti`}</div>
+              </div>
+              <Link className="btn btn-sm" to={`/membres/${a.member_id}`}>Ouvrir la fiche</Link>
+            </div>
+          ))}</div>
+        </section>
+      ) : null}
+      {toTopUp.length ? <RenewalTopUps alerts={toTopUp} /> : null}
+    </>
+  );
+}
+
+function RenewalTopUps({ alerts }) {
   return (
     <section className="card">
       <div className="card-head">

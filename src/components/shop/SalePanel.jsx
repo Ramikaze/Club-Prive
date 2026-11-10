@@ -32,6 +32,8 @@ export default function SalePanel({ account, products, cart, setCart, onSold, on
   const memberId = isMember ? buyer.person.id : null;
   const wallet = useLoad(() => (memberId ? api.get(`/api/members/${memberId}`) : Promise.resolve(null)), [memberId]);
   const loadingBalance = isMember && wallet.data === undefined && !wallet.error;
+  // A balance that could not be read is not « no credit »: the sale waits until it is read again.
+  const balanceUnread = isMember && wallet.data === undefined && Boolean(wallet.error);
   const balance = isMember ? (wallet.data?.wallet?.balance ?? 0) : 0;
   // The card only counts for a member who holds money: a choice made for a previous buyer falls back to the default.
   const cardUsable = isMember && balance > 0;
@@ -39,6 +41,7 @@ export default function SalePanel({ account, products, cart, setCart, onSold, on
   const clientId = buyer.kind === 'client' && buyer.person !== null ? buyer.person.id : null;
   const credit = useLoad(() => (clientId ? api.get(`/api/clients/${clientId}/account`) : Promise.resolve(null)), [clientId]);
   const loadingCredit = clientId !== null && credit.data === undefined && !credit.error;
+  const creditUnread = clientId !== null && credit.data === undefined && Boolean(credit.error);
   const creditAvailable = clientId ? (credit.data?.available ?? 0) : 0;
   const creditUsable = clientId !== null && (credit.data?.credit_limit ?? 0) > 0 && creditAvailable >= total;
   // « À crédit » stays chosen while the buyer is a regular client, even when the cart grows past what he may still
@@ -47,7 +50,7 @@ export default function SalePanel({ account, products, cart, setCart, onSold, on
   const method = (fallback ? null : picked) ?? (cardUsable ? CARD_METHOD : (methods[0] ?? ''));
   const byCard = cardUsable && method === CARD_METHOD;
   const onCredit = buyer.kind === 'client' && method === CREDIT_LABEL;
-  const creditBlocked = onCredit && clientId !== null && !loadingCredit && !creditUsable;
+  const creditBlocked = onCredit && clientId !== null && !loadingCredit && !creditUnread && !creditUsable;
   const rest = total - (byCard ? Math.min(balance, total) : 0);
   const needsBuyer = buyer.kind !== 'journalier' && buyer.person === null;
 
@@ -136,7 +139,8 @@ export default function SalePanel({ account, products, cart, setCart, onSold, on
             <Icon name="card" />
             <span><strong>{CARD_METHOD}</strong>
               <span className="subtle">{!isMember ? 'Choisissez le membre pour voir son solde'
-                : loadingBalance ? 'Lecture du solde…' : balance > 0 ? `${money(balance)} disponibles` : 'Aucun crédit sur la carte'}</span></span>
+                : loadingBalance ? 'Lecture du solde…' : balanceUnread ? 'Solde illisible'
+                  : balance > 0 ? `${money(balance)} disponibles` : 'Aucun crédit sur la carte'}</span></span>
           </label>
         )}
         {buyer.kind === 'client' && (
@@ -147,6 +151,7 @@ export default function SalePanel({ account, products, cart, setCart, onSold, on
             <span><strong>{CREDIT_LABEL}</strong>
               <span className="subtle">{clientId === null ? 'Choisissez le client pour voir son crédit'
                 : loadingCredit ? 'Lecture du crédit…'
+                  : creditUnread ? 'Crédit illisible'
                   : !(credit.data?.credit_limit > 0) ? 'Pas de crédit (plafond à fixer sur sa fiche)'
                     : `${money(creditAvailable)} de crédit disponible${creditAvailable < total ? ' : pas assez pour ce panier' : ''}`}</span></span>
           </label>
@@ -165,11 +170,18 @@ export default function SalePanel({ account, products, cart, setCart, onSold, on
             {methods.map((x) => <option key={x}>{x}</option>)}</select></label>
       )}
 
+      {(balanceUnread || creditUnread) && (
+        <Notice kind="warn">
+          {balanceUnread ? 'Le solde de la carte n’a pas pu être lu' : 'Le crédit du client n’a pas pu être lu'} : vérifiez le
+          réseau, puis réessayez avant d’encaisser.{' '}
+          <button type="button" className="btn btn-sm" onClick={balanceUnread ? wallet.retry : credit.retry}>Réessayer</button>
+        </Notice>
+      )}
       {creditBlocked && rows.length > 0 && (
         <Notice kind="warn">Crédit insuffisant pour ce panier : retirez un produit ou choisissez un autre moyen de paiement.</Notice>
       )}
       <FormError error={error} />
-      <button type="submit" className="btn btn-primary btn-block" disabled={busy || loadingBalance || loadingCredit || creditBlocked || !rows.length || needsBuyer} aria-busy={busy}>
+      <button type="submit" className="btn btn-primary btn-block" disabled={busy || loadingBalance || loadingCredit || balanceUnread || creditUnread || creditBlocked || !rows.length || needsBuyer} aria-busy={busy}>
         {!rows.length ? 'Encaisser' : onCredit ? `Vendre à crédit ${money(total)}` : `Encaisser ${money(total)}`}
       </button>
       {needsBuyer && <p className="subtle">Choisissez l’acheteur pour encaisser.</p>}

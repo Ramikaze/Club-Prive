@@ -88,11 +88,15 @@ function ErrorScreen({ title, message, reloadLabel }) {
 // An error raised while drawing the signed-in app would leave a white page: this shows a plain screen
 // instead. It catches what React raises while rendering, not what a click or a request raises (those
 // show their own messages).
-class CrashBoundary extends Component {
-  state = { crashed: false };
+// A part of the app fetched on demand (a page, the client space) that did not download: weak network, or a new
+// version put online since the page was opened. Each browser words it its own way.
+const DOWNLOAD_FAILED = /dynamically imported module|Importing a module script failed|Unable to preload CSS/i;
 
-  static getDerivedStateFromError() {
-    return { crashed: true };
+class CrashBoundary extends Component {
+  state = { crashed: false, download: false };
+
+  static getDerivedStateFromError(error) {
+    return { crashed: true, download: DOWNLOAD_FAILED.test(String(error?.message ?? '')) };
   }
 
   componentDidCatch(error, info) {
@@ -101,6 +105,15 @@ class CrashBoundary extends Component {
 
   render() {
     if (!this.state.crashed) return this.props.children;
+    if (this.state.download) {
+      return (
+        <ErrorScreen
+          title="Chargement impossible"
+          message="Une partie de l’application n’a pas pu être téléchargée. Vérifiez la connexion internet, puis rechargez la page : ce qui est déjà enregistré n’est pas perdu."
+          reloadLabel="Recharger"
+        />
+      );
+    }
     return (
       <ErrorScreen
         title="Un problème d’affichage est survenu"
@@ -214,5 +227,6 @@ function StaffApp() {
 // application runs there (no session check, no staff store, no demo header): the choice is made before StaffApp's hooks.
 export default function App() {
   if (!/^\/client(\/|$)/.test(window.location.pathname)) return <StaffApp />;
-  return <Suspense fallback={<div className="card"><Skeleton /></div>}><ClientApp /></Suspense>;
+  // Its own crash screen is inside the part downloaded on demand: this one shows when that download fails.
+  return <CrashBoundary><Suspense fallback={<div className="card"><Skeleton /></div>}><ClientApp /></Suspense></CrashBoundary>;
 }

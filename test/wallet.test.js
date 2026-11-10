@@ -875,12 +875,23 @@ test('renouvellements isolés : la panne d’un membre ne bloque ni l’accueil 
     if (memberId === broken.member.id) throw new Error('Panne simulée');
     return r;
   };
-  console.error = () => {};
+  const logged = [];
+  console.error = (...args) => logged.push(args.map(String).join(' '));
   const charges = () => club.get('SELECT COUNT(*) AS n FROM charges WHERE member_id = ?', broken.member.id).n;
   const linesBefore = charges();
   atDay(addDays(broken.end, 1));
   try {
-    ok(await manager.get('/api/dashboard'));
+    const home = ok(await manager.get('/api/dashboard'));
+    // The failure is not silent: the log names the member, the home page and the member's page show it.
+    assert.ok(logged.some((line) => line.includes(`membre id ${broken.member.id}`) && line.includes('Panne simulée')));
+    const alert = home.renewal_alerts.find((a) => a.member_id === broken.member.id);
+    assert.equal(alert.state, 'echec');
+    assert.equal(alert.balance, 60000 * UM);
+    assert.equal(alert.price, 50000 * UM);
+    assert.equal(alert.missing, 0);
+    assert.equal(alert.end_date, broken.end);
+    assert.ok(!home.renewal_alerts.some((a) => a.member_id === fine.member.id));
+    assert.equal((await renewalOf(broken.member.id)).state, 'echec');
     assert.equal(subscriptionsOf(broken.member.id).length, 1);
     assert.equal(charges(), linesBefore);
     assert.equal(balance(broken.member.id), 60000 * UM);
@@ -895,6 +906,7 @@ test('renouvellements isolés : la panne d’un membre ne bloque ni l’accueil 
     server.api.runRenewals();
     assert.equal(subscriptionsOf(broken.member.id).length, 2);
     assert.equal(balance(broken.member.id), 10000 * UM);
+    assert.equal(await renewalOf(broken.member.id), null);
   } finally {
     club.activateSubscription = activate;
     console.error = logError;

@@ -39,12 +39,15 @@ export default function EntryDialog({ close, kind, categories, onDone, categoryC
   });
   // The tracked suppliers, for a purchase recorded by the administrator or an associé (the manager pays none).
   const [suppliers, setSuppliers] = useState(presetSupplier ? [presetSupplier] : []);
+  const [suppliersUnread, setSuppliersUnread] = useState(false);
+  const [suppliersTry, setSuppliersTry] = useState(0);
   useEffect(() => {
     if (!isAdmin || kind !== 'depense') return undefined;
     let live = true;
-    api.get('/api/suppliers').then((r) => { if (live) setSuppliers(r.suppliers); }).catch(() => {});
+    setSuppliersUnread(false);
+    api.get('/api/suppliers').then((r) => { if (live) setSuppliers(r.suppliers); }).catch(() => { if (live) setSuppliersUnread(true); });
     return () => { live = false; };
-  }, [isAdmin, kind]);
+  }, [isAdmin, kind, suppliersTry]);
   const { busy, error, submit } = useSubmit();
   const set = (k) => (e) => setV({ ...v, [k]: e.target.value });
   const category = options.find((c) => String(c.id) === String(v.category_id));
@@ -54,6 +57,8 @@ export default function EntryDialog({ close, kind, categories, onDone, categoryC
   // The suppliers this purchase may pay: those of its caisse (an inactive one only if already chosen).
   const payable = purchase && isAdmin ? suppliers.filter((x) => x.account === purchase && (x.active || String(x.id) === v.supplier_id)) : [];
   const supplier = payable.find((x) => String(x.id) === v.supplier_id) ?? null;
+  // Unread suppliers are not « no supplier »: a purchase saved now could not lower what the club owes one of them.
+  const suppliersMissing = suppliersUnread && Boolean(purchase) && isAdmin && !presetSupplier;
   const pickSupplier = (e) => {
     const next = payable.find((x) => String(x.id) === e.target.value);
     setV({ ...v, supplier_id: e.target.value, foreign_currency: next?.currency ?? v.foreign_currency });
@@ -115,6 +120,12 @@ export default function EntryDialog({ close, kind, categories, onDone, categoryC
         ) : (
           <Notice kind="warn">{kind === 'depense' ? 'Aucun type de dépense actif.' : 'Aucune catégorie active.'} Un administrateur peut en créer dans Paramètres, rubrique Catégories.</Notice>
         ))}
+        {suppliersMissing && (
+          <Notice kind="warn">
+            La liste des fournisseurs n’a pas pu être lue : vérifiez le réseau, puis réessayez avant d’enregistrer cet achat.{' '}
+            <button type="button" className="btn btn-sm" onClick={() => setSuppliersTry((n) => n + 1)}>Réessayer</button>
+          </Notice>
+        )}
         {payable.length > 0 && (
           <label className="field"><span>Fournisseur</span>
             <select value={supplier ? v.supplier_id : ''} onChange={pickSupplier}>
@@ -157,7 +168,7 @@ export default function EntryDialog({ close, kind, categories, onDone, categoryC
         <FormError error={error} />
         <div className="modal-actions">
           <button type="button" className="btn" onClick={close}>Annuler</button>
-          <button type="submit" className="btn btn-primary" disabled={busy || (kind !== 'transfert' && !options.length)} aria-busy={busy}>Enregistrer</button>
+          <button type="submit" className="btn btn-primary" disabled={busy || suppliersMissing || (kind !== 'transfert' && !options.length)} aria-busy={busy}>Enregistrer</button>
         </div>
       </form>
     </Modal>

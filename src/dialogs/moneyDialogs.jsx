@@ -41,6 +41,8 @@ function PaymentDialog({ close, due, memberName, onDone }) {
   const cardPart = byCard ? Math.min(balance, total) : 0;
   const rest = total - cardPart;
   const loadingBalance = Boolean(memberId) && memberState.data === undefined && !memberState.error;
+  // A balance that could not be read is not « no credit »: nothing is collected until it is read again.
+  const balanceUnread = Boolean(memberId) && memberState.data === undefined && Boolean(memberState.error);
 
   const toggle = (id, on) => setChecked((prev) => {
     const next = new Set(prev);
@@ -100,7 +102,8 @@ function PaymentDialog({ close, due, memberName, onDone }) {
                 onChange={() => setPicked(CARD_METHOD)} />
               <Icon name="card" />
               <span><strong>{CARD_METHOD}</strong>
-                <span className="subtle">{loadingBalance ? 'Lecture du solde…' : balance > 0 ? `${money(balance)} disponibles` : 'Aucun crédit sur la carte'}</span></span>
+                <span className="subtle">{loadingBalance ? 'Lecture du solde…' : balanceUnread ? 'Solde illisible'
+                  : balance > 0 ? `${money(balance)} disponibles` : 'Aucun crédit sur la carte'}</span></span>
             </label>
             {methods.map((x) => (
               <label key={x} className="pay-method">
@@ -117,9 +120,15 @@ function PaymentDialog({ close, due, memberName, onDone }) {
           ) : null}
         </div>
         {byCard ? <p className="subtle">Le ticket imprimé est à faire signer par le membre.</p> : null}
+        {balanceUnread && (
+          <Notice kind="warn">
+            Le solde de la carte n’a pas pu être lu : vérifiez le réseau, puis réessayez avant d’encaisser.{' '}
+            <button type="button" className="btn btn-sm" onClick={memberState.retry}>Réessayer</button>
+          </Notice>
+        )}
         <FormError error={error} />
         <div className="modal-actions"><button type="button" className="btn" onClick={close}>Annuler</button>
-          <button type="submit" className="btn btn-primary" id="pay-submit" disabled={busy || loadingBalance || selected.length === 0} aria-busy={busy}>
+          <button type="submit" className="btn btn-primary" id="pay-submit" disabled={busy || loadingBalance || balanceUnread || selected.length === 0} aria-busy={busy}>
             {selected.length ? `Encaisser ${money(total)}` : 'Encaisser'}</button></div>
       </form>
     </Modal>
