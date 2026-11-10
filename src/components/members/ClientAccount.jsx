@@ -5,7 +5,7 @@
 import { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import Icon from '../ui/Icon.jsx';
-import { Empty, Loaded } from '../ui/ui.jsx';
+import { CancelledChip, Empty, Loaded } from '../ui/ui.jsx';
 import { api } from '../../lib/api.js';
 import { useLoad } from '../../lib/hooks.js';
 import { money, dateTime } from '../../lib/format.js';
@@ -21,7 +21,7 @@ function Statement({ movements, isBoss, onChanged }) {
         <tr key={x.key} className={x.cancelled_at ? 'is-muted' : ''}>
           <td data-label="Date" className="nowrap">{dateTime(x.at)}</td>
           <td data-label="Opération"><span><strong>{x.label}</strong>
-            {x.cancelled_at ? <> <span className="chip chip-neutral">annulé</span></> : null}
+            {x.cancelled_at ? <> <CancelledChip /></> : null}
             {x.detail ? <span className="subtle"> · {x.detail}</span> : null}
             {x.by ? <span className="subtle"> · {x.by}</span> : null}</span></td>
           <td data-label="Dû" className="num">{x.due ? money(x.due) : '—'}</td>
@@ -30,7 +30,7 @@ function Statement({ movements, isBoss, onChanged }) {
           <td className="actions"><span className="row-actions">
             {x.kind === 'reglement' ? <Link className="btn btn-sm" to={`/caisse/ticket/${x.payment_id}`} title={x.ticket_number}>Ticket</Link> : null}
             {x.kind === 'reglement' && !x.cancelled_at && isBoss
-              ? <button type="button" className="btn btn-sm btn-ghost" onClick={() => openCancelSettlementDialog(x, onChanged)}>Annuler</button> : null}
+              ? <button type="button" className="btn btn-sm btn-ghost" onClick={() => openCancelSettlementDialog(x, onChanged)}>Annuler le règlement</button> : null}
           </span></td>
         </tr>
       ))}</tbody>

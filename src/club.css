@@ -9,6 +9,8 @@
   --surface-3: #e8dcc8;
   --border: #dfd1b8;
   --border-strong: #c5b293;
+  /* The border of a field: at least 3:1 against the page and the cards (WCAG 1.4.11), even in strong light. */
+  --field-border: #94805f;
   --text: #241c15;
   --text-2: #5a4b3c;
   --text-3: #705e4b;
@@ -79,6 +81,7 @@
   --surface-3: #2e2924;
   --border: #36302a;
   --border-strong: #4d443b;
+  --field-border: #7a6d5c;
   --text: #f2ebe1;
   --text-2: #bfb5a8;
   --text-3: #918679;
@@ -119,6 +122,7 @@
     --surface-3: #2e2924;
     --border: #36302a;
     --border-strong: #4d443b;
+    --field-border: #7a6d5c;
     --text: #f2ebe1;
     --text-2: #bfb5a8;
     --text-3: #918679;
@@ -511,7 +515,7 @@ table.table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
 .field .help.is-over { color: var(--danger); font-weight: 600; }
 input, select, textarea {
   font: inherit; color: var(--text); background: var(--surface);
-  border: 1px solid var(--border-strong); border-radius: 10px;
+  border: 1px solid var(--field-border); border-radius: 10px;
   min-height: 44px; padding: 8px 12px; width: 100%;
 }
 textarea { min-height: 80px; resize: vertical; }
@@ -1321,6 +1325,12 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .stepper { display: inline-flex; align-items: center; gap: 4px; }
 .stepper .btn { min-width: 36px; padding: 0 8px; justify-content: center; }
 .stepper output { min-width: 2ch; text-align: center; font-variant-numeric: tabular-nums; font-weight: 600; }
+/* On a touch screen (tablet, phone) the small buttons keep a finger-sized target of 44 px, the quantity buttons
+   included; with a mouse they stay compact. */
+@media (pointer: coarse) {
+  .btn-sm { min-height: 44px; }
+  .stepper .btn { min-width: 44px; }
+}
 .sale-empty { margin: 0; }
 .sale-panel .calc { margin: 0; }
 .sale-panel .pay-methods { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }

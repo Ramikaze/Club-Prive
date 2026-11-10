@@ -4,7 +4,7 @@
 import { useParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
 import { actionDialog, openDialog } from '../components/ui/Modal.jsx';
-import { DemoChip, Loaded, Notice, PageHead } from '../components/ui/ui.jsx';
+import { CancelledChip, DemoChip, Loaded, Notice, PageHead } from '../components/ui/ui.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import EntryDialog from '../components/cash/EntryDialog.jsx';
 import { cancelEntry } from '../components/cash/CashRow.jsx';
@@ -32,7 +32,7 @@ function Operation({ l }) {
     : [l.label !== l.kind_label ? l.label : null, l.reference && `Facture ${l.reference}`].filter(Boolean);
   return (
     <div className="supplier-op">
-      <strong>{l.kind_label}</strong>{l.status !== 'active' && <> <span className="chip">annulé</span></>}
+      <strong>{l.kind_label}</strong>{l.status !== 'active' && <> <CancelledChip /></>}
       {extra.length > 0 && <div className="subtle">{extra.join(' · ')}</div>}
       {l.created_by_name && <div className="subtle">par {l.created_by_name}</div>}
       {l.status !== 'active' && l.cancel_reason && <div className="subtle">Annulé par {l.cancelled_by_name} : {l.cancel_reason}</div>}

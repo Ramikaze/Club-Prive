@@ -62,7 +62,7 @@ function errorResponse(err) {
     return json(409, { error: { code: 'CONTRAINTE', message: 'Opération refusée : elle rendrait les données incohérentes.' } });
   }
   console.error(err);
-  return json(500, { error: { code: 'ERREUR_SERVEUR', message: "Erreur interne. L'opération n'a pas été enregistrée." } });
+  return json(500, { error: { code: 'ERREUR_SERVEUR', message: 'Erreur interne : l’opération n’a pas été enregistrée. Réessayez ; si cela continue, prévenez l’administrateur.' } });
 }
 
 async function readJson(request, limit = MAX_BODY) {
@@ -75,7 +75,7 @@ async function readJson(request, limit = MAX_BODY) {
     if (data === null || typeof data !== 'object' || Array.isArray(data)) throw new Error('not an object');
     return data;
   } catch {
-    throw invalid('Corps de requête JSON invalide.');
+    throw invalid('Les informations envoyées sont illisibles : rechargez la page, puis recommencez.');
   }
 }
 
@@ -514,7 +514,7 @@ export function createApi({ db, env = {}, demo = false, sendPush: pushSender = n
     const type = String(request.headers.get('content-type') ?? '');
     if (!type.startsWith('application/json')) throw new AppError(415, 'TYPE_CONTENU', 'Requête refusée : JSON attendu.');
     const origin = request.headers.get('origin');
-    if (origin && origin !== url.origin && !allowedOrigins.includes(origin)) throw forbidden('Requête refusée : origine inconnue.');
+    if (origin && origin !== url.origin && !allowedOrigins.includes(origin)) throw forbidden('Opération refusée : ouvrez l’application depuis son adresse habituelle, puis recommencez.');
   }
 
   // Every write, the staff's (handle) and the client's (worker/clientApi.js), runs here; `records` says where the
@@ -526,7 +526,7 @@ export function createApi({ db, env = {}, demo = false, sendPush: pushSender = n
   // notifications the handler queued in `ctx.after` go out (notify); a replay, which runs no handler, queues none.
   async function runWrite(request, url, route, ctx, records, ownerId) {
     const key = route.opts.noIdempotency ? undefined : request.headers.get('idempotency-key') ?? undefined;
-    if (key !== undefined && !/^[A-Za-z0-9_-]{8,100}$/.test(key)) throw invalid("Clé d'idempotence invalide.");
+    if (key !== undefined && !/^[A-Za-z0-9_-]{8,100}$/.test(key)) throw invalid('Cette opération n’a pas pu être enregistrée : rechargez la page, puis recommencez.');
     const hash = key && ownerId ? await sha256Hex(JSON.stringify([request.method, url.pathname, ctx.body])) : null;
     const replay = () => {
       const prev = club.get(records.find, key, ownerId);

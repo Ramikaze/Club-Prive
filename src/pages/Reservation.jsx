@@ -50,7 +50,7 @@ function ReservationDetail({ d, products, reload }) {
 
   const lineActions = (c) => (
     <>
-      {c.status === 'due' && (c.kind === 'produit' || isAdmin) ? <button type="button" className="btn btn-sm btn-ghost" onClick={() => cancelChargeDialog(c, reload)}>Annuler</button> : null}
+      {c.status === 'due' && (c.kind === 'produit' || isAdmin) ? <button type="button" className="btn btn-sm btn-ghost" onClick={() => cancelChargeDialog(c, reload)}>Annuler la ligne</button> : null}
       {c.status === 'payee' && canRefund() ? <button type="button" className="btn btn-sm btn-ghost" onClick={() => openRefundDialog(c, reload)}>Rembourser</button> : null}
     </>
   );

@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
 import SmartSearch from '../components/ui/SmartSearch.jsx';
-import { DemoChip, Empty, FormError, Loaded, PageHead, ProductPhoto, Segmented } from '../components/ui/ui.jsx';
+import { DemoChip, Empty, FormError, Loaded, PageHead, ProductPhoto, Segmented, Skeleton } from '../components/ui/ui.jsx';
 import { Modal, actionDialog, openDialog } from '../components/ui/Modal.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import { api, newKey } from '../lib/api.js';
@@ -209,8 +209,8 @@ function HistoryDialog({ close, product }) {
   const { data, error } = useLoad(() => api.get(`/api/stock-movements?product_id=${product.id}&limit=200`), []);
   const excel = useBusy();
   let content;
-  if (error) content = <div className="form-error">{error.message}</div>;
-  else if (data === undefined) content = <p className="subtle">Chargement…</p>;
+  if (error) content = <FormError error={error.message} />;
+  else if (data === undefined) content = <Skeleton />;
   else {
     content = (
       <>

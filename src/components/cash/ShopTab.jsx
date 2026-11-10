@@ -7,7 +7,7 @@ import { Link } from 'react-router-dom';
 import Icon from '../ui/Icon.jsx';
 import { actionDialog } from '../ui/Modal.jsx';
 import { toast } from '../ui/toast.jsx';
-import { Loaded, PageHead } from '../ui/ui.jsx';
+import { CancelledChip, Loaded, PageHead } from '../ui/ui.jsx';
 import PeriodPicker, { usePeriod } from '../ui/PeriodPicker.jsx';
 import CashTabs from './CashTabs.jsx';
 import { CashRow, metaLine } from './CashRow.jsx';
@@ -54,7 +54,7 @@ function SaleRow({ sale, canCancel, onDone }) {
   const cancelled = !!sale.cancelled_at;
   return (
     <CashRow
-      title={<>{productsOf(sale)}{cancelled && <> <span className="chip chip-danger">annulée</span></>}</>}
+      title={<>{productsOf(sale)}{cancelled && <> <CancelledChip label="annulée" /></>}</>}
       meta={metaLine(dateTime(sale.created_at), ticketLink(sale.payment_id, sale.ticket_number), <Buyer sale={sale} />,
         sale.method && paymentMethodText(sale), sale.created_by_name && `par ${sale.created_by_name}`)}
       note={cancelled ? `Annulée le ${dateTime(sale.cancelled_at)}${sale.cancelled_by_name ? ` par ${sale.cancelled_by_name}` : ''} : ${sale.cancel_reason ?? ''}` : null}
