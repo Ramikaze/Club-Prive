@@ -1,39 +1,42 @@
 // Boot (session check), sign-in, then the routed application. Every rule is enforced by the server;
 // the guards here only avoid showing pages the server would refuse.
-import { Component, useEffect, useRef, useState } from 'react';
+import { Component, Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { HashRouter, Routes, Route, Link, Navigate, useLocation } from 'react-router-dom';
 import AppShell from './components/layout/AppShell.jsx';
 import { DialogRoot, closeAllDialogs } from './components/ui/Modal.jsx';
 import { Toasts } from './components/ui/toast.jsx';
-import { Empty } from './components/ui/ui.jsx';
-import Login from './pages/Login.jsx';
-import Dashboard from './pages/Dashboard.jsx';
-import Rooms from './pages/Rooms.jsx';
-import Agenda from './pages/Agenda.jsx';
-import Members from './pages/Members.jsx';
-import Member from './pages/Member.jsx';
-import ClientsList from './components/members/ClientsList.jsx';
-import MemberCard from './pages/MemberCard.jsx';
-import Statement from './pages/Statement.jsx';
-import Reservation from './pages/Reservation.jsx';
-import BookingConfirmation from './pages/BookingConfirmation.jsx';
-import Products from './pages/Products.jsx';
-import Shop from './pages/Shop.jsx';
-import Orders from './pages/Orders.jsx';
-import Cash from './pages/Cash.jsx';
-import ShopTab from './components/cash/ShopTab.jsx';
-import Ticket from './pages/Ticket.jsx';
-import TicketHistory from './pages/TicketHistory.jsx';
-import Treasury from './pages/Treasury.jsx';
-import Ledger from './pages/Ledger.jsx';
-import Closing from './pages/Closing.jsx';
-import Settings from './pages/Settings.jsx';
-import AuditJournal from './pages/AuditJournal.jsx';
-import Suppliers from './pages/Suppliers.jsx';
-import Supplier from './pages/Supplier.jsx';
+import { Empty, Skeleton } from './components/ui/ui.jsx';
+import Login, { prefetchSetup } from './pages/Login.jsx';
 import PublicTicket, { isPublicTicketHash } from './pages/PublicTicket.jsx';
-import ClientApp from './client/ClientApp.jsx';
 import { api, setUnauthorizedHandler } from './lib/api.js';
+
+// Each page is downloaded the first time it is opened, so the sign-in screen and the client space do not wait for
+// every staff page (site speed review, 2026-11-10). The shell shows a placeholder meanwhile (AppShell's Suspense).
+const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
+const Rooms = lazy(() => import('./pages/Rooms.jsx'));
+const Agenda = lazy(() => import('./pages/Agenda.jsx'));
+const Members = lazy(() => import('./pages/Members.jsx'));
+const Member = lazy(() => import('./pages/Member.jsx'));
+const ClientsList = lazy(() => import('./components/members/ClientsList.jsx'));
+const MemberCard = lazy(() => import('./pages/MemberCard.jsx'));
+const Statement = lazy(() => import('./pages/Statement.jsx'));
+const Reservation = lazy(() => import('./pages/Reservation.jsx'));
+const BookingConfirmation = lazy(() => import('./pages/BookingConfirmation.jsx'));
+const Products = lazy(() => import('./pages/Products.jsx'));
+const Shop = lazy(() => import('./pages/Shop.jsx'));
+const Orders = lazy(() => import('./pages/Orders.jsx'));
+const Cash = lazy(() => import('./pages/Cash.jsx'));
+const ShopTab = lazy(() => import('./components/cash/ShopTab.jsx'));
+const Ticket = lazy(() => import('./pages/Ticket.jsx'));
+const TicketHistory = lazy(() => import('./pages/TicketHistory.jsx'));
+const Treasury = lazy(() => import('./pages/Treasury.jsx'));
+const Ledger = lazy(() => import('./pages/Ledger.jsx'));
+const Closing = lazy(() => import('./pages/Closing.jsx'));
+const Settings = lazy(() => import('./pages/Settings.jsx'));
+const AuditJournal = lazy(() => import('./pages/AuditJournal.jsx'));
+const Suppliers = lazy(() => import('./pages/Suppliers.jsx'));
+const Supplier = lazy(() => import('./pages/Supplier.jsx'));
+const ClientApp = lazy(() => import('./client/ClientApp.jsx'));
 import { isDemoSpace, leaveDemo } from './lib/space.js';
 import { applyTheme } from './lib/theme.js';
 import { useStore, useIsAdmin, useIsBoss } from './store/useStore.js';
@@ -110,6 +113,9 @@ class CrashBoundary extends Component {
 
 async function boot() {
   const store = useStore.getState();
+  // The sign-in screen asks whether the club is installed: asked now, alongside the session check, it does not wait
+  // for the session's answer first.
+  prefetchSetup();
   try {
     store.setBundle(await api.get('/api/me'));
   } catch (e) {
@@ -207,5 +213,6 @@ function StaffApp() {
 // /client is the client space: a separate application, with its own sign-in and its own API. Nothing of the staff
 // application runs there (no session check, no staff store, no demo header): the choice is made before StaffApp's hooks.
 export default function App() {
-  return /^\/client(\/|$)/.test(window.location.pathname) ? <ClientApp /> : <StaffApp />;
+  if (!/^\/client(\/|$)/.test(window.location.pathname)) return <StaffApp />;
+  return <Suspense fallback={<div className="card"><Skeleton /></div>}><ClientApp /></Suspense>;
 }
