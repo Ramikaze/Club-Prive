@@ -49,7 +49,7 @@ const EXPORT_SHEETS = {
 };
 const STOCK_KIND = {
   stock_initial: 'Stock initial', entree: 'Entrée', vente: 'Vente', annulation_vente: 'Annulation de vente',
-  retour: 'Retour (remboursement)', ajustement: 'Ajustement',
+  retour: 'Retour (remboursement)', ajustement: 'Ajustement', offert: 'Offert', annulation_offert: 'Offert annulé',
 };
 const SESSION_DAYS = 14;
 
@@ -58,7 +58,7 @@ const SESSION_DAYS = 14;
 const WIPE_ORDER = [
   // Tables of the former cigar-cave tracking, no longer in the app: kept in the database, still cleared by a reset.
   'humidor_readings', 'humidors',
-  'idempotency_keys', 'wallet_movements', 'payment_allocations', 'refunds', 'stock_movements', 'credit_movements', 'charges',
+  'idempotency_keys', 'wallet_movements', 'payment_allocations', 'refunds', 'stock_movements', 'credit_movements', 'charges', 'gifts',
   'client_ticket_copies', 'client_order_sales', 'client_order_lines', 'client_orders', 'reservation_requests',
   'client_idempotency', 'client_sessions', 'client_accounts',
   'ticket_events', 'payments', 'shop_sales',
@@ -2716,7 +2716,7 @@ export class Club {
     };
   }
 
-  moveStock(actor, productId, delta, kind, { chargeId = null, reason = null } = {}) {
+  moveStock(actor, productId, delta, kind, { chargeId = null, giftId = null, reason = null } = {}) {
     const res = this.run('UPDATE products SET stock_qty = stock_qty + ? WHERE id = ? AND stock_qty + ? >= 0', delta, productId, delta);
     if (res.changes !== 1) {
       const p = this.get('SELECT name, stock_qty FROM products WHERE id = ?', productId);
@@ -2724,9 +2724,9 @@ export class Club {
     }
     const { stock_qty: after } = this.get('SELECT stock_qty FROM products WHERE id = ?', productId);
     this.run(
-      `INSERT INTO stock_movements (product_id, kind, quantity, stock_after, charge_id, reason, created_at, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      productId, kind, delta, after, chargeId, reason, this.nowIso(), actor?.id ?? null,
+      `INSERT INTO stock_movements (product_id, kind, quantity, stock_after, charge_id, gift_id, reason, created_at, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      productId, kind, delta, after, chargeId, giftId, reason, this.nowIso(), actor?.id ?? null,
     );
     return after;
   }
@@ -3150,6 +3150,9 @@ export class Club {
       low: p.stock_qty <= p.low_stock_threshold, out: p.stock_qty === 0, photo_version: p.photo_version ?? null,
       // At least one charge (any status, session or Boutique): the category no longer changes.
       sold: !!p.sold,
+      // The cost price is a margin figure: only the administrator and the associés read it (this.viewer is the
+      // account of the request, set by worker/api.js just before each handler).
+      ...(isBoss(this.viewer) ? { cost_price: p.cost_price ?? null } : {}),
     };
   }
 
@@ -3177,7 +3180,10 @@ export class Club {
     const price = int(pick('price'), 'Prix de vente', { min: 0 });
     const threshold = int(pick('low_stock_threshold') ?? this.settings().low_stock_default, "Seuil d'alerte", { min: 0, max: 10000 });
     const active = input.active !== undefined ? flag(input.active) : current.active !== undefined ? !!current.active : true;
-    return { category, name, reference, description, price, threshold, active };
+    // Empty is « not known yet »; a cost price left out of the form keeps the current one.
+    const rawCost = input.cost_price !== undefined ? input.cost_price : current.cost_price;
+    const cost = rawCost === null || rawCost === undefined || rawCost === '' ? null : int(rawCost, 'Prix de revient', { min: 0 });
+    return { category, name, reference, description, price, threshold, active, cost };
   }
 
   // Product files, photos and stock belong to the rayon of an associé; the administrator owns both, and the
@@ -3192,9 +3198,9 @@ export class Club {
     if (this.get('SELECT 1 AS x FROM products WHERE reference = ?', f.reference)) throw conflict('REFERENCE_PRISE', 'Cette référence existe déjà.');
     const initial = input.initial_stock === undefined || input.initial_stock === '' ? 0 : int(input.initial_stock, 'Stock initial', { min: 0, max: 100000 });
     const id = this.insert(
-      `INSERT INTO products (category, name, reference, description, price, stock_qty, low_stock_threshold, active, is_demo, created_at, created_by)
-       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
-      f.category, f.name, f.reference, f.description, f.price, f.threshold, f.active ? 1 : 0, demo ? 1 : 0, this.nowIso(), actor.id,
+      `INSERT INTO products (category, name, reference, description, price, cost_price, stock_qty, low_stock_threshold, active, is_demo, created_at, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+      f.category, f.name, f.reference, f.description, f.price, f.cost, f.threshold, f.active ? 1 : 0, demo ? 1 : 0, this.nowIso(), actor.id,
     );
     if (initial > 0) this.moveStock(actor, id, initial, 'stock_initial', { reason: 'Création du produit' });
     this.audit(actor, 'produit.creer', 'product', id, { ...f, stock_initial: initial });
@@ -3216,13 +3222,13 @@ export class Club {
       throw conflict('CATEGORIE_VENDUE', 'Ce produit a déjà été vendu : sa catégorie ne change plus. Créez un nouveau produit et désactivez celui-ci.');
     }
     this.run(
-      `UPDATE products SET category = ?, name = ?, reference = ?, description = ?, price = ?, low_stock_threshold = ?, active = ?,
+      `UPDATE products SET category = ?, name = ?, reference = ?, description = ?, price = ?, cost_price = ?, low_stock_threshold = ?, active = ?,
          updated_at = ?, updated_by = ? WHERE id = ?`,
-      f.category, f.name, f.reference, f.description, f.price, f.threshold, f.active ? 1 : 0, this.nowIso(), actor.id, p.id,
+      f.category, f.name, f.reference, f.description, f.price, f.cost, f.threshold, f.active ? 1 : 0, this.nowIso(), actor.id, p.id,
     );
     this.audit(actor, 'produit.modifier', 'product', p.id, {
-      avant: { category: p.category, name: p.name, reference: p.reference, price: p.price, low_stock_threshold: p.low_stock_threshold, active: !!p.active },
-      apres: { category: f.category, name: f.name, reference: f.reference, price: f.price, low_stock_threshold: f.threshold, active: f.active },
+      avant: { category: p.category, name: p.name, reference: p.reference, price: p.price, cost_price: p.cost_price ?? null, low_stock_threshold: p.low_stock_threshold, active: !!p.active },
+      apres: { category: f.category, name: f.name, reference: f.reference, price: f.price, cost_price: f.cost, low_stock_threshold: f.threshold, active: f.active },
     });
     return this.productById(p.id);
   }

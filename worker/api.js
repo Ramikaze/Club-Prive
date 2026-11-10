@@ -524,6 +524,18 @@ export function createApi({ db, env = {}, demo = false, sendPush: pushSender = n
   // one transaction: the whole write commits or rolls back as one unit. A route that answers a secret shown once
   // (noIdempotency) never records nor replays: the answer would sit in the table. Once the transaction has committed, the
   // notifications the handler queued in `ctx.after` go out (notify); a replay, which runs no handler, queues none.
+  // Runs a route's handler as its account: `club.viewer` is set just before the (synchronous) handler and cleared
+  // after, never across an await, so a request that waits cannot leave its account to another one. What a reply
+  // shows may depend on it (the cost price of a product is only for the administrator and the associés).
+  function callHandler(route, ctx) {
+    club.viewer = ctx.user ?? null;
+    try {
+      return route.handler(ctx);
+    } finally {
+      club.viewer = null;
+    }
+  }
+
   async function runWrite(request, url, route, ctx, records, ownerId) {
     const key = route.opts.noIdempotency ? undefined : request.headers.get('idempotency-key') ?? undefined;
     if (key !== undefined && !/^[A-Za-z0-9_-]{8,100}$/.test(key)) throw invalid('Cette opération n’a pas pu être enregistrée : rechargez la page, puis recommencez.');
@@ -543,13 +555,13 @@ export function createApi({ db, env = {}, demo = false, sendPush: pushSender = n
     if (route.opts.prepare) await route.opts.prepare(ctx);
     let replayed = false;
     const payload = club.tx(() => {
-      if (!hash) return route.handler(ctx);
+      if (!hash) return callHandler(route, ctx);
       const previous = replay();
       if (previous !== undefined) {
         replayed = true;
         return previous;
       }
-      const result = route.handler(ctx);
+      const result = callHandler(route, ctx);
       club.run(records.insert, key, ownerId, hash, JSON.stringify(result ?? null), new Date().toISOString());
       return result;
     });
@@ -657,7 +669,7 @@ export function createApi({ db, env = {}, demo = false, sendPush: pushSender = n
 
       if (!writes || route.opts.readonly) {
         if (route.opts.prepare) await route.opts.prepare(ctx);
-        return respond(route.handler(ctx), cookies, false);
+        return respond(callHandler(route, ctx), cookies, false);
       }
 
       const { payload, replayed } = await runWrite(request, url, route, ctx, STAFF_RECORDS, ctx.user?.id);
