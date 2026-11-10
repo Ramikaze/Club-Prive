@@ -27,7 +27,7 @@ function AccountCard({ a, from, to, total = false }) {
 export default function Treasury() {
   const period = usePeriod('month');
   const { from, to } = period;
-  const state = useLoad(() => api.get(`/api/treasury${qs({ from, to })}`), [from, to]);
+  const state = useLoad((signal) => api.get(`/api/treasury${qs({ from, to })}`, { signal }), [from, to]);
   // The opening balances are part of the application's settings: only the administrator types them.
   const isAdmin = useIsAdmin();
 

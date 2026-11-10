@@ -160,6 +160,8 @@ test('18. clôture mensuelle : la période fermée refuse toute écriture jusqu�
     kind: 'depense', category_id: cat('Divers'), amount: 5000 * UM, method: 'Espèces', biz_date: lastMonth,
   }));
   assert.equal((await admin.post('/api/closings', { month: today.slice(0, 7) })).status, 400);
+  // The manager neither closes a month nor reopens one: only the administrator and the associés do.
+  assert.equal((await manager.post('/api/closings', { month })).status, 403);
   const closings = ok(await admin.post('/api/closings', { month }));
   const closed = closings.months.find((m) => m.month === month);
   assert.equal(closed.closed, true);
@@ -177,6 +179,7 @@ test('18. clôture mensuelle : la période fermée refuse toute écriture jusqu�
   ok(await admin.put('/api/settings', { opening_balances: { date: null, amounts: { 'Espèces': 100000 * UM } } })); // unchanged: accepted
 
   assert.equal((await admin.post(`/api/closings/${month}/reopen`, {})).status, 400);
+  assert.equal((await manager.post(`/api/closings/${month}/reopen`, { reason: 'Facture oubliée' })).status, 403);
   ok(await admin.post(`/api/closings/${month}/reopen`, { reason: 'Facture oubliée' }));
   const cancelled = ok(await admin.post(`/api/ledger/entries/${old.id}/cancel`, { reason: 'Doublon' }));
   assert.equal(cancelled.status, 'annulee');

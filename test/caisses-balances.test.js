@@ -181,3 +181,35 @@ test('le gérant ne lit pas les caisses', async () => {
     assert.equal((await c.ger.get('/api/caisses')).status, 403);
   } finally { c.server.destroy(); }
 });
+
+// A closed month takes no more money: collecting a note or refunding a paid line is refused (409 PERIODE_CLOTUREE)
+// and leaves nothing behind, so a closed month's accounts can never change silently. (Cancelling a line not paid yet
+// moves no money, only goods back to stock: it is not held by the closing.)
+test('mois clôturé : encaissement et remboursement refusés, rien n’est écrit', async () => {
+  const c = await club('mois-clos');
+  const { admin, ger, p, server } = c;
+  const refusedClosed = (r) => {
+    assert.equal(r.status, 409, JSON.stringify(r.data));
+    assert.equal(r.data.error.code, 'PERIODE_CLOTUREE');
+  };
+  try {
+    ok(await admin.post('/api/treasury/fund', { amounts: { 'Espèces': 100000 * UM } }));
+    const a = await c.member('Clo', '00 00 09 05', '06:00');
+    const due = await c.item(a, p.CHP);
+    const paidLine = await c.item(a, p.CIG);
+    ok(await ger.post('/api/payments', { charge_ids: [paidLine], method: 'Espèces' }));
+    const rows = () => server.club.get(`SELECT (SELECT COUNT(*) FROM payments) AS payments, (SELECT COUNT(*) FROM refunds) AS refunds,
+      (SELECT COUNT(*) FROM payment_allocations) AS allocations, (SELECT group_concat(id || ':' || status) FROM charges) AS charges`);
+    const before = { rows: rows(), caisses: await c.caisses() };
+    const month = c.today.slice(0, 7);
+    server.club.run("INSERT INTO closed_periods (month, closed_at, summary) VALUES (?, ?, '{}')", month, new Date().toISOString());
+    try {
+      refusedClosed(await ger.post('/api/payments', { charge_ids: [due], method: 'Espèces' }));
+      refusedClosed(await admin.post(`/api/charges/${paidLine}/refund`, { reason: 'Cigare abîmé', method: 'Espèces' }));
+    } finally {
+      server.club.run('DELETE FROM closed_periods WHERE month = ?', month);
+    }
+    assert.deepEqual(rows(), before.rows);
+    assert.deepEqual(await c.caisses(), before.caisses);
+  } finally { c.server.destroy(); }
+});
