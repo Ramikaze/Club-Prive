@@ -6,9 +6,12 @@ import { Modal, openDialog, actionDialog } from '../components/ui/Modal.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import { FormError } from '../components/ui/ui.jsx';
 import { useSubmit } from '../lib/hooks.js';
+import { useIsBoss } from '../store/useStore.js';
 
 function ClientDialog({ close, client, onDone }) {
   const editing = Boolean(client);
+  // The client-access code is sent to this phone: the manager does not change it once the file has a client access.
+  const phoneLocked = editing && !useIsBoss() && Boolean(client.has_client_access);
   const [key] = useState(newKey);
   const { busy, error, submit } = useSubmit();
   const [v, setV] = useState(() => ({
@@ -38,7 +41,8 @@ function ClientDialog({ close, client, onDone }) {
           <label className="field"><span>Nom</span><input {...field('last_name')} required maxLength={60} autoComplete="off" /></label>
         </div>
         <div className="form-row">
-          <label className="field"><span>Téléphone</span><input {...field('phone')} type="tel" required maxLength={30} autoComplete="off" /></label>
+          <label className="field"><span>Téléphone</span><input {...field('phone')} type="tel" required maxLength={30} autoComplete="off" disabled={phoneLocked} />
+            {phoneLocked && <span className="help">Ce client a un espace client : seuls l’administrateur et les associés changent son téléphone.</span>}</label>
           <label className="field"><span>Courriel (facultatif)</span><input {...field('email')} type="email" maxLength={120} autoComplete="off" /></label>
         </div>
         <label className="field"><span>Notes (facultatif)</span><textarea {...field('notes')} maxLength={500} /></label>

@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { api, newKey } from '../lib/api.js';
 import { money, fmtDuration, dayLabel, bizToday, subStateLabel } from '../lib/format.js';
-import { useStore, useSettings } from '../store/useStore.js';
+import { useStore, useSettings, useIsBoss } from '../store/useStore.js';
 import { openDialog, Modal, actionDialog } from '../components/ui/Modal.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import { Notice, FormError } from '../components/ui/ui.jsx';
@@ -29,6 +29,8 @@ const useActivePlans = () => {
 
 function MemberDialog({ close, member, onDone }) {
   const editing = Boolean(member);
+  // The client-access code is sent to this phone: the manager does not change it once the file has a client access.
+  const phoneLocked = editing && !useIsBoss() && Boolean(member.has_client_access);
   const [key] = useState(newKey);
   const [subKey] = useState(newKey);
   const plans = useActivePlans();
@@ -91,7 +93,8 @@ function MemberDialog({ close, member, onDone }) {
           <label className="field"><span>Nom</span><input {...field('last_name')} required maxLength={60} autoComplete="off" /></label>
         </div>
         <div className="form-row">
-          <label className="field"><span>Téléphone</span><input {...field('phone')} type="tel" required maxLength={30} autoComplete="off" /></label>
+          <label className="field"><span>Téléphone</span><input {...field('phone')} type="tel" required maxLength={30} autoComplete="off" disabled={phoneLocked} />
+            {phoneLocked && <span className="help">Ce client a un espace client : seuls l’administrateur et les associés changent son téléphone.</span>}</label>
           <label className="field"><span>Courriel (facultatif)</span><input {...field('email')} type="email" maxLength={120} autoComplete="off" /></label>
         </div>
         <label className="field"><span>Notes (facultatif)</span><textarea {...field('notes')} maxLength={500} /></label>

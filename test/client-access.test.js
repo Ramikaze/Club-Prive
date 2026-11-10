@@ -218,3 +218,24 @@ test('le code n’est jamais gardé dans les clés d’idempotence', async () =>
   const retry = await admin.call('POST', `/api/members/${m.id}/client-access/code`, {}, { 'idempotency-key': 'cle-test-0002' });
   assert.notEqual(retry.data.code, renewed.code);
 });
+
+// The temporary code is sent to the file's phone: the manager does not change the phone of a file that has a client
+// access, or he could have the code sent to himself (security audit run-2). Other fields, and files without an access,
+// stay his to edit.
+test('le gérant ne change pas le téléphone d’un client qui a un espace client', async () => {
+  const { server, admin, associate, manager } = await setup();
+  const m = await newMember(admin, '06 123 45 67');
+  const free = await newMember(admin, '06 222 22 22');
+  ok(await associate.post(`/api/members/${m.id}/client-access`, {}));
+  assert.equal(ok(await manager.get(`/api/members/${m.id}`)).has_client_access, true);
+  assert.equal(ok(await manager.get(`/api/members/${free.id}`)).has_client_access, false);
+  const r = await manager.put(`/api/members/${m.id}`, { first_name: 'jean', last_name: m.last_name, phone: '06 999 99 99' });
+  assert.equal(r.status, 403, JSON.stringify(r.data));
+  assert.equal(server.club.get('SELECT phone FROM members WHERE id = ?', m.id).phone, '06 123 45 67');
+  ok(await manager.put(`/api/members/${m.id}`, { first_name: 'jean', last_name: m.last_name, phone: '06 123 45 67', email: 'jean@test.cg' }));
+  ok(await manager.put(`/api/members/${free.id}`, { first_name: 'jean', last_name: free.last_name, phone: '06 333 33 33' }));
+  ok(await associate.put(`/api/members/${m.id}`, { first_name: 'jean', last_name: m.last_name, phone: '06 999 99 99' }));
+  // A cut access still counts: it can be restored.
+  ok(await associate.post(`/api/members/${m.id}/client-access/disable`, {}));
+  assert.equal((await manager.put(`/api/members/${m.id}`, { first_name: 'jean', last_name: m.last_name, phone: '06 111 11 11' })).status, 403);
+});

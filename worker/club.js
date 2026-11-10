@@ -611,8 +611,13 @@ export class Club {
     }
     this.run('UPDATE users SET name = ?, role = ?, rayon = ?, active = ? WHERE id = ?', name, role, rayon, active ? 1 : 0, u.id);
     if (!active || role !== u.role || rayon !== (u.rayon ?? null)) this.run('DELETE FROM sessions WHERE user_id = ?', u.id);
+    // Only the administrator and the associés give client codes: one who loses that right no longer stands behind the
+    // codes he gave (worker/clientAccess.js voidCodesIssuedBy).
+    const givesCodes = (r, on) => on && (r === 'admin' || r === 'associe');
+    const voided = givesCodes(u.role, !!u.active) && !givesCodes(role, active) ? this.voidCodesIssuedBy(u.id) : 0;
     this.audit(actor, 'utilisateur.modifier', 'user', u.id, {
       avant: { name: u.name, role: u.role, rayon: u.rayon ?? null, active: !!u.active }, apres: { name, role, rayon, active },
+      ...(voided ? { codes_clients_annules: voided } : {}),
     });
     return this.userDTO(this.userRow(u.id));
   }
@@ -747,6 +752,12 @@ export class Club {
   updateMember(actor, memberId, input) {
     const m = this.fileRow(memberId);
     const f = this.memberFields(input, m);
+    // The temporary code of a client's space is sent to this phone by the administrator or an associé. The manager may
+    // not change the phone of a file that has a client access (even a cut one), or he could have the code sent to
+    // himself (security audit run-2).
+    if (f.phone !== String(m.phone ?? '').trim() && !isBoss(actor) && this.accountRow(m.id)) {
+      throw forbidden("Ce client a un espace client : seuls l'administrateur et les associés changent son téléphone.");
+    }
     this.run(
       'UPDATE members SET first_name = ?, last_name = ?, phone = ?, email = ?, notes = ?, updated_at = ?, updated_by = ? WHERE id = ?',
       f.first, f.last, f.phone, f.email, f.notes, this.nowIso(), actor.id, m.id,
@@ -1020,6 +1031,8 @@ export class Club {
       subscriptions, cards, reservations, charges, payments, balance_due: due,
       wallet: this.walletDTO(m.id),
       renewal: this.renewalStatus(m.id, today),
+      // Whether the file has a client access (active or cut): its phone is then changed by a boss only (updateMember).
+      has_client_access: Boolean(this.accountRow(m.id)),
     };
   }
 

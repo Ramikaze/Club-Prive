@@ -527,10 +527,16 @@ export const ledgerMethods = {
   // Closes the till of a day (today or a past day left open): every ticket checked, or a reason for those left; every
   // account to count counted, the gaps recorded as when counting the till, with a reason when there is one. Then the
   // day is locked: no money movement dated on it until an administrator reopens it.
+  // The manager closes only the current day. A past day left open is closed by the administrator or an associé: its
+  // gap is recorded above the manager's own limits, and a day before the verification start never goes through an
+  // associé's check.
   closeDay(actor, input) {
     const day = input.day ?? this.bizToday();
     if (!isValidDate(day)) throw invalid('Date invalide.');
     if (day > this.bizToday()) throw invalid('Seule une journée commencée peut être fermée.');
+    if (!isBoss(actor) && day !== this.bizToday()) {
+      throw forbidden("Seuls l'administrateur et les associés ferment la caisse d'une journée passée.");
+    }
     if (this.get('SELECT 1 AS x FROM day_closings WHERE biz_day = ?', day)) {
       throw conflict('DEJA_FERMEE', 'La caisse de cette journée est déjà fermée.');
     }

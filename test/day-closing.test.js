@@ -4,6 +4,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { Server, Client, ok, UM, fundCaisse } from './harness.js';
+import { addDays } from '../shared/time.js';
 
 const server = new Server({});
 let admin;
@@ -82,6 +83,17 @@ test('seul un administrateur rouvre la journée, avec un motif', async () => {
 
 test('une journée future ne peut pas être fermée', async () => {
   refused(await admin.post('/api/day-closing', { day: '2999-01-01', counts: {} }), 400);
+});
+
+// The manager closes only the current day: on a past day his closing would record a gap above his own limits.
+test('le gérant ne ferme pas une journée passée', async () => {
+  const yesterday = addDays(today, -1);
+  const entries = server.club.get('SELECT COUNT(*) AS n FROM ledger_entries').n;
+  refused(await manager.post('/api/day-closing', {
+    day: yesterday, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 0 }, gap_reason: 'Manque',
+  }), 403, 'INTERDIT');
+  assert.equal(server.club.get('SELECT COUNT(*) AS n FROM day_closings WHERE biz_day = ?', yesterday).n, 0);
+  assert.equal(server.club.get('SELECT COUNT(*) AS n FROM ledger_entries').n, entries);
 });
 
 // The demo reset empties the same tables as this wipe (WIPE_ORDER).

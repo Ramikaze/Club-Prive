@@ -63,7 +63,7 @@ test('migration V25 : les accès existants gardent leur identifiant, non choisi'
     v24Copy(source.file, old.file);
     await old.start(); // migrates 24 -> 25
     assert.equal(old.db.get("SELECT value FROM meta WHERE key = 'schema_version'").value, String(MIGRATIONS.length));
-    assert.equal(MIGRATIONS.length, 25);
+    assert.ok(MIGRATIONS.length >= 25);
     const row = old.db.get('SELECT * FROM client_accounts WHERE member_id = ?', member.id);
     assert.equal(row.login, '242061234567');
     assert.equal(row.login_chosen, 0);

@@ -77,9 +77,9 @@ export const clientAccessMethods = {
     if (this.accountRow(m.id)) throw conflict('ACCES_EXISTE', 'Ce client a déjà un accès : générez un nouveau code si besoin.');
     const login = m.member_no.toLowerCase();
     this.run(
-      `INSERT INTO client_accounts (member_id, login, login_chosen, temp_hash, temp_expires_at, created_at, created_by)
-       VALUES (?, ?, 0, ?, ?, ?, ?)`,
-      m.id, login, tempHash, expiresAt, this.nowIso(), actor.id,
+      `INSERT INTO client_accounts (member_id, login, login_chosen, temp_hash, temp_expires_at, temp_issued_by, created_at, created_by)
+       VALUES (?, ?, 0, ?, ?, ?, ?, ?)`,
+      m.id, login, tempHash, expiresAt, actor.id, this.nowIso(), actor.id,
     );
     this.audit(actor, 'client.acces.creer', 'member', m.id, { member_no: m.member_no, login });
     return { login, status: this.clientAccessStatus(m.id) };
@@ -92,7 +92,10 @@ export const clientAccessMethods = {
     this.assertMemberActive(m, 'de renouveler un code');
     const a = this.accountRow(m.id);
     if (!a) throw notFound('Accès client');
-    this.run('UPDATE client_accounts SET password_hash = NULL, temp_hash = ?, temp_expires_at = ? WHERE id = ?', tempHash, expiresAt, a.id);
+    this.run(
+      'UPDATE client_accounts SET password_hash = NULL, temp_hash = ?, temp_expires_at = ?, temp_issued_by = ? WHERE id = ?',
+      tempHash, expiresAt, actor.id, a.id,
+    );
     this.closeClientSessions(m.id);
     this.audit(actor, 'client.acces.code', 'member', m.id, { member_no: m.member_no, login: a.login });
     return { login: a.login, status: this.clientAccessStatus(m.id) };
@@ -111,6 +114,19 @@ export const clientAccessMethods = {
   // The client's open sessions end with his file's deactivation, a new code or a cut.
   closeClientSessions(memberId) {
     this.run('DELETE FROM client_sessions WHERE account_id IN (SELECT id FROM client_accounts WHERE member_id = ?)', memberId);
+  },
+
+  // A staff member loses the right to give codes (deactivated, or no longer administrator or associé): the codes he gave
+  // that no client has used yet stop working, and the sessions opened with them (identifier and password not yet
+  // chosen) are closed. A client who already chose his password keeps it. Tells how many codes were voided.
+  voidCodesIssuedBy(userId) {
+    const { n } = this.get('SELECT COUNT(*) AS n FROM client_accounts WHERE temp_issued_by = ? AND temp_hash IS NOT NULL', userId);
+    this.run(
+      'DELETE FROM client_sessions WHERE must_set_password = 1 AND account_id IN (SELECT id FROM client_accounts WHERE temp_issued_by = ?)',
+      userId,
+    );
+    this.run('UPDATE client_accounts SET temp_hash = NULL, temp_expires_at = NULL, temp_issued_by = NULL WHERE temp_issued_by = ?', userId);
+    return n;
   },
 
   // ---------------------------------------------------------------- client side: sign-in and sessions
@@ -167,7 +183,12 @@ export const clientAccessMethods = {
     const s = this.get('SELECT * FROM client_sessions WHERE token_hash = ?', tokenHash);
     if (!s || s.expires_at < this.nowIso()) return null;
     const access = this.activeClientAccess(s.account_id);
-    return access ? { ...access, mustSetPassword: s.must_set_password === 1, loginChosen: access.account.login_chosen === 1 } : null;
+    if (!access) return null;
+    // A session opened with the code lives only as long as the code: once it has expired or been voided, its holder
+    // can no longer choose the identifier and the password with it.
+    const code = access.account;
+    if (s.must_set_password === 1 && (!code.temp_hash || !(code.temp_expires_at > this.nowIso()))) return null;
+    return { ...access, mustSetPassword: s.must_set_password === 1, loginChosen: access.account.login_chosen === 1 };
   },
 
   closeClientSession(tokenHash) {
@@ -193,7 +214,10 @@ export const clientAccessMethods = {
     const a = this.get('SELECT * FROM client_accounts WHERE id = ?', accountId);
     if (!a) throw notFound('Accès client');
     if (login) this.setClientLogin(a.id, login);
-    this.run('UPDATE client_accounts SET password_hash = ?, temp_hash = NULL, temp_expires_at = NULL WHERE id = ?', passwordHash, a.id);
+    this.run(
+      'UPDATE client_accounts SET password_hash = ?, temp_hash = NULL, temp_expires_at = NULL, temp_issued_by = NULL WHERE id = ?',
+      passwordHash, a.id,
+    );
     this.run('DELETE FROM client_sessions WHERE account_id = ? AND token_hash <> ?', a.id, keepTokenHash ?? '');
     this.run('UPDATE client_sessions SET must_set_password = 0 WHERE account_id = ? AND token_hash = ?', a.id, keepTokenHash ?? '');
     this.audit(null, 'client.mot_de_passe', 'member', a.member_id, { client: a.member_id });

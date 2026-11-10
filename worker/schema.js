@@ -1001,7 +1001,20 @@ const V25 = [
   'DELETE FROM client_sessions WHERE must_set_password = 1',
 ];
 
-export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25];
+// V26: who gave the live temporary code (security audit run-2). A code opens the client's space to whoever holds it,
+// so it is only as trusted as the person who handed it out: when that person loses the right to give codes
+// (deactivated, or no longer administrator or associé), the codes he gave and the sessions opened with them are voided
+// (worker/club.js updateUser), as V25 did once for the gérant. The codes still live take as giver the author of the
+// last code given on their file in the log.
+const V26 = [
+  'ALTER TABLE client_accounts ADD COLUMN temp_issued_by INTEGER REFERENCES users(id)',
+  `UPDATE client_accounts SET temp_issued_by = (
+     SELECT a.user_id FROM audit_log a WHERE a.entity = 'member' AND a.entity_id = client_accounts.member_id
+       AND a.action IN ('client.acces.creer', 'client.acces.code') ORDER BY a.id DESC LIMIT 1)
+   WHERE temp_hash IS NOT NULL`,
+];
+
+export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26];
 
 export function migrate(db) {
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
