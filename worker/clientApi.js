@@ -111,11 +111,19 @@ export function createClientRoutes({ club, helpers }) {
       const given = givenLogin(ctx.body.login);
       checkLoginRule(ctx, given);
       ctx.newLogin = given ? clientIdentifier(ctx.body.login) : null;
-      if (!ctx.mustSetPassword && !(await verifyPassword(String(ctx.body.current_password ?? ''), ctx.account.password_hash))) {
-        throw invalid('Mot de passe actuel incorrect.');
-      }
+      // The new password's strength is checked first, so a weak one tells nothing about the current one. Wrong current
+      // passwords count like failed sign-ins, per access: an open session cannot be used to guess it at will.
       const weak = checkPasswordStrength(ctx.body.new_password);
       if (weak) throw invalid(weak);
+      if (!ctx.mustSetPassword) {
+        const key = `client:${ctx.account.id}|mot-de-passe`;
+        checkThrottle(key);
+        if (!(await verifyPassword(String(ctx.body.current_password ?? ''), ctx.account.password_hash))) {
+          recordFailure(key);
+          throw invalid('Mot de passe actuel incorrect.');
+        }
+        clearFailures(key);
+      }
       ctx.passwordHash = await hashPassword(ctx.body.new_password);
     },
   }, (ctx) => {

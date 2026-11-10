@@ -9,6 +9,7 @@ import { FormError, PasswordField } from '../ui/ui.jsx';
 import { toast } from '../ui/toast.jsx';
 import GuidedTour, { TOUR_DEMO_DONE_KEY } from '../ui/GuidedTour.jsx';
 import { api } from '../../lib/api.js';
+import { disablePush } from '../../lib/push.js';
 import { useSubmit } from '../../lib/hooks.js';
 import { toggleTheme } from '../../lib/theme.js';
 import { enterDemo, leaveDemo } from '../../lib/space.js';
@@ -73,7 +74,10 @@ function useOrderCounter(paused) {
 
 const NavCount = ({ n }) => (n > 0 ? <span className="nav-count" aria-label={`${n} en attente`}>{n}</span> : null);
 
+// Signing out also stops this device's notifications (client names, orders): on a shared counter device the next person
+// must not keep receiving them. The staff member turns them on again after signing back in.
 async function logout() {
+  try { await disablePush(); } catch { /* no notifications on this device, or the session already gone */ }
   try { await api.post('/api/logout', {}); } catch { /* session already gone */ }
   closeAllDialogs();
   useStore.getState().signOut();

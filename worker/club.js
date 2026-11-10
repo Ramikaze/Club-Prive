@@ -626,6 +626,7 @@ export class Club {
     const u = this.userRow(userId);
     this.run('UPDATE users SET password_hash = ? WHERE id = ?', passwordHash, u.id);
     this.run('DELETE FROM sessions WHERE user_id = ?', u.id);
+    this.closePushDevices(u.id);
     this.audit(actor, 'utilisateur.mot_de_passe_reinitialise', 'user', u.id, null);
     return { ok: true };
   }
@@ -635,8 +636,16 @@ export class Club {
     const u = this.userRow(actor.id);
     this.run('UPDATE users SET password_hash = ? WHERE id = ?', passwordHash, u.id);
     this.run('DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?', u.id, keepTokenHash ?? '');
+    this.closePushDevices(u.id);
     this.audit(actor, 'utilisateur.mot_de_passe_modifie', 'user', u.id, null);
     return { ok: true };
+  }
+
+  // A password change or reset closes the account's sessions; the devices that receive its notifications (client
+  // names, orders, requests) are dropped with them, since one may have been registered from a session that is now
+  // closed (security audit run-2). Each device the staff member keeps turns notifications on again.
+  closePushDevices(userId) {
+    this.run('DELETE FROM push_subscriptions WHERE user_id = ?', userId);
   }
 
   // Lost access: the installation code (checked by the API layer) gives the club's first administrator
@@ -651,6 +660,7 @@ export class Club {
       throw conflict('IDENTIFIANT_PRIS', 'Cet identifiant est déjà utilisé.');
     }
     this.run('UPDATE users SET login = ?, password_hash = ?, active = 1 WHERE id = ?', login, input.password_hash, owner.id);
+    this.closePushDevices(owner.id);
     this.run('DELETE FROM sessions WHERE user_id = ?', owner.id);
     this.audit(null, 'utilisateur.acces_reinitialise', 'user', owner.id, { avant: owner.login, apres: login });
     return this.userRow(owner.id);

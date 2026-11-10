@@ -1014,7 +1014,14 @@ const V26 = [
    WHERE temp_hash IS NOT NULL`,
 ];
 
-export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26];
+// V27: the staff password routes no longer keep idempotency records (worker/api.js, security audit run-2): the ones
+// already kept held a fast hash of a request body with a password. The records only serve to answer a retried request
+// once more, so all are dropped.
+const V27 = [
+  'DELETE FROM idempotency_keys',
+];
+
+export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26, V27];
 
 export function migrate(db) {
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
