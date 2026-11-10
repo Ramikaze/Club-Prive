@@ -64,11 +64,11 @@ before(async () => {
   yesterday = addDays(today, -1);
   twoAgo = addDays(today, -2);
   // The scenario the next tests share: the fund two days ago, 100 000 of cigars sold yesterday and the day closed by
-  // the gérant (not verified), 50 000 sold today, today left open.
+  // the administrator (not verified; the gérant closes only today), 50 000 sold today, today left open.
   bootSince = server.club.get("SELECT value FROM meta WHERE key = 'day_verification_since'").value;
   const c = { srv: server, admin, cig, ger, today, yesterday, twoAgo };
   await fundAndSell(c, 100000, noon(server, yesterday));
-  ok(await ger.post('/api/day-closing', { day: yesterday, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 100000 * UM } }));
+  ok(await admin.post('/api/day-closing', { day: yesterday, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 100000 * UM } }));
   await sell(c, 1, noon(server, today));
 });
 after(() => server.destroy());
@@ -87,7 +87,7 @@ test('le solde validé exclut les journées non vérifiées ; validé + en atten
   assert.equal(b.pending_total, 150000 * UM);
   assert.equal(b.till_validated + b.pending_total, b.till);
   assert.deepEqual(b.pending_days.map((d) => [d.day, d.closed]), [[yesterday, true], [today, false]]);
-  assert.equal(b.pending_days[0].closed_by_name, 'Gérant');
+  assert.equal(b.pending_days[0].closed_by_name, 'Propriétaire');
   assert.equal(b.pending_days[0].net.cigares, 100000 * UM);
   assert.equal(b.pending_days[1].total, 50000 * UM);
   assert.equal(b.verified_through, addDays(yesterday, -1));
@@ -197,8 +197,8 @@ test('les journées se vérifient dans l’ordre (JOURNEE_PRECEDENTE)', async ()
   try {
     await fundAndSell(c, 100000, noon(c.srv, c.twoAgo));
     await sell(c, 2, noon(c.srv, c.yesterday));
-    ok(await c.ger.post('/api/day-closing', { day: c.twoAgo, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 100000 * UM } }));
-    ok(await c.ger.post('/api/day-closing', { day: c.yesterday, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 200000 * UM } }));
+    ok(await c.admin.post('/api/day-closing', { day: c.twoAgo, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 100000 * UM } }));
+    ok(await c.admin.post('/api/day-closing', { day: c.yesterday, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 200000 * UM } }));
     const [y, m, d] = c.twoAgo.split('-');
     const r = await c.admin.post(`/api/day-closing/${c.yesterday}/verify`, {});
     refused(r, 409, 'JOURNEE_PRECEDENTE');
@@ -235,7 +235,7 @@ test('rouvrir une journée vérifiée remet son argent en attente', async () => 
   const log = server.club.get("SELECT details FROM audit_log WHERE action = 'caisse.rouvrir' ORDER BY id DESC");
   assert.ok(JSON.parse(log.details).verifiee_le);
   // Close and verify again: the shared state ends with yesterday closed and verified, today open.
-  ok(await ger.post('/api/day-closing', { day: yesterday, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 100000 * UM } }));
+  ok(await admin.post('/api/day-closing', { day: yesterday, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 100000 * UM } }));
   ok(await admin.post(`/api/day-closing/${yesterday}/verify`, {}));
   b = ok(await admin.get('/api/caisses'));
   assert.equal(b.caisses.cigares.balance, 100000 * UM);
@@ -246,7 +246,7 @@ test('l’Accueil signale les caisses à vérifier aux administrateurs seulement
   const c = await club();
   try {
     await fundAndSell(c, 100000, noon(c.srv, c.yesterday));
-    ok(await c.ger.post('/api/day-closing', { day: c.yesterday, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 100000 * UM } }));
+    ok(await c.admin.post('/api/day-closing', { day: c.yesterday, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 100000 * UM } }));
     assert.deepEqual(ok(await c.admin.get('/api/dashboard')).days_to_verify, [c.yesterday]);
     assert.deepEqual(ok(await c.cig.get('/api/dashboard')).days_to_verify, [c.yesterday]);
     assert.deepEqual(ok(await c.ger.get('/api/dashboard')).days_to_verify, []);
@@ -266,7 +266,7 @@ test('JOURNEE_PRECEDENTE : une journée précédente non fermée demande de la f
   try {
     await fundAndSell(c, 100000, noon(c.srv, c.twoAgo));
     await sell(c, 2, noon(c.srv, c.yesterday));
-    ok(await c.ger.post('/api/day-closing', { day: c.yesterday, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 200000 * UM } }));
+    ok(await c.admin.post('/api/day-closing', { day: c.yesterday, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 200000 * UM } }));
     const [y, m, d] = c.twoAgo.split('-');
     const r = await c.admin.post(`/api/day-closing/${c.yesterday}/verify`, {});
     refused(r, 409, 'JOURNEE_PRECEDENTE');
@@ -293,7 +293,7 @@ test('clôturer un mois est refusé tant qu’une de ses journées avec de l’a
     let r = await c.admin.post('/api/closings', { month: c.pastMonth });
     refused(r, 409, 'JOURNEES_A_VERIFIER');
     assert.equal(r.data.error.message, msg);
-    ok(await c.ger.post('/api/day-closing', { day: c.pastDay, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 100000 * UM } }));
+    ok(await c.admin.post('/api/day-closing', { day: c.pastDay, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 100000 * UM } }));
     r = await c.admin.post('/api/closings', { month: c.pastMonth });
     refused(r, 409, 'JOURNEES_A_VERIFIER');
     ok(await c.admin.post(`/api/day-closing/${c.pastDay}/verify`, {}));
@@ -304,7 +304,7 @@ test('clôturer un mois est refusé tant qu’une de ses journées avec de l’a
 test('rouvrir une journée vérifiée d’un mois clôturé est refusé (PERIODE_CLOTUREE)', async () => {
   const c = await pastMonthClub();
   try {
-    ok(await c.ger.post('/api/day-closing', { day: c.pastDay, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 100000 * UM } }));
+    ok(await c.admin.post('/api/day-closing', { day: c.pastDay, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 100000 * UM } }));
     ok(await c.admin.post(`/api/day-closing/${c.pastDay}/verify`, {}));
     ok(await c.admin.post('/api/closings', { month: c.pastMonth }));
     const r = await c.admin.post(`/api/day-closing/${c.pastDay}/reopen`, { reason: 'Erreur de saisie' });
@@ -326,7 +326,7 @@ test('l’argent en attente se dépense en négatif seulement : le disponible ti
       ok(await c.ger.post('/api/shop/sales', { account: 'cigares', buyer: { kind: 'journalier' }, lines: [{ product_id: cigar, quantity: qty }], method: 'Espèces' }));
     };
     await sellB(64, c.yesterday);
-    ok(await c.ger.post('/api/day-closing', { day: c.yesterday, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 640000 * UM } }));
+    ok(await c.admin.post('/api/day-closing', { day: c.yesterday, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 640000 * UM } }));
     ok(await c.admin.post(`/api/day-closing/${c.yesterday}/verify`, {}));
     await sellB(9, c.today);
     c.srv.club.at = null;
