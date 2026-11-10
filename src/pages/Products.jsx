@@ -2,7 +2,8 @@ import { useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
 import SmartSearch from '../components/ui/SmartSearch.jsx';
-import { DemoChip, Empty, FormError, Loaded, PageHead, ProductPhoto, Segmented, Skeleton } from '../components/ui/ui.jsx';
+import { DemoChip, Empty, FormError, Loaded, Notice, PageHead, ProductPhoto, Segmented, Skeleton } from '../components/ui/ui.jsx';
+import BuyerPicker from '../components/shop/BuyerPicker.jsx';
 import { Modal, actionDialog, openDialog } from '../components/ui/Modal.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import { api, newKey } from '../lib/api.js';
@@ -18,6 +19,8 @@ import { CATEGORIES, CATEGORY_LABEL, CATEGORY_PLURAL, accountOfCategory, canSell
 const ownsProduct = (me, p) => ownsAccount(me, accountOfCategory(p.category));
 // Whoever may move a product's stock: the manager, and the boss of its rayon.
 const canStockProduct = (me, p) => canSellIn(me, accountOfCategory(p.category));
+// Only the associé of a product's rayon gives it away (« Offert »): neither the manager nor the administrator.
+const canOfferProduct = (me, p) => me?.role === 'associe' && ownsProduct(me, p);
 
 const formValues = (form) => Object.fromEntries(new FormData(form));
 
@@ -86,8 +89,12 @@ function ProductDialog({ close, product, onDone }) {
     submit(async () => {
       const price = parseMoney(v.price);
       if (price == null) throw new Error('Prix invalide (exemple : 40000 ou 40000,50).');
+      // Empty is « not known yet »; the gifts count it 0 until it is entered.
+      const costText = (v.cost_price ?? '').trim();
+      const cost = costText === '' ? null : parseMoney(costText);
+      if (costText !== '' && cost == null) throw new Error('Prix de revient invalide (exemple : 25000 ou 25000,50), ou laissez-le vide.');
       const body = {
-        category: locked ? product.category : v.category, reference: v.reference, name: v.name, description: v.description, price,
+        category: locked ? product.category : v.category, reference: v.reference, name: v.name, description: v.description, price, cost_price: cost,
         low_stock_threshold: Number(v.low_stock_threshold),
       };
       if (editing) {
@@ -119,6 +126,8 @@ function ProductDialog({ close, product, onDone }) {
           {!editing && <label className="field"><span>Stock initial</span><input type="number" name="initial_stock" min="0" step="1" defaultValue="0" inputMode="numeric" /></label>}
           <label className="field"><span>Seuil d’alerte</span><input type="number" name="low_stock_threshold" min="0" step="1" defaultValue={threshold} inputMode="numeric" /></label>
         </div>
+        <label className="field"><span>Prix de revient ({settings.currency.label}, facultatif)</span><input name="cost_price" inputMode="decimal" defaultValue={toMajor(product?.cost_price)} />
+          <span className="help">Ce que le produit coûte au club. Il sert à compter les produits offerts ; le gérant ne le voit pas.</span></label>
         {editing && (
           <>
             <label className="check"><input type="checkbox" name="active" value="1" defaultChecked={product.active} /><span>Produit actif (proposé à la vente)</span></label>
@@ -202,6 +211,45 @@ function StockButtons({ p, large = false, disabled = false, onDone, onStale }) {
         {large ? 'Ajuster le stock' : 'Ajuster'}
       </button>
     </>
+  );
+}
+
+// Gives a product away: no money, the stock goes down, the gift is recorded in the associé's name at its cost price
+// (worker/gifts.js). Whom it goes to is optional: a member, a regular client, or nobody (a passing client).
+function OfferDialog({ close, product, onDone }) {
+  const [key] = useState(newKey);
+  const [buyer, setBuyer] = useState({ kind: 'journalier', person: null });
+  const { busy, error, submit } = useSubmit();
+
+  const onSubmit = (e) => {
+    e.preventDefault();
+    const v = formValues(e.currentTarget);
+    submit(async () => {
+      const quantity = Number(v.quantity);
+      if (!Number.isInteger(quantity) || quantity < 1) throw new Error('Indiquez la quantité offerte (nombre entier, au moins 1).');
+      if (quantity > product.stock_qty) throw new Error(`Stock insuffisant : ${product.stock_qty} disponible(s).`);
+      if (buyer.kind !== 'journalier' && !buyer.person) throw new Error('Choisissez le client, ou « Client journalier » pour un client de passage.');
+      const res = await api.post(`/api/products/${product.id}/offer`, { quantity, member_id: buyer.person?.id ?? null, reason: v.reason }, key);
+      close();
+      toast(`Cadeau enregistré : ${res.gift.quantity} × ${res.gift.product_name}.`);
+      onDone?.(res.product);
+    });
+  };
+
+  return (
+    <Modal title="Offrir" onClose={close}>
+      <form className="form-grid" onSubmit={onSubmit} noValidate>
+        <p><strong>{product.name}</strong> · stock : <strong>{product.stock_qty}</strong></p>
+        {product.cost_price == null && <Notice kind="warn">Prix de revient à renseigner : ce cadeau sera compté à 0 tant qu’il manque.</Notice>}
+        <label className="field"><span>Quantité offerte</span><input type="number" name="quantity" min="1" max={product.stock_qty} step="1" required inputMode="numeric" defaultValue="1" autoFocus /></label>
+        <div className="field"><span className="field-label">Offert à (facultatif)</span><BuyerPicker buyer={buyer} onChange={setBuyer} /></div>
+        <label className="field"><span>Motif (facultatif)</span><input name="reason" maxLength={200} placeholder="Anniversaire, fidélité, geste commercial…" /></label>
+        <p className="subtle">Le produit sort du stock, sans encaissement. Le cadeau est enregistré à votre nom et compté au prix de revient.</p>
+        <FormError error={error} />
+        <div className="modal-actions"><button type="button" className="btn" onClick={close}>Annuler</button>
+          <button type="submit" className="btn btn-primary" disabled={busy} aria-busy={busy}>Offrir</button></div>
+      </form>
+    </Modal>
   );
 }
 
@@ -304,11 +352,15 @@ function ProductSheet({ close, product, onDone }) {
             {p.description && <p>{p.description}</p>}
             <dl className="kv">
               <dt>Prix de vente</dt><dd>{money(p.price)}</dd>
+              {'cost_price' in p && <><dt>Prix de revient</dt><dd>{p.cost_price === null ? <span className="subtle">à renseigner</span> : money(p.cost_price)}</dd></>}
               <dt>Stock</dt><dd><StockChip p={p} /></dd>
             </dl>
             {canStock && (
               // Not while a photo is being sent: both answers rewrite the sheet, and the older one must not come last.
               <div className="row"><StockButtons p={p} large disabled={busy} onDone={onStock} onStale={onStale} /></div>
+            )}
+            {canOfferProduct(me, p) && (
+              <div className="row"><button type="button" className="btn" disabled={busy || p.stock_qty === 0} onClick={() => offerDialog(p, onStock)}>Offrir</button></div>
             )}
             {canEditPhoto && (
               <div className="row">
@@ -333,6 +385,7 @@ function ProductSheet({ close, product, onDone }) {
 const productDialog = (product, onDone) => openDialog(ProductDialog, { product, onDone });
 const sheetDialog = (product, onDone) => openDialog(ProductSheet, { product, onDone });
 const stockDialog = (product, kind, onDone, onStale) => openDialog(StockDialog, { product, kind, onDone, onStale });
+const offerDialog = (product, onDone) => openDialog(OfferDialog, { product, onDone });
 const historyDialog = (product) => openDialog(HistoryDialog, { product });
 
 export default function Products() {
@@ -425,6 +478,7 @@ export default function Products() {
                     <td className="actions">
                       <div className="product-actions">
                         {canStockProduct(me, p) && <StockButtons p={p} onDone={reload} onStale={reload} />}
+                        {canOfferProduct(me, p) && <button type="button" className="btn btn-sm btn-ghost" disabled={p.stock_qty === 0} onClick={() => offerDialog(p, reload)}>Offrir</button>}
                         <button type="button" className="btn btn-sm btn-ghost" onClick={() => historyDialog(p)}>Historique</button>
                         {ownsProduct(me, p) && <button type="button" className="btn btn-sm btn-ghost" onClick={() => productDialog(p, reload)}><Icon name="edit" /><span className="sr-only">Modifier {p.name}</span></button>}
                       </div>
