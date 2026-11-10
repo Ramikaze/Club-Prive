@@ -151,7 +151,6 @@ function AdminCash() {
       </div>
       <Loaded state={state}>{(d) => (
         <div className="cash-page">
-          <DayClosingBar isAdmin onChange={state.reload} refresh={barTick} />
           {/* On all accounts, the associés' caisses (six tiles); on one account, its four figures. */}
           {method
             ? <CashBalance t={d.treasury} method={method} entries={d.entries} journal={d.journal} openingBalances={settings.opening_balances} onCount={count} />
@@ -159,6 +158,7 @@ function AdminCash() {
           <CategoryColumns
             sum={d.sum} billed={d.billed} method={method} oneDay={oneDay}
             journal={d.journal} entries={d.entries} t={d.treasury} openingBalances={settings.opening_balances}
+            closing={<DayClosingBar isAdmin inline onChange={state.reload} refresh={barTick} />}
           />
           <div className="cash-columns">
             <div className="cash-columns-inner">

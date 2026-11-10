@@ -1209,6 +1209,9 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .close-bar > span { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .close-bar svg { width: 18px; height: 18px; flex: none; }
 .close-bar.is-closed { background: var(--bronze-soft); color: var(--bronze-text); }
+/* Inside the « Recette du jour par catégorie » tile: a soft band of its own, not a card. */
+.cash-block .close-bar { border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; }
+.cash-block .close-bar:not(.is-closed) { background: var(--surface-2); }
 .close-steps { display: flex; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .close-steps li { flex: 1; display: inline-flex; justify-content: center; align-items: center; gap: 4px; padding: 5px 0; border-radius: var(--radius-sm); background: var(--surface-2, rgba(0,0,0,.04)); color: var(--text-3); font-size: 0.85rem; font-weight: 600; }
 .close-steps li.current { background: var(--bronze-soft); color: var(--bronze-text); }
