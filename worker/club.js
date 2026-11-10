@@ -1308,17 +1308,21 @@ export class Club {
 
   // The renewal alert of a member, or null: 'bientot' when the subscription ends within RENEWAL_WARNING_DAYS and the
   // card's credit will not cover the price, 'bloque' when it ended at most RENEWAL_GRACE_DAYS ago and the credit still
-  // does not (a recharge of `missing` renews it). Enough credit means no alert: the next run renews it.
+  // does not (a recharge of `missing` renews it). Enough credit before the end means no alert: the run renews it.
+  // 'echec' when it ended with enough credit and is still not renewed: the scheduled run and the home page renew
+  // before reading this, so their renewal failed (worker/api.js logs why); staff renew it by hand, which says why.
   renewalStatus(memberId, today = this.bizToday()) {
     const m = this.memberRow(memberId);
     const base = m.active !== 0 ? this.renewalBase(m.id) : null;
     if (!base) return null;
     const { sub, plan } = base;
     const balance = this.walletBalance(m.id);
-    if (balance >= plan.price) return null;
     const ended = sub.end_date < today;
     const days = ended ? daysBetween(sub.end_date, today) : daysBetween(today, sub.end_date);
     if (days > (ended ? RENEWAL_GRACE_DAYS : RENEWAL_WARNING_DAYS)) return null;
+    if (balance >= plan.price) {
+      return ended ? { state: 'echec', plan_name: plan.name, price: plan.price, balance, missing: 0, end_date: sub.end_date } : null;
+    }
     return {
       state: ended ? 'bloque' : 'bientot', plan_name: plan.name, price: plan.price, balance,
       missing: plan.price - balance, end_date: sub.end_date,

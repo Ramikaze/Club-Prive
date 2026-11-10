@@ -205,6 +205,15 @@ export function DayClosingBar({ isAdmin, onChange, refresh = 0 }) {
   const state = useLoad(() => api.get(`/api/day-closing${qs({ day })}`), [day, refresh]);
   const reload = () => { state.reload(); onChange?.(); };
   const c = state.data?.closed;
+  // Unread is not « nothing to show »: whether the day is open or closed stays unknown until read again.
+  if (state.error && !state.data) {
+    return (
+      <div className="card close-bar">
+        <span><Icon name="alert" /> {`L’état de la caisse du ${dayLabel(day, 'medium')} n’a pas pu être lu.`}</span>
+        <button type="button" className="btn btn-sm" onClick={state.retry}>Réessayer</button>
+      </div>
+    );
+  }
   if (!state.data) return null;
   if (!c) {
     return (

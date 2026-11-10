@@ -79,6 +79,16 @@ function RenewalAlert({ m }) {
   const r = m.renewal;
   if (!r) return null;
   const end = dayLabel(r.end_date, 'short');
+  // Enough credit, yet the automatic run could not renew it: a renewal by hand says what is wrong.
+  if (r.state === 'echec') {
+    return (
+      <div className="tile-alert">
+        <Notice kind="danger">
+          {`Renouvellement automatique non abouti : la formule ${r.plan_name} est terminée le ${end} alors que la carte a ${money(r.balance)}, assez pour ${money(r.price)}. Renouvelez-la à la main ; si c’est refusé, le message dira pourquoi.`}
+        </Notice>
+      </div>
+    );
+  }
   return (
     <div className="tile-alert">
       <Notice kind={r.state === 'bloque' ? 'danger' : 'warn'}>

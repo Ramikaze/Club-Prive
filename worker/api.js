@@ -735,7 +735,8 @@ export function createApi({ db, env = {}, demo = false, sendPush: pushSender = n
         result.renewed.push(...renewed);
         result.blocked.push(...blocked);
       } catch (err) {
-        console.error(err);
+        // Named, so the log says whose renewal to look at; the home page and the member's page show it too.
+        console.error(`Renouvellement automatique impossible (membre id ${memberId}) :`, err);
         result.failed.push(memberId);
       }
     }
