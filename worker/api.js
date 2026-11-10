@@ -507,6 +507,10 @@ export function createApi({ db, env = {}, demo = false, sendPush: pushSender = n
   add('PUT', '/api/products/:id/photo', { ...CLUB, ...PHOTOS, ...WITH_PHOTO }, (ctx) => club.setProductPhoto(ctx.user, ctx.params.id, ctx.body));
   add('DELETE', '/api/products/:id/photo', { ...CLUB, ...PHOTOS }, (ctx) => club.removeProductPhoto(ctx.user, ctx.params.id));
   add('GET', '/api/stock-movements', {}, (ctx) => club.stockMovements(ctx.query));
+  // Products given away (worker/gifts.js): the associé of the rayon gives (checked there); bosses list and cancel.
+  add('POST', '/api/products/:id/offer', {}, (ctx) => club.offerProduct(ctx.user, ctx.params.id, ctx.body));
+  add('GET', '/api/gifts', CLUB, (ctx) => club.listGifts(ctx.user, ctx.query));
+  add('POST', '/api/gifts/:id/cancel', CLUB, (ctx) => club.cancelGift(ctx.user, ctx.params.id, ctx.body));
 
   // Cross-site writes are refused: browsers cannot send application/json cross-origin without a
   // CORS preflight (which this API never grants), and a present Origin must be this site.

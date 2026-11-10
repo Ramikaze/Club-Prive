@@ -11,6 +11,7 @@ import { shopMethods, buyerShown } from './shop.js';
 import { caisseMethods } from './caisses.js';
 import { supplierMethods } from './suppliers.js';
 import { creditMethods } from './credit.js';
+import { giftMethods } from './gifts.js';
 import { clientAccessMethods } from './clientAccess.js';
 import { clientViewMethods } from './clientView.js';
 import { clientOrderMethods } from './clientOrders.js';
@@ -3905,6 +3906,7 @@ export class Club {
 Object.assign(Club.prototype, ledgerMethods);
 Object.assign(Club.prototype, shopMethods);
 Object.assign(Club.prototype, caisseMethods);
+Object.assign(Club.prototype, giftMethods);
 Object.assign(Club.prototype, supplierMethods);
 Object.assign(Club.prototype, creditMethods);
 Object.assign(Club.prototype, clientAccessMethods);
