@@ -216,11 +216,24 @@ export function createApi({ db, env = {}, demo = false, sendPush: pushSender = n
     return { ok: true };
   });
   add('GET', '/api/me', {}, (ctx) => club.bundle(ctx.user));
+  // The body holds passwords: the password routes keep no idempotency record, whose request hash would be a fast hash
+  // of them (security audit run-2), as the client password route does.
   add('POST', '/api/me/password', {
     ...ACCOUNTS,
+    noIdempotency: true,
     prepare: async (ctx) => {
+      // The new password's strength is checked first, so a weak one tells nothing about the current one. Wrong current
+      // passwords count like failed sign-ins, per account: an open session cannot be used to guess it at will.
+      const weak = checkPasswordStrength(ctx.body.new_password);
+      if (weak) throw invalid(weak);
+      const key = `compte:${ctx.user.id}|mot-de-passe`;
+      checkThrottle(key);
       const u = club.userRow(ctx.user.id);
-      if (!(await verifyPassword(String(ctx.body.current_password ?? ''), u.password_hash))) throw invalid('Mot de passe actuel incorrect.');
+      if (!(await verifyPassword(String(ctx.body.current_password ?? ''), u.password_hash))) {
+        recordFailure(key);
+        throw invalid('Mot de passe actuel incorrect.');
+      }
+      clearFailures(key);
       await preparePassword(ctx, 'new_password');
     },
   }, (ctx) => club.changeOwnPassword(ctx.user, ctx.passwordHash, ctx.tokenHash));
@@ -291,10 +304,10 @@ export function createApi({ db, env = {}, demo = false, sendPush: pushSender = n
     return club.bundle(ctx.user);
   });
   add('GET', '/api/users', { ...ADMIN, ...ACCOUNTS }, () => club.listUsers());
-  add('POST', '/api/users', { ...ADMIN, ...ACCOUNTS, prepare: (ctx) => preparePassword(ctx, 'password') },
+  add('POST', '/api/users', { ...ADMIN, ...ACCOUNTS, noIdempotency: true, prepare: (ctx) => preparePassword(ctx, 'password') },
     (ctx) => club.createUser(ctx.user, { ...ctx.body, password_hash: ctx.passwordHash }));
   add('PUT', '/api/users/:id', { ...ADMIN, ...ACCOUNTS }, (ctx) => club.updateUser(ctx.user, ctx.params.id, ctx.body));
-  add('POST', '/api/users/:id/password', { ...ADMIN, ...ACCOUNTS, prepare: (ctx) => preparePassword(ctx, 'password') },
+  add('POST', '/api/users/:id/password', { ...ADMIN, ...ACCOUNTS, noIdempotency: true, prepare: (ctx) => preparePassword(ctx, 'password') },
     (ctx) => club.setUserPassword(ctx.user, ctx.params.id, ctx.passwordHash));
   add('GET', '/api/audit', CLUB, (ctx) => club.auditLog(ctx.query));
   add('POST', '/api/admin/reset', { ...ADMIN, ...ACCOUNTS }, (ctx) => club.wipeData(ctx.user, ctx.body.confirm));
