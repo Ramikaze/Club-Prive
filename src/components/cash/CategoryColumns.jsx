@@ -77,9 +77,10 @@ export default function CategoryColumns({ sum, billed, method, oneDay, journal, 
   return (
     <section id="caisse-categories" className="card cash-block">
       <div className="card-head">
-        <h2><Icon name="list" /> Par catégorie {method && <span className="subtle">toutes caisses et comptes</span>}</h2>
+        {/* Owner's wording (2026-11-10): « Recette du jour par catégorie », or the period's when it spans several days. */}
+        <h2><Icon name="list" /> {oneDay ? 'Recette du jour par catégorie' : 'Recette de la période par catégorie'} {method && <span className="subtle">toutes caisses et comptes</span>}</h2>
         {/* The three accounts are the only ones, so the total is exactly the sum of the three column heads. */}
-        <span className="cat-total"><span className="subtle">{oneDay ? 'Recette du jour' : 'Recette de la période'}</span> <strong className="cash-block-total num">{money(sum.total.net)}</strong></span>
+        <span className="cat-total"><span className="subtle">Total</span> <strong className="cash-block-total num">{money(sum.total.net)}</strong></span>
       </div>
       {!billed ? <p className="subtle">Les lignes facturées n’ont pas pu être chargées. Rechargez la page.</p> : (
       <div className="cat-columns">
