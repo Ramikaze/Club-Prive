@@ -197,3 +197,34 @@ test('vente à crédit payée en deux règlements puis annulée : chaque part re
   assert.equal(ok(await ger.get(`/api/payments/${a.payment.id}/ticket`)).ticket.status, 'rembourse');
   await centralRule('vente réglée en deux fois puis annulée');
 });
+
+// A closed month takes no more money nor goods: each write of the Boutique and of the clients' credit is refused
+// (409 PERIODE_CLOTUREE) and leaves nothing behind, so a closed month's accounts can never change silently.
+test('mois clôturé : vente, vente à crédit, règlement et annulations refusés, rien n’est écrit', async () => {
+  const c = await newClient();
+  ok(await cha.put(`/api/clients/${c.id}/credit-limit`, { credit_limit: 100000 * UM }));
+  const sale = ok(await creditSale(ger, c, 'alcool', CHP, 1));
+  const paid = ok(await ger.post(`/api/clients/${c.id}/settlements`, { amount: 5000 * UM, method: 'Espèces' }));
+  const rows = () => server.club.get(`SELECT (SELECT COUNT(*) FROM shop_sales) AS sales, (SELECT COUNT(*) FROM payments) AS payments,
+    (SELECT COUNT(*) FROM charges) AS charges, (SELECT COUNT(*) FROM payment_allocations) AS allocations,
+    (SELECT COUNT(*) FROM shop_sales WHERE cancelled_at IS NOT NULL) AS cancelled_sales,
+    (SELECT COUNT(*) FROM payments WHERE cancelled_at IS NOT NULL) AS cancelled_payments`);
+  const before = { stock: stockOf(CHP), rows: rows(), account: await account(c), caisses: await caisses() };
+  const month = today.slice(0, 7);
+  server.club.run("INSERT INTO closed_periods (month, closed_at, summary) VALUES (?, ?, '{}')", month, new Date().toISOString());
+  try {
+    refused(await ger.post('/api/shop/sales', {
+      account: 'alcool', buyer: { kind: 'journalier' }, lines: [{ product_id: CHP, quantity: 1 }], method: 'Espèces',
+    }), 409, 'PERIODE_CLOTUREE');
+    refused(await creditSale(ger, c, 'alcool', CHP, 1), 409, 'PERIODE_CLOTUREE');
+    refused(await ger.post(`/api/clients/${c.id}/settlements`, { amount: 5000 * UM, method: 'Espèces' }), 409, 'PERIODE_CLOTUREE');
+    refused(await cha.post(`/api/payments/${paid.payment.id}/cancel-settlement`, { reason: 'Erreur de montant' }), 409, 'PERIODE_CLOTUREE');
+    refused(await cha.post(`/api/shop/sales/${sale.sale.id}/cancel`, { reason: 'Erreur de produit' }), 409, 'PERIODE_CLOTUREE');
+  } finally {
+    server.club.run('DELETE FROM closed_periods WHERE month = ?', month);
+  }
+  assert.equal(stockOf(CHP), before.stock);
+  assert.deepEqual(rows(), before.rows);
+  assert.deepEqual(await account(c), before.account);
+  assert.deepEqual(await caisses(), before.caisses);
+});

@@ -14,7 +14,7 @@ export default function Ledger() {
   const account = ACCOUNT_LABEL[period.params.get('sous_compte')] ? period.params.get('sous_compte') : '';
   const configured = useStore((s) => s.settings.payment_methods);
   const filters = { from, to, method, account };
-  const state = useLoad(() => api.get(`/api/ledger/book${qs(filters)}`), [from, to, method, account]);
+  const state = useLoad((signal) => api.get(`/api/ledger/book${qs(filters)}`, { signal }), [from, to, method, account]);
   const methods = [...new Set([...configured, ...(state.data?.methods ?? []), ...(method ? [method] : [])])];
 
   return (

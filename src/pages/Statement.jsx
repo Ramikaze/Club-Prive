@@ -95,7 +95,7 @@ export default function Statement() {
   const { id } = useParams();
   const period = usePeriod('month');
   const { from, to, today, presets, setPeriod } = period;
-  const state = useLoad(() => api.get(`/api/members/${id}/statement?from=${from}&to=${to}`), [id, from, to]);
+  const state = useLoad((signal) => api.get(`/api/members/${id}/statement?from=${from}&to=${to}`, { signal }), [id, from, to]);
   useA4Page();
   // The day the member joined, kept while another period loads: the start of « Tout l'historique ».
   const [joined, setJoined] = useState(null);

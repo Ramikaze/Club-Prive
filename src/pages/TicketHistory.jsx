@@ -45,7 +45,7 @@ export default function TicketHistory() {
   const { from, to } = period;
   const userId = period.params.get('employe') ?? '';
   // Always both bounds: the server ignores `to` alone.
-  const state = useLoad(() => api.get(`/api/ticket-events${qs({ from, to, user_id: userId })}`), [from, to, userId]);
+  const state = useLoad((signal) => api.get(`/api/ticket-events${qs({ from, to, user_id: userId })}`, { signal }), [from, to, userId]);
   // The employee list comes with the history (an associé cannot read the user accounts); the last one received is
   // kept while another period loads.
   const [users, setUsers] = useState([]);

@@ -77,17 +77,18 @@ function AdminCash() {
   const settings = useSettings();
   const period = useCashPeriod();
   const { from, to } = period;
-  const state = useLoad(async () => {
+  // `signal`: a new period cancels the eight downloads of the previous one.
+  const state = useLoad(async (signal) => {
     const [sum, billed, journal, open, ledger, categories, treasury, caisses] = await Promise.all([
-      api.get(`/api/finance/summary${qs({ from, to })}`),
+      api.get(`/api/finance/summary${qs({ from, to })}`, { signal }),
       // A failure of the billed lines must not take the whole page down: the block says so instead.
-      api.get(`/api/finance/billed${qs({ from, to })}`).catch(() => null),
-      api.get(`/api/finance/journal${qs({ from, to })}`),
-      api.get('/api/finance/open'),
-      api.get(`/api/ledger/entries${qs({ from, to })}`),
-      api.get('/api/ledger/categories'),
-      api.get(`/api/treasury${qs({ from, to })}`),
-      api.get(`/api/caisses${qs({ to })}`),
+      api.get(`/api/finance/billed${qs({ from, to })}`, { signal }).catch(() => null),
+      api.get(`/api/finance/journal${qs({ from, to })}`, { signal }),
+      api.get('/api/finance/open', { signal }),
+      api.get(`/api/ledger/entries${qs({ from, to })}`, { signal }),
+      api.get('/api/ledger/categories', { signal }),
+      api.get(`/api/treasury${qs({ from, to })}`, { signal }),
+      api.get(`/api/caisses${qs({ to })}`, { signal }),
     ]);
     return { sum, billed, journal, open, entries: ledger.entries, categories, treasury, caisses };
   }, [from, to]);
@@ -181,9 +182,10 @@ function AdminCash() {
 
 function ManagerCash() {
   const today = bizToday();
-  const state = useLoad(async () => {
+  const state = useLoad(async (signal) => {
     const [journal, open, ledger, categories] = await Promise.all([
-      api.get('/api/finance/journal'), api.get('/api/finance/open'), api.get('/api/ledger/entries'), api.get('/api/ledger/categories'),
+      api.get('/api/finance/journal', { signal }), api.get('/api/finance/open', { signal }),
+      api.get('/api/ledger/entries', { signal }), api.get('/api/ledger/categories', { signal }),
     ]);
     return { journal, open, entries: ledger.entries, categories };
   }, []);
