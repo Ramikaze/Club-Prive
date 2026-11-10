@@ -1,7 +1,7 @@
 // « Dépenses »: the expenses by category, then every expense of the period, newest first, and the total. The
 // transfers between treasury accounts are neither: they get their own quiet list, only when there are any.
 import Icon from '../ui/Icon.jsx';
-import { AccountTag, DemoChip } from '../ui/ui.jsx';
+import { AccountTag, CancelledChip, DemoChip } from '../ui/ui.jsx';
 import { CashRow, EntryCancel, TotalLine, metaLine } from './CashRow.jsx';
 import { byCategory, expenseTotal, onAccount } from './flows.js';
 import { entryWhen } from './when.js';
@@ -18,7 +18,7 @@ function EntryTitle({ e }) {
   return (
     <>
       {e.label} <DemoChip on={e.is_demo} />
-      {e.status !== 'active' && <> <span className="chip">annulée</span></>}
+      {e.status !== 'active' && <> <CancelledChip label="annulée" /></>}
       {e.period_closed && <> <span className="chip" title="Mois clôturé"><Icon name="lock" /> Clôturé</span></>}
     </>
   );

@@ -442,9 +442,9 @@ export default function Agenda() {
             title={showsToday ? undefined : 'Revenir à aujourd’hui'}>{shownLabel}</button>
           <button type="button" className="btn btn-sm" onClick={() => setQuery({ vue: view, date: addDays(date, step), au: listTo(step), statut: status, salle: roomId })} aria-label="Période suivante"><Icon name="right" /></button>
           <label className="date-range-field"><span>Du</span>
-            <input key={`du-${from}`} ref={dateInput} type="date" defaultValue={from} aria-label="Premier jour" className="btn-sm" style={{ minHeight: '36px' }} /></label>
+            <input key={`du-${from}`} ref={dateInput} type="date" defaultValue={from} aria-label="Premier jour" className="btn-sm" /></label>
           <label className="date-range-field"><span>au</span>
-            <input key={`au-${from}-${to}`} ref={toInput} type="date" defaultValue={to} min={from} max={addDays(from, MAX_RANGE_DAYS)} aria-label="Dernier jour" className="btn-sm" style={{ minHeight: '36px' }} /></label>
+            <input key={`au-${from}-${to}`} ref={toInput} type="date" defaultValue={to} min={from} max={addDays(from, MAX_RANGE_DAYS)} aria-label="Dernier jour" className="btn-sm" /></label>
         </div>
         {view === 'liste' && (
           <select value={status} onChange={(e) => setQuery({ vue: view, date, au: listTo(0), statut: e.target.value, salle: roomId })} aria-label="Filtrer par statut" style={{ width: 'auto', minHeight: '36px' }}>

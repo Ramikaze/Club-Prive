@@ -44,7 +44,7 @@ async function request(method, url, body, key) {
     if (res.status === 401 && !NO_SIGNOUT.has(url)) onSignedOut();
     if (res.status === 403 && (data?.error?.code === 'MOT_DE_PASSE_A_CHOISIR' || data?.error?.code === 'IDENTIFIANT_A_CHOISIR')) onPasswordFirst();
     if (!res.ok) {
-      throw new ApiError(res.status, data?.error?.code ?? 'ERREUR', data?.error?.message ?? `Erreur ${res.status}.`, data?.error?.details);
+      throw new ApiError(res.status, data?.error?.code ?? 'ERREUR', data?.error?.message ?? `Le serveur n’a pas pu répondre (erreur ${res.status}). Réessayez ; si cela continue, prévenez l’administrateur.`, data?.error?.details);
     }
     return data;
   }

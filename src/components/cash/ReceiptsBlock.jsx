@@ -3,7 +3,7 @@
 // money was received with the recharge.
 import { Link } from 'react-router-dom';
 import Icon from '../ui/Icon.jsx';
-import { DemoChip } from '../ui/ui.jsx';
+import { CancelledChip, DemoChip } from '../ui/ui.jsx';
 import { CashRow, EntryCancel, TotalLine, metaLine } from './CashRow.jsx';
 import { cancelledBy, cashOf, onAccount, paymentAdds, receiptSummary, saleCashByAccount } from './flows.js';
 import { bizDayOf, entryWhen, whenText } from './when.js';
@@ -74,7 +74,7 @@ function Row({ row, to, isAdmin, onChange }) {
     const adds = paymentAdds(p, to, bizDayOf);
     return (
       <CashRow
-        title={<>{saleTitle(p)}{p.cancelled_at && <> <span className="chip chip-danger" title={p.cancel_reason ?? ''}>annulé</span></>}</>}
+        title={<>{saleTitle(p)}{p.cancelled_at && <> <CancelledChip title={p.cancel_reason ?? ''} /></>}</>}
         meta={metaLine(row.when, p.shop_sale_id && shopTag(p.shop_account), ticketLink(p.id, `Ticket ${formatTicketNumber(p.id)}`),
           p.shop_sale_id ? buyerOf(p.buyer_kind, p.member_id, p.member_name) : memberLink(p.member_id, p.member_name),
           cash ? <>{p.method}{p.reference ? ` ${p.reference}` : ''}</> : null, card > 0 && cash > 0 && `dont ${money(card)} par carte`)}
@@ -103,7 +103,7 @@ function Row({ row, to, isAdmin, onChange }) {
   const cancelled = e.status !== 'active';
   return (
     <CashRow
-      title={<>{e.label} <DemoChip on={e.is_demo} />{cancelled && <> <span className="chip">annulée</span></>}</>}
+      title={<>{e.label} <DemoChip on={e.is_demo} />{cancelled && <> <CancelledChip label="annulée" /></>}</>}
       meta={metaLine(row.when, 'Entrée diverse', e.category_name, e.method, e.reference, e.created_by_name && `par ${e.created_by_name}`)}
       note={cancelled && e.cancel_reason ? `Annulée par ${e.cancelled_by_name} : ${e.cancel_reason}` : null}
       amount={e.amount} sign="+" cancelled={cancelled}

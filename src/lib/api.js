@@ -64,7 +64,7 @@ async function request(method, url, body, key, asFile = false, anonymous = false
     try { data = await res.json(); } catch { /* empty body */ }
     if (res.status === 401 && !NO_REDIRECT.has(url)) onUnauthorized();
     if (!res.ok) {
-      throw new ApiError(res.status, data?.error?.code ?? 'ERREUR', data?.error?.message ?? `Erreur ${res.status}.`, data?.error?.details);
+      throw new ApiError(res.status, data?.error?.code ?? 'ERREUR', data?.error?.message ?? `Le serveur n’a pas pu répondre (erreur ${res.status}). Réessayez ; si cela continue, prévenez l’administrateur.`, data?.error?.details);
     }
     return data;
   }

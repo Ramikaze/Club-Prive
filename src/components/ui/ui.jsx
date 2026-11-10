@@ -20,6 +20,11 @@ export function Hypothesis({ title, label = 'Hypothèse' }) {
   return <span className="chip chip-hyp" title={title}>{label}</span>;
 }
 
+// A cancelled line, drawn the same on every screen; `label` agrees with what was cancelled (« annulé », « annulée »).
+export function CancelledChip({ label = 'annulé', title }) {
+  return <span className="chip chip-danger" title={title}>{label}</span>;
+}
+
 export function DemoChip({ on }) {
   return on ? <span className="chip chip-demo" title="Donnée fictive de démonstration">démo</span> : null;
 }
@@ -64,7 +69,7 @@ export function ErrorState({ error, onRetry }) {
       <div className="empty">
         <Icon name="alert" />
         <p><strong>Impossible d’afficher cette page.</strong></p>
-        <p className="muted">{error?.message ?? 'Erreur inconnue.'}</p>
+        <p className="muted">{error?.message ?? 'Un problème est survenu. Réessayez ; si cela continue, prévenez l’administrateur.'}</p>
         {onRetry && <button type="button" className="btn" onClick={onRetry}>Réessayer</button>}
       </div>
     </div>

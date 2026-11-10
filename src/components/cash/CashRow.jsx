@@ -53,5 +53,5 @@ export function cancelEntry(e, onDone) {
 
 export function EntryCancel({ e, isAdmin, onDone }) {
   if (!isAdmin || e.status !== 'active' || e.period_closed) return null;
-  return <button type="button" className="btn btn-sm btn-ghost" onClick={() => cancelEntry(e, onDone)}>Annuler<span className="sr-only"> : {e.label}</span></button>;
+  return <button type="button" className="btn btn-sm btn-ghost" onClick={() => cancelEntry(e, onDone)}>Annuler l’opération<span className="sr-only"> : {e.label}</span></button>;
 }

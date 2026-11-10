@@ -1,6 +1,6 @@
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
-import { AccountTag, Chip, DemoChip, Empty, Loaded, Notice, PageHead } from '../components/ui/ui.jsx';
+import { AccountTag, CancelledChip, Chip, DemoChip, Empty, Loaded, Notice, PageHead } from '../components/ui/ui.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import { actionDialog } from '../components/ui/Modal.jsx';
 import { api, newKey } from '../lib/api.js';
@@ -126,7 +126,7 @@ function WalletMovements({ m, reload }) {
                   <span className={w.amount > 0 ? 'amount-in' : ''}>{`${w.amount > 0 ? '+' : '−'}${money(Math.abs(w.amount))}`}</span></div>
                 <div className="meta">{`${dateTime(w.at)} · solde ${money(w.balance_after)}${w.by_name ? ` · ${w.by_name}` : ''}${w.reason ? ` · ${w.reason}` : ''}`}</div>
               </div>
-              {isCancelled ? <span className="chip">annulée</span> : null}
+              {isCancelled ? <CancelledChip label="annulée" /> : null}
               {w.payment_id ? <Link className="btn btn-sm" to={`/caisse/ticket/${w.payment_id}`}>Ticket</Link> : null}
               {isAdmin && w.kind === 'recharge' && !isCancelled ? (
                 <button type="button" className="btn btn-sm btn-ghost"
@@ -417,7 +417,7 @@ function MemberDetail({ m, reload }) {
                       {paidForLabel(p) ? ` · ${paidForLabel(p)}` : null}
                       {p.reservation_id ? <> · <Link to={`/reservations/${p.reservation_id}`}>réservation n° {p.reservation_id}</Link></> : (paidForLabel(p) ? null : ' · abonnement')}
                       {cancelledAt ? ` · annulé le ${dateTime(cancelledAt)} : ${reason}` : null}</div></div>
-                  {cancelledAt ? <span className="chip">annulé</span> : <span className="chip chip-ok">n° {p.id}</span>}
+                  {cancelledAt ? <CancelledChip /> : <span className="chip chip-ok">n° {p.id}</span>}
                   {isAdmin && p.kind === 'repas' && !p.cancelled_at
                     ? <button type="button" className="btn btn-sm btn-ghost" onClick={() => openCancelMealDialog(p, reload)}>Annuler le repas</button> : null}
                   <Link className="btn btn-sm" to={`/caisse/ticket/${p.id}`}>Ticket</Link></div>

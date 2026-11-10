@@ -61,7 +61,7 @@ function Orders({ orders, reload }) {
                     <button type="button" className="btn btn-sm btn-danger" disabled={busy} onClick={() => cancel(o.id)}>Confirmer l’annulation</button>
                     <button type="button" className="btn btn-sm" onClick={() => setAsking(null)}>Garder</button>
                   </span>
-                ) : <button type="button" className="cl-link" onClick={() => setAsking(o.id)}>Annuler</button>)}
+                ) : <button type="button" className="cl-link" onClick={() => setAsking(o.id)}>Annuler la commande</button>)}
               </div>
               <span className={`chip chip-${kind}`}>{label}</span>
             </li>
