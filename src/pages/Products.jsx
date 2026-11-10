@@ -362,6 +362,8 @@ function ProductSheet({ close, product, onDone }) {
             {canOfferProduct(me, p) && (
               <div className="row"><button type="button" className="btn" disabled={busy || p.stock_qty === 0} onClick={() => offerDialog(p, onStock)}>Offrir</button></div>
             )}
+            {/* The product's movements, as from the list's « Historique » button: for everyone who opens the sheet. */}
+            <div className="row"><button type="button" className="btn btn-ghost" onClick={() => historyDialog(p)}><Icon name="list" /> Historique du stock</button></div>
             {canEditPhoto && (
               <div className="row">
                 <button type="button" className="btn" disabled={busy} aria-busy={busy} onClick={() => picker.current?.click()}>
