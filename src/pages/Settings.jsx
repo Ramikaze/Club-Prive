@@ -9,6 +9,7 @@ import { api, newKey } from '../lib/api.js';
 import { ACCOUNT_LABEL, ROLE_LABEL, dateTime, fmtDuration, parseMoney, toMajor } from '../lib/format.js';
 import { useBusy, useLoad, useSubmit } from '../lib/hooks.js';
 import { ROLES, RAYONS, RAYON_LABEL } from '../../shared/roles.js';
+import { ERASE_GROUPS, ERASE_LABEL, eraseClosure } from '../../shared/erase.js';
 import { useIsAdmin, useSettings, useStore } from '../store/useStore.js';
 
 const TIME_ZONES = ['Africa/Brazzaville', 'Africa/Kinshasa', 'Africa/Douala', 'Africa/Lagos', 'Africa/Abidjan', 'Africa/Casablanca',
@@ -145,35 +146,57 @@ function RenameCategoryDialog({ close, category, onDone }) {
   );
 }
 
-function ResetDialog({ close, onDone }) {
+// Paramètres › « Effacer des données » (shared/erase.js): the administrator ticks what he erases; the groups a box
+// needs are shown ticked and greyed, with the reason. Accounts, settings, plans and categories always stay.
+function EraseDialog({ close, onDone }) {
   const [key] = useState(newKey);
+  const [picked, setPicked] = useState(() => new Set());
   const [confirm, setConfirm] = useState('');
   const { busy, error, submit } = useSubmit();
+  const erased = eraseClosure([...picked]);
+  const implied = erased.filter((k) => !picked.has(k));
+  const toggle = (k, on) => setPicked((prev) => {
+    const next = new Set(prev);
+    if (on) next.add(k);
+    else next.delete(k);
+    return next;
+  });
   const onSubmit = (e) => {
     e.preventDefault();
     submit(async () => {
+      if (!erased.length) throw new Error('Cochez au moins une rubrique à effacer.');
       if (confirm !== 'EFFACER') throw new Error('Pour confirmer, saisissez EFFACER en majuscules.');
-      await api.post('/api/admin/reset', { confirm }, key);
+      const res = await api.post('/api/admin/erase', { groups: [...picked], confirm }, key);
       close();
-      toast('Toutes les données ont été effacées.');
+      toast(`Effacé : ${res.erased.map((k) => ERASE_LABEL[k]).join(', ')}.`);
       onDone?.();
     });
   };
   return (
-    <Modal title="Effacer toutes les données" onClose={close}>
+    <Modal title="Effacer des données" size="wide" onClose={close}>
       <form className="form-grid" onSubmit={onSubmit} noValidate>
-        <Notice kind="danger">Opération définitive : les données effacées ne peuvent pas être récupérées. Utilisez-la pour repartir d’un club vide.</Notice>
-        <dl className="kv">
-          <dt>Supprimés</dt>
-          <dd>membres, cartes, abonnements, réservations, encaissements, remboursements, produits, stocks, dépenses, clôtures, historique et soldes d’ouverture.</dd>
-          <dt>Conservés</dt>
-          <dd>comptes utilisateurs, paramètres, formules, catégories.</dd>
-        </dl>
+        <Notice kind="danger">Opération définitive dans l’application. Cochez seulement ce que vous voulez effacer.</Notice>
+        <div className="row">
+          <button type="button" className="btn btn-sm" onClick={() => setPicked(new Set(ERASE_GROUPS.map((g) => g.key)))}>Tout cocher</button>
+          <button type="button" className="btn btn-sm btn-ghost" onClick={() => setPicked(new Set())}>Tout décocher</button>
+        </div>
+        <div className="stack-sm">{ERASE_GROUPS.map((g) => {
+          const forced = implied.includes(g.key);
+          return (
+            <label key={g.key} className="check">
+              <input type="checkbox" checked={picked.has(g.key) || forced} disabled={forced} onChange={(e) => toggle(g.key, e.target.checked)} />
+              <span><strong>{g.label}</strong> <span className="subtle">{g.help}</span>
+                {forced && <span className="subtle"> · effacé aussi, car une rubrique cochée en dépend</span>}</span>
+            </label>
+          );
+        })}</div>
+        <p className="subtle">Toujours conservés : comptes du personnel, réglages, formules, catégories. Les quantités en stock ne sont pas recalculées : ajustez-les ensuite si besoin.</p>
         <label className="field"><span>Pour confirmer, saisissez EFFACER</span>
           <input value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="off" autoCapitalize="characters" spellCheck={false} /></label>
         <FormError error={error} />
         <div className="modal-actions"><button type="button" className="btn" onClick={close}>Annuler</button>
-          <button type="submit" className="btn btn-danger" disabled={busy || confirm !== 'EFFACER'} aria-busy={busy}>Effacer les données</button></div>
+          <button type="submit" className="btn btn-danger" disabled={busy || confirm !== 'EFFACER' || !erased.length} aria-busy={busy}>
+            {erased.length ? `Effacer ${erased.length} rubrique${erased.length > 1 ? 's' : ''}` : 'Effacer'}</button></div>
       </form>
     </Modal>
   );
@@ -589,9 +612,9 @@ function DataSection({ onReset }) {
     <section className="card settings-section" id="sec-data">
       <div className="card-head"><h2>Données</h2></div>
       <div className="stack">
-        <p>Pour repartir d’un club vide, effacez toutes les données : les comptes utilisateurs, les paramètres, les formules et les catégories sont conservés.</p>
+        <p>Effacez ce que vous voulez : les encaissements de test seulement, ou tout pour repartir d’un club vide. Les comptes du personnel, les réglages, les formules et les catégories sont toujours conservés.</p>
         <div className="row">
-          <button type="button" className="btn btn-danger" onClick={() => openDialog(ResetDialog, { onDone: onReset })}><Icon name="reset" /> Effacer toutes les données</button>
+          <button type="button" className="btn btn-danger" onClick={() => openDialog(EraseDialog, { onDone: onReset })}><Icon name="reset" /> Effacer des données</button>
         </div>
       </div>
     </section>

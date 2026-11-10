@@ -12,6 +12,7 @@ import { caisseMethods } from './caisses.js';
 import { supplierMethods } from './suppliers.js';
 import { creditMethods } from './credit.js';
 import { giftMethods } from './gifts.js';
+import { ERASE_GROUPS, ERASE_UNLINKS, eraseClosure } from '../shared/erase.js';
 import { clientAccessMethods } from './clientAccess.js';
 import { clientViewMethods } from './clientView.js';
 import { clientOrderMethods } from './clientOrders.js';
@@ -339,6 +340,24 @@ export class Club {
     this.cachedSettings = null;
     this.audit(actor, 'donnees.effacer', null, null, { tables: WIPE_ORDER });
     return { ok: true };
+  }
+
+  // Erases the groups the administrator ticked (shared/erase.js) and every group they need: links from tables that
+  // stay are emptied first, then the rows go in WIPE_ORDER (children before parents). Stored replies of earlier
+  // writes are dropped too (they may describe rows that are gone). The stock quantities are left as they are.
+  eraseData(actor, input) {
+    if (input?.confirm !== 'EFFACER') throw invalid('Pour confirmer, saisissez EFFACER en majuscules.');
+    const groups = eraseClosure(Array.isArray(input.groups) ? input.groups : []);
+    if (!groups.length) throw invalid('Cochez au moins une rubrique à effacer.');
+    const chosen = new Set(groups);
+    for (const [table, column, target, own] of ERASE_UNLINKS) {
+      if (chosen.has(target) && !chosen.has(own)) this.run(`UPDATE ${table} SET ${column} = NULL WHERE ${column} IS NOT NULL`);
+    }
+    const tables = new Set(ERASE_GROUPS.filter((g) => chosen.has(g.key)).flatMap((g) => g.tables));
+    for (const table of WIPE_ORDER) if (tables.has(table) || table === 'idempotency_keys') this.run(`DELETE FROM ${table}`);
+    this.cachedSettings = null;
+    this.audit(actor, 'donnees.effacer_partie', null, null, { rubriques: groups });
+    return { erased: groups };
   }
 
   // ---------------------------------------------------------------- settings

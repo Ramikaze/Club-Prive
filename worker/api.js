@@ -311,6 +311,8 @@ export function createApi({ db, env = {}, demo = false, sendPush: pushSender = n
     (ctx) => club.setUserPassword(ctx.user, ctx.params.id, ctx.passwordHash));
   add('GET', '/api/audit', CLUB, (ctx) => club.auditLog(ctx.query));
   add('POST', '/api/admin/reset', { ...ADMIN, ...ACCOUNTS }, (ctx) => club.wipeData(ctx.user, ctx.body.confirm));
+  // Paramètres › « Effacer des données »: the administrator erases the groups he ticks (shared/erase.js).
+  add('POST', '/api/admin/erase', { ...ADMIN, ...ACCOUNTS }, (ctx) => club.eraseData(ctx.user, ctx.body));
   // Catalogue import: a temporary door for a script on the owner's computer, one product per call, open only
   // while the IMPORT_TOKEN secret exists. There is no session: the code is the whole credential, so the door
   // belongs to the real club alone (the demo space answers 404).
