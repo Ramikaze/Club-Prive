@@ -1,12 +1,13 @@
 // Who buys: a day client (default, no file), a regular client or a member found by the same search as the Membres page.
 // Only active people are offered. A regular client can also be created on the spot.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import SmartSearch from '../ui/SmartSearch.jsx';
 import { FormError, Segmented } from '../ui/ui.jsx';
 import { Modal, openDialog } from '../ui/Modal.jsx';
 import { toast } from '../ui/toast.jsx';
 import { api, newKey, qs } from '../../lib/api.js';
 import { useSubmit } from '../../lib/hooks.js';
+import { smartFilter } from '../../../shared/search.js';
 
 const KINDS = [['journalier', 'Client journalier'], ['client', 'Client régulier'], ['membre', 'Membre']];
 const ENDPOINT = { client: '/api/clients', membre: '/api/members' };
@@ -50,31 +51,25 @@ function NewClientDialog({ close, onDone }) {
 
 export default function BuyerPicker({ buyer, onChange }) {
   const [text, setText] = useState('');
-  const [found, setFound] = useState({ q: '', kind: '', items: [] });
-  const seq = useRef(0);
-  const timer = useRef(null);
-  useEffect(() => () => { clearTimeout(timer.current); seq.current += 1; }, []);
+  // Every active member (or regular client), read once per kind: the suggestions show as soon as the field is touched
+  // and narrow at each letter on the device itself, with no wait on a weak network (same matching as the server's).
+  const [all, setAll] = useState({ kind: '', items: [] });
+  useEffect(() => {
+    if (buyer.kind === 'journalier') return undefined;
+    let live = true;
+    api.get(`${ENDPOINT[buyer.kind]}${qs({ statut: 'actifs' })}`)
+      .then((items) => { if (live) setAll({ kind: buyer.kind, items }); })
+      .catch((err) => { if (live) toast(err.message, 'error'); });
+    return () => { live = false; };
+  }, [buyer.kind]);
 
   const setKind = (kind) => {
     setText('');
-    setFound({ q: '', kind: '', items: [] });
     onChange({ kind, person: null });
   };
-  const onInput = (value) => {
-    setText(value);
-    clearTimeout(timer.current);
-    const q = value.trim();
-    timer.current = setTimeout(async () => {
-      const n = (seq.current += 1);
-      try {
-        const items = await api.get(`${ENDPOINT[buyer.kind]}${qs({ q, statut: 'actifs' })}`);
-        if (n === seq.current) setFound({ q, kind: buyer.kind, items });
-      } catch (err) {
-        toast(err.message, 'error');
-      }
-    }, 220);
-  };
-  const suggestions = found.kind === buyer.kind && found.q === text.trim() ? found.items : [];
+  const list = all.kind === buyer.kind ? all.items : [];
+  const q = text.trim();
+  const suggestions = q ? smartFilter(list, q, (m) => [m.name ?? `${m.first_name} ${m.last_name}`, m.member_no, m.phone]) : list;
 
   return (
     <div className="buyer-picker">
@@ -88,7 +83,8 @@ export default function BuyerPicker({ buyer, onChange }) {
         <>
           <SmartSearch
             value={text}
-            onChange={onInput}
+            onChange={setText}
+            instant
             suggestions={suggestions}
             onPick={(m) => onChange({ kind: buyer.kind, person: asPerson(m) })}
             placeholder="Nom, téléphone ou numéro"

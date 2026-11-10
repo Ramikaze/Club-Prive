@@ -23,7 +23,7 @@ export const NAV = [
   { path: '/salles', label: 'Salles', short: 'Salles', icon: 'rooms', tab: true },
   { path: '/agenda', label: 'Agenda', short: 'Agenda', icon: 'calendar', tab: true, also: ['/reservations'] },
   { path: '/membres', label: 'Membres / Clients', short: 'Membres', icon: 'users', tab: true, also: ['/clients', '/cartes'] },
-  { path: '/boutique', label: 'Boutique', short: 'Boutique', icon: 'shop' },
+  { path: '/boutique', label: 'Boutique', short: 'Boutique', icon: 'shop', tab: true },
   // Orders and reservation requests from the client space; the counter is what waits (useOrderCounter).
   { path: '/commandes', label: 'Commandes', short: 'Commandes', icon: 'receipt', counter: true },
   { path: '/produits', label: 'Stocks', short: 'Stocks', icon: 'box' },

@@ -1,15 +1,16 @@
 // Search box with a list of suggestions under it, from two characters typed (shared/search.js). Arrows move through the
 // suggestions, Enter opens the one highlighted, Escape closes the list. The page filters its own list with the same
-// text; the suggestions only give a quick way to the item.
+// text; the suggestions only give a quick way to the item. With `instant`, the list shows as soon as the field is
+// touched, empty or with one letter, and narrows as the text grows (the buyer of a sale).
 import { useId, useState } from 'react';
 import Icon from './Icon.jsx';
 import { searchable } from '../../../shared/search.js';
 
-export default function SmartSearch({ value, onChange, suggestions, renderSuggestion, onPick, placeholder, label, max = 8 }) {
+export default function SmartSearch({ value, onChange, suggestions, renderSuggestion, onPick, placeholder, label, max = 8, instant = false }) {
   const listId = useId();
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
-  const shown = searchable(value) ? suggestions.slice(0, max) : [];
+  const shown = instant || searchable(value) ? suggestions.slice(0, max) : [];
   const expanded = open && shown.length > 0;
   const at = Math.min(active, shown.length - 1);
 
