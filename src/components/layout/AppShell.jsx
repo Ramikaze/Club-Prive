@@ -183,7 +183,10 @@ export default function AppShell() {
   useEffect(() => {
     closeAllDialogs();
     window.scrollTo(0, 0);
-    document.getElementById('main')?.focus({ preventScroll: true });
+    // On a phone the page content scrolls inside main, not the window (club.css).
+    const main = document.getElementById('main');
+    main?.scrollTo(0, 0);
+    main?.focus({ preventScroll: true });
   }, [pathname]);
 
   // The tour opens by itself once per browser, in the demo space: the first entry, whatever the browser

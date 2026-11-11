@@ -36,6 +36,15 @@
   color-scheme: dark; background: var(--charcoal); color: var(--on-charcoal); border-top: 1px solid var(--charcoal-3);
   --focus-ring: 0 0 0 2px var(--charcoal), 0 0 0 4px var(--bronze-on-charcoal);
 }
+/* As in the staff app (club.css): on a phone the page itself never scrolls. The space fills the screen, its two bars
+   are rows of it and only the content scrolls between them, so Safari on iPhone cannot move the bottom bar. */
+@media screen and (max-width: 899px) {
+  html:has(.cl) { overscroll-behavior: none; }
+  .cl { position: fixed; inset: 0; min-height: 0; }
+  .cl-top { position: relative; flex: none; }
+  .cl-main { min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; padding-bottom: 28px; }
+  .cl-nav { position: relative; flex: none; max-width: none; margin: 0; }
+}
 .cl-nav a {
   display: grid; justify-items: center; align-content: center; gap: 3px; min-height: var(--tabbar-h);
   color: var(--on-charcoal-2); text-decoration: none; font-size: 0.74rem;
