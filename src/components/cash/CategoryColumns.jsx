@@ -71,7 +71,8 @@ function Bridge({ bridge, cash, oneDay }) {
 
 // `journal`, `entries`, `t` (the treasury) and `openingBalances`: what « Soldes » reads, for the line under the
 // columns. The columns ignore the account filter, so the line is shown on all accounts only.
-export default function CategoryColumns({ sum, billed, method, oneDay, journal, entries, t, openingBalances }) {
+// `closing`: the day's closing bar (« Fermer la caisse »), shown in this tile at the owner's request (2026-11-10).
+export default function CategoryColumns({ sum, billed, method, oneDay, journal, entries, t, openingBalances, closing = null }) {
   const bridge = !method && recetteToCash(sum, journal, entries, { to: t.to, dayOf: bizDayOf });
   const cash = !method && tillFigures(t, '', { entries, journal, openingBalances, dayOf: bizDayOf }).in;
   return (
@@ -82,6 +83,8 @@ export default function CategoryColumns({ sum, billed, method, oneDay, journal, 
         {/* The three accounts are the only ones, so the total is exactly the sum of the three column heads. */}
         <span className="cat-total"><span className="subtle">Total</span> <strong className="cash-block-total num">{money(sum.total.net)}</strong></span>
       </div>
+      {closing}
+      <p className="subtle">La recette du jour passe dans le solde réel de la caisse une fois la caisse fermée, puis vérifiée par un associé ou l’administrateur ; jusque-là, elle est « en attente ».</p>
       {!billed ? <p className="subtle">Les lignes facturées n’ont pas pu être chargées. Rechargez la page.</p> : (
       <div className="cat-columns">
         {/* The three columns share the whole width of the block, so each reads at ease (owner, 2026-11-08: no longer

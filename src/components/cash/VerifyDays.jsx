@@ -6,7 +6,6 @@ import { Modal, actionDialog, openDialog } from '../ui/Modal.jsx';
 import { FormError, Loaded } from '../ui/ui.jsx';
 import { toast } from '../ui/toast.jsx';
 import { gapText } from './CountDialog.jsx';
-import { closeDayDialog } from './CloseDay.jsx';
 import { api, qs } from '../../lib/api.js';
 import { dateTime, dayLabel, money } from '../../lib/format.js';
 import { useLoad, useSubmit } from '../../lib/hooks.js';
@@ -30,9 +29,8 @@ export function PendingDaysBand({ days, onChange }) {
             </div>
             <span className="num">{money(d.total)}</span>
             {i > 0 && <span className="subtle">après le {dayLabel(days[i - 1].day, 'medium')}</span>}
-            {i === 0 && !d.closed && (
-              <button type="button" className="btn btn-sm btn-primary" onClick={() => closeDayDialog(d.day, onChange)}><Icon name="lock" /> Fermer la caisse</button>
-            )}
+            {/* The day is closed from the « Recette du jour par catégorie » tile below (owner's request, 2026-11-10). */}
+            {i === 0 && !d.closed && <span className="subtle">à fermer dans « Recette du jour par catégorie »</span>}
             {i === 0 && d.closed && boss && (
               <button type="button" className="btn btn-sm btn-primary" onClick={() => verifyDayDialog(d.day, onChange)}>Vérifier</button>
             )}

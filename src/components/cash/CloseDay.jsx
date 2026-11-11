@@ -200,7 +200,8 @@ function Wizard({ close, day, data, onDone }) {
 
 // The day's closing on the cash page: a button to close it, or who closed it and the gap, and for an administrator a
 // way to reopen it.
-export function DayClosingBar({ isAdmin, onChange, refresh = 0 }) {
+// `inline`: drawn inside another card (the « Recette du jour par catégorie » tile of the bosses), not as a card of its own.
+export function DayClosingBar({ isAdmin, onChange, refresh = 0, inline = false }) {
   const day = bizToday();
   const state = useLoad(() => api.get(`/api/day-closing${qs({ day })}`), [day, refresh]);
   const reload = () => { state.reload(); onChange?.(); };
@@ -208,7 +209,7 @@ export function DayClosingBar({ isAdmin, onChange, refresh = 0 }) {
   // Unread is not « nothing to show »: whether the day is open or closed stays unknown until read again.
   if (state.error && !state.data) {
     return (
-      <div className="card close-bar">
+      <div className={`${inline ? '' : 'card '}close-bar`}>
         <span><Icon name="alert" /> {`L’état de la caisse du ${dayLabel(day, 'medium')} n’a pas pu être lu.`}</span>
         <button type="button" className="btn btn-sm" onClick={state.retry}>Réessayer</button>
       </div>
@@ -217,7 +218,7 @@ export function DayClosingBar({ isAdmin, onChange, refresh = 0 }) {
   if (!state.data) return null;
   if (!c) {
     return (
-      <div className="card close-bar">
+      <div className={`${inline ? '' : 'card '}close-bar`}>
         <span><Icon name="unlock" /> La caisse du {dayLabel(day, 'medium')} est ouverte.</span>
         <button type="button" className="btn btn-primary btn-sm" onClick={() => closeDayDialog(day, reload)}><Icon name="lock" /> Fermer la caisse</button>
       </div>
@@ -232,7 +233,7 @@ export function DayClosingBar({ isAdmin, onChange, refresh = 0 }) {
     run: async ({ reason }) => { await api.post(`/api/day-closing/${day}/reopen`, { reason }); toast('Journée rouverte.'); reload(); },
   });
   return (
-    <div className="card close-bar is-closed">
+    <div className={`${inline ? '' : 'card '}close-bar is-closed`}>
       <span><Icon name="lock" /> Caisse fermée le {dateTime(c.closed_at)}{c.closed_by_name ? ` par ${c.closed_by_name}` : ''} · {gapText(gap)}
         {c.summary.unchecked.length > 0 && ` · ${c.summary.unchecked.length} ticket(s) non pointé(s)`}
         {c.verified ? (c.verified.verified_by_name ? ` · vérifiée par ${c.verified.verified_by_name}` : ' · vérifiée') : ' · en attente de vérification'}</span>
