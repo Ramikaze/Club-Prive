@@ -328,3 +328,30 @@ test('côté équipe : « encaissé » mène au ticket de la vente (son paiement
   assert.deepEqual(seen(onCredit.id).sales, { alcool: credit.sale.id });
   assert.deepEqual(seen(onCredit.id).tickets, { alcool: null });
 });
+
+// Once a rayon of an order is sold at the counter, the client sees that rayon taken and is no longer offered to cancel
+// (the server would refuse it); a fresh order still is.
+test('commande à moitié encaissée : côté client, rayon retiré et plus d’annulation proposée', async () => {
+  const c = await newProduct('cigare', 5);
+  const b = await newProduct('bouteille', 5);
+  const a = await person();
+  const o = ok(await order(a, [{ product_id: c.id, quantity: 1 }, { product_id: b.id, quantity: 1 }]));
+  const view = async () => ok(await a.client.get('/api/client/orders')).find((x) => x.id === o.id);
+  const before = await view();
+  assert.equal(before.cancellable, true);
+  assert.deepEqual(before.lines.map((l) => l.taken), [null, null]);
+  ok(await ger.post('/api/shop/sales', {
+    account: 'cigares', buyer: { kind: 'client', member_id: a.member.id }, lines: [{ product_id: c.id, quantity: 1 }], method: 'Espèces', order_id: o.id,
+  }));
+  const half = await view();
+  assert.equal(half.status, 'en_attente');
+  assert.equal(half.cancellable, false);
+  assert.deepEqual(half.lines.map((l) => [l.account, l.taken]), [['cigares', true], ['alcool', null]]);
+  ok(await ger.post('/api/shop/sales', {
+    account: 'alcool', buyer: { kind: 'client', member_id: a.member.id }, lines: [{ product_id: b.id, quantity: 1 }], method: 'Espèces', order_id: o.id,
+  }));
+  const done = await view();
+  assert.equal(done.status, 'retiree');
+  assert.equal(done.cancellable, false);
+  assert.deepEqual(done.lines.map((l) => l.taken), [true, true]);
+});
