@@ -140,6 +140,7 @@ test('règles de rôle partagées', () => {
   assert.equal(accountOfCategory('bouteille'), 'alcool'); assert.equal(accountOfCategory('cigare'), 'cigares');
   assert.deepEqual(ROLES, ['admin', 'associe', 'gerant']);
   assert.deepEqual(RAYONS, ['cigares', 'alcool']);
+  assert.equal(ROLE_LABEL.admin, 'Administrateur'); // the admin keeps the app, he is not an owner of the club
   assert.equal(ROLE_LABEL.associe, 'Associé'); assert.equal(RAYON_LABEL.alcool, 'Champagne');
   assert.equal(SHOP.alcool.category, 'bouteille');
 });

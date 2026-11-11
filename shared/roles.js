@@ -1,6 +1,6 @@
 // Roles and shop accounts, shared by the Worker and the interface. Pure: no import from worker or src.
 export const ROLES = ['admin', 'associe', 'gerant'];
-export const ROLE_LABEL = { admin: 'Propriétaire / administrateur', associe: 'Associé', gerant: 'Gérant' };
+export const ROLE_LABEL = { admin: 'Administrateur', associe: 'Associé', gerant: 'Gérant' };
 
 // The two shop departments (« rayons »); an associé owns one of them. Each is also a ledger account.
 export const RAYONS = ['cigares', 'alcool'];

@@ -16,7 +16,7 @@ export const ACTION_LABELS = {
   'utilisateur.modifier': 'Utilisateur modifié',
   'utilisateur.mot_de_passe_reinitialise': 'Mot de passe réinitialisé',
   'utilisateur.mot_de_passe_modifie': 'Mot de passe modifié',
-  'utilisateur.acces_reinitialise': 'Accès du propriétaire réinitialisé',
+  'utilisateur.acces_reinitialise': 'Accès de l’administrateur réinitialisé',
   'membre.creer': 'Membre créé',
   'membre.modifier': 'Fiche membre modifiée',
   'membre.supprimer': 'Membre supprimé',
