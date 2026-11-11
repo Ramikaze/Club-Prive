@@ -64,7 +64,7 @@ function SetupForm({ tokenConfigured, onSignedIn }) {
     <form className="login-card" onSubmit={onSubmit} noValidate>
       <div>
         <h1>Installation du club</h1>
-        <p className="muted">Créez le compte du premier propriétaire. Il pourra ensuite créer les comptes des associés et du gérant.</p>
+        <p className="muted">Créez le compte de l’administrateur. Il pourra ensuite créer les comptes des associés et du gérant.</p>
       </div>
       {!tokenConfigured && (
         <Notice kind="warn">
@@ -105,7 +105,7 @@ function ResetForm({ tokenConfigured, onSignedIn, onBack }) {
     <form className="login-card" onSubmit={onSubmit} noValidate>
       <div>
         <h1>Identifiants oubliés</h1>
-        <p className="muted">Avec le code d’installation, choisissez un nouvel identifiant et un nouveau mot de passe pour le compte du propriétaire.</p>
+        <p className="muted">Avec le code d’installation, choisissez un nouvel identifiant et un nouveau mot de passe pour le compte de l’administrateur.</p>
       </div>
       {!tokenConfigured && (
         <Notice kind="warn">Le code d’installation n’est pas configuré sur le serveur : la réinitialisation est impossible.</Notice>
