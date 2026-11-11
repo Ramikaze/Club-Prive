@@ -44,6 +44,8 @@ function Orders({ orders, reload }) {
         {orders.map((o) => {
           const [label, kind] = ORDER_STATUS[o.status] ?? [o.status, 'neutral'];
           const total = o.lines.reduce((sum, l) => sum + l.quantity * l.unit_price, 0);
+          // Open with a rayon already sold at the counter: the client took part of it, the rest waits for him.
+          const started = o.status !== 'retiree' && o.lines.some((l) => l.taken === true);
           return (
             <li key={o.id}>
               <div className="cl-row-main">
@@ -51,12 +53,15 @@ function Orders({ orders, reload }) {
                 <strong>{o.lines.map((l, i) => (
                   <Fragment key={i}>
                     {i > 0 && ', '}{l.quantity} × {l.name}{l.taken === false && <span className="cl-untaken"> (non retiré)</span>}
+                    {started && l.taken === true && <span className="cl-untaken"> (retiré)</span>}
                   </Fragment>
                 ))}</strong>
                 <span className="muted">{dateTime(o.created_at)} · {money(total)}</span>
                 {o.status === 'annulee' && o.cancel_reason && <span className="cl-reason">Motif : {o.cancel_reason}</span>}
-                {o.status === 'prete' && <span className="cl-reason">Votre commande vous attend au club.</span>}
-                {o.status === 'en_attente' && (asking === o.id ? (
+                {started && <span className="cl-reason">Retrait en cours : le reste vous attend au club.</span>}
+                {o.status === 'prete' && !started && <span className="cl-reason">Votre commande vous attend au club.</span>}
+                {/* Only what the server accepts: waiting, and nothing of it sold yet. */}
+                {(o.cancellable ?? o.status === 'en_attente') && (asking === o.id ? (
                   <span className="cl-inline">
                     <button type="button" className="btn btn-sm btn-danger" disabled={busy} onClick={() => cancel(o.id)}>Confirmer l’annulation</button>
                     <button type="button" className="btn btn-sm" onClick={() => setAsking(null)}>Garder</button>

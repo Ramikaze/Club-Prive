@@ -64,10 +64,17 @@ export const clientOrderMethods = {
     const closed = order.status === 'retiree';
     return {
       id: order.id, status: order.status, created_at: order.created_at, cancel_reason: order.cancel_reason ?? null,
+      // What cancelClientOrder accepts: waiting, and nothing of it sold at the counter yet.
+      cancellable: order.status === 'en_attente' && sold.size === 0,
+      // A rayon sold at the counter is taken, even while the order waits for its other rayon; once closed, the rest is
+      // not taken. Open and unsold: not known yet (null).
       lines: this.all(
         `SELECT l.account, l.quantity, l.unit_price, p.name FROM client_order_lines l JOIN products p ON p.id = l.product_id
          WHERE l.order_id = ? ORDER BY l.id`, order.id,
-      ).map((l) => ({ name: l.name, quantity: l.quantity, unit_price: l.unit_price, account: l.account, taken: closed ? sold.has(l.account) : null })),
+      ).map((l) => ({
+        name: l.name, quantity: l.quantity, unit_price: l.unit_price, account: l.account,
+        taken: sold.has(l.account) ? true : closed ? false : null,
+      })),
     };
   },
 
