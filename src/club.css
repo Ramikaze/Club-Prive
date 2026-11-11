@@ -309,6 +309,19 @@ main:focus { outline: none; }
   h1 { font-size: 1.45rem; }
 }
 
+/* On a phone the page itself never scrolls: the shell fills the screen, the top bar and the bottom bar are rows of
+   it, and only the page content (main) scrolls between them. Safari on iPhone (iOS 26, home-screen app included)
+   moves a bar fixed to the bottom of a scrolling page while it scrolls; with no page scroll, both bars stay put.
+   Screen only: on paper the page keeps its plain flow (@media print). */
+@media screen and (max-width: 899px) {
+  html:has(.shell) { overscroll-behavior: none; }
+  .shell { position: fixed; inset: 0; display: flex; flex-direction: column; }
+  .main-col { flex: 1; min-height: 0; }
+  .main-col > .topbar, .main-col > .banner-demo { position: relative; top: auto; flex: none; }
+  .main-col > main { min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; padding-bottom: 28px; }
+  .tabbar { position: relative; flex: none; }
+}
+
 /* ------------------------------------------------------------------ page layout */
 
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 22px; }

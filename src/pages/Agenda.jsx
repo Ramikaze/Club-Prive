@@ -164,7 +164,8 @@ function useFitSlotHeight(ref, slotCount) {
     const measure = () => {
       const el = ref.current;
       if (!el || window.innerWidth < FIT_MIN_WIDTH || !window.matchMedia('(pointer: fine)').matches) return setSlotH(DAY_SLOT_H);
-      const top = el.getBoundingClientRect().top + window.scrollY;
+      // Under 900 px the page content scrolls inside main, not the window (club.css): count both.
+      const top = el.getBoundingClientRect().top + window.scrollY + (document.getElementById('main')?.scrollTop ?? 0);
       const room = window.innerHeight - top - LEGEND_SPACE;
       setSlotH(Math.max(FIT_MIN_SLOT_H, Math.min(DAY_SLOT_H, Math.floor(room / slotCount))));
     };
