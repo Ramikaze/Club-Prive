@@ -4,6 +4,7 @@
 import { notFound, invalid } from './errors.js';
 import { localParts } from '../shared/time.js';
 import { DEPOSIT_FROM, depositFor } from '../shared/rules.js';
+import { formatTicketNumber } from '../shared/ticket.js';
 
 // The ticket fields a client never gets: the next duplicate's number (the staff's count of copies), the reasons typed
 // by staff when the sale or payment was cancelled. The cashier's name and the payment reference stay: the paper
@@ -117,11 +118,17 @@ export const clientViewMethods = {
     }
     for (const r of statement.reservations) {
       if (r.status === 'reservee') continue;
-      item(r.start_at, 'seance', `Séance — ${r.room_name}`, r.supplement_amount, null, null, SESSION_STATUS[r.status]);
+      // The paid time of a session is its own lines (temps_supplementaire): owed, it says « à régler »; paid, it opens
+      // its ticket. A running or cancelled session keeps its own state.
+      const paid = this.clientLinesPayment('reservation_id', r.id, 'temps_supplementaire');
+      const status = r.status === 'terminee' ? paid.status ?? 'valide' : SESSION_STATUS[r.status];
+      item(r.start_at, 'seance', `Séance — ${r.room_name}`, r.supplement_amount, paid.payment_id, paid.ticket_number, status);
     }
     for (const s of statement.subscriptions) {
       if (s.created_at >= startAt && s.created_at < endAt) {
-        item(s.created_at, 'abonnement', `Abonnement — ${s.plan_name}`, s.price, null, null, s.status === 'annulee' ? 'annule' : 'valide');
+        const paid = this.clientLinesPayment('subscription_id', s.id, 'abonnement');
+        const status = s.status === 'annulee' ? 'annule' : paid.status ?? 'valide';
+        item(s.created_at, 'abonnement', `Abonnement — ${s.plan_name}`, s.price, paid.payment_id, paid.ticket_number, status);
       }
     }
     for (const l of this.purchaseHistory(memberId).lines) {
@@ -131,6 +138,25 @@ export const clientViewMethods = {
     }
     items.sort((x, y) => (x.at < y.at ? 1 : x.at > y.at ? -1 : 0));
     return { period: { from: statement.period.from, to: statement.period.to }, items };
+  },
+
+  // The lines of a plan or of a session's paid time (`owner`: 'subscription_id' or 'reservation_id', never a value from
+  // the network), as one history line sees them: `status` null without any line, « a_regler » while one is owed, else
+  // the lines' common state; the payment is the latest that still stands, as for a purchase (purchaseHistory).
+  clientLinesPayment(owner, ownerId, kind) {
+    if (owner !== 'subscription_id' && owner !== 'reservation_id') throw new Error('clientLinesPayment: owner inconnu.');
+    const lines = this.all(`SELECT id, status FROM charges WHERE ${owner} = ? AND kind = ?`, ownerId, kind);
+    if (!lines.length) return { status: null, payment_id: null, ticket_number: null };
+    const states = new Set(lines.map((l) => CHARGE_STATUS[l.status] ?? l.status));
+    let status = 'valide';
+    if (states.has('a_regler')) status = 'a_regler';
+    else if (states.size === 1) [status] = states;
+    const payment = this.get(
+      `SELECT x.payment_id AS id FROM payment_allocations x JOIN payments p ON p.id = x.payment_id
+       WHERE x.charge_id IN (SELECT value FROM json_each(?)) ORDER BY (p.cancelled_at IS NULL) DESC, x.id DESC LIMIT 1`,
+      JSON.stringify(lines.map((l) => l.id)),
+    );
+    return { status, payment_id: payment?.id ?? null, ticket_number: payment ? formatTicketNumber(payment.id) : null };
   },
 
   // The payment row when it is the member's own and not a walk-in's, else null.

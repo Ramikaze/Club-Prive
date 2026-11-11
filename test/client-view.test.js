@@ -276,3 +276,46 @@ test('acompte d’une demande : rien à payer quand la carte le couvre', async (
   ok(await manager.post(`/api/members/${e.id}/wallet/recharge`, { amount: due, method: 'Espèces' }));
   assert.equal(await deposit(), 0);
 });
+
+// A paid line opens its ticket (spec « Espace client », historique) and a line still owed says « à régler »: the plan
+// and the paid time of a session too, not only the purchases.
+test('historique : abonnement et temps payant d’une séance, à régler puis réglés avec leur ticket', async () => {
+  const historyOf = async (client) => ok(await client.get('/api/client/history')).items;
+
+  // Alice's plan was taken without paying it: owed, no ticket yet.
+  const plan = (await historyOf(alice.client)).find((i) => i.kind === 'abonnement');
+  assert.equal(plan.status, 'a_regler');
+  assert.equal(plan.payment_id, null);
+  const subCharge = server.club.get(
+    "SELECT id FROM charges WHERE member_id = ? AND kind = 'abonnement' AND status = 'due'", alice.member.id,
+  ).id;
+  const { payment: subPayment } = ok(await manager.post('/api/payments', { charge_ids: [subCharge], method: 'Espèces' }));
+  const paidPlan = (await historyOf(alice.client)).find((i) => i.kind === 'abonnement');
+  assert.equal(paidPlan.status, 'valide');
+  assert.equal(paidPlan.payment_id, subPayment.id);
+  assert.match(paidPlan.ticket_number, /\d/);
+  ok(await alice.client.get(`/api/client/tickets/${subPayment.id}`));
+
+  // Chloé has no plan and an empty card: her session's time is paid time, still owed once the session is over.
+  const rooms = ok(await manager.get('/api/rooms'));
+  const c = ok(await manager.post('/api/members', { first_name: 'chloe', last_name: 'seance', phone: '06 777 77 77' }));
+  const client = await signedIn(c, 'chloe.seance');
+  const booked = ok(await manager.post('/api/reservations', {
+    member_id: c.id, room_id: rooms[0].id, date: today, start_time: '11:00', duration_min: 60, pay_with_card: true,
+  })).reservation;
+  ok(await manager.post(`/api/reservations/${booked.id}/start`));
+  ok(await manager.post(`/api/reservations/${booked.id}/finish`, {}));
+  const owed = (await historyOf(client)).find((i) => i.kind === 'seance');
+  assert.ok(owed.amount > 0);
+  assert.equal(owed.status, 'a_regler');
+  assert.equal(owed.payment_id, null);
+  const timeCharges = server.club.all(
+    "SELECT id FROM charges WHERE reservation_id = ? AND kind = 'temps_supplementaire' AND status = 'due'", booked.id,
+  ).map((x) => x.id);
+  assert.ok(timeCharges.length > 0);
+  const { payment: timePayment } = ok(await manager.post('/api/payments', { charge_ids: timeCharges, method: 'Espèces' }));
+  const paid = (await historyOf(client)).find((i) => i.kind === 'seance');
+  assert.equal(paid.status, 'valide');
+  assert.equal(paid.payment_id, timePayment.id);
+  assert.match(paid.ticket_number, /\d/);
+});
