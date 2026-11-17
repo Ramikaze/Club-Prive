@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import MemberCard3D from '../components/ui/MemberCard3D.jsx';
+import CardWhatsAppButton from '../components/ui/CardWhatsAppButton.jsx';
 import Icon from '../components/ui/Icon.jsx';
 import { Loaded, PageHead } from '../components/ui/ui.jsx';
 import { api } from '../lib/api.js';
@@ -23,7 +24,13 @@ function CardPage({ v }) {
           title={`Carte ${v.card.kind}`}
           lead="Recto et verso au format carte bancaire (85,6 × 54 mm), côte à côte, prêts à imprimer et à découper."
           back={{ to: `/membres/${v.member.id}`, label: v.member.name }}
-          actions={<button type="button" className="btn btn-primary" onClick={() => window.print()}><Icon name="printer" /> Imprimer</button>}
+          actions={(
+            <>
+              <button type="button" className="btn btn-primary" onClick={() => window.print()}><Icon name="printer" /> Imprimer</button>
+              {/* Only an active card is sent: a deactivated one must not travel with its QR code. */}
+              {active ? <CardWhatsAppButton member={v.member} card={v.card} /> : null}
+            </>
+          )}
           tour="card"
         />
       </div>
