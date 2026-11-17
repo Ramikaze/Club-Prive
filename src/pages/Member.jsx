@@ -182,12 +182,16 @@ function CardTile({ m, current, summary, reload, book }) {
     <section className="card card-tile">
       <div className="card-head"><h2>Carte</h2>
         {activeCard ? <span className="chip chip-ok">active</span> : shown ? <span className="chip">désactivée</span> : <span className="chip">aucune carte</span>}</div>
-      <MemberCard3D
-        name={m.name}
-        code={shown?.code ?? null}
-        active={Boolean(activeCard)}
-        qrPath={shown ? `/membres/${m.id}?card=${encodeURIComponent(shown.code)}` : null}
-      />
+      {/* The card, with the discreet « send on WhatsApp » icon beside it (an active card only). */}
+      <div className="card-tile-visual">
+        <MemberCard3D
+          name={m.name}
+          code={shown?.code ?? null}
+          active={Boolean(activeCard)}
+          qrPath={shown ? `/membres/${m.id}?card=${encodeURIComponent(shown.code)}` : null}
+        />
+        {activeCard ? <CardWhatsAppButton member={m} card={activeCard} label="Envoyer la carte sur WhatsApp" compact /> : null}
+      </div>
       {!activeCard ? (
         <div className="row" style={{ justifyContent: 'center', marginTop: 10 }}>
           <button type="button" className="btn btn-sm btn-primary" onClick={issueCard}><Icon name="card" /> Émettre une carte</button>
@@ -205,7 +209,6 @@ function CardTile({ m, current, summary, reload, book }) {
         <button type="button" className="btn" onClick={() => openOutsideMealDialog(m, reload)} disabled={!m.active} title={inactiveTitle}>
           <Icon name="receipt" /> Repas extérieur</button>
         {shown ? <Link className="btn" to={`/cartes/${shown.id}`}><Icon name="printer" /> Imprimer la carte</Link> : null}
-        {activeCard ? <CardWhatsAppButton member={m} card={activeCard} label="Envoyer la carte" /> : null}
       </div>
       <div className="tile-actions-minor">
         {isAdmin && current ? <button type="button" className="btn btn-sm btn-ghost" onClick={() => openAdjustCreditDialog(m, current, reload)}>Ajuster le crédit temps</button> : null}
