@@ -294,3 +294,29 @@ test('effacer toutes les données efface aussi les fournisseurs', async () => {
   assert.equal(server.club.get('SELECT COUNT(*) AS n FROM suppliers').n, 0);
   assert.equal(server.club.get('SELECT COUNT(*) AS n FROM supplier_purchases').n, 0);
 });
+
+test('supprimer : seulement un fournisseur désactivé qui n’a jamais eu d’opération', async () => {
+  const del = (who, id) => who.del(`/api/suppliers/${id}`);
+  const unused = ok(await admin.post('/api/suppliers', { name: 'Jamais servi', account: 'cigares' }));
+  // Still active: deactivate it first.
+  refused(await del(admin, unused.id), 409, 'FOURNISSEUR_ACTIF');
+  ok(await admin.put(`/api/suppliers/${unused.id}`, { active: false }));
+  refused(await del(ger, unused.id), 403);
+  refused(await del(admin, 99999), 404);
+  ok(await del(cha, unused.id));
+  refused(await admin.get(`/api/suppliers/${unused.id}`), 404);
+  assert.ok(!ok(await admin.get('/api/suppliers')).suppliers.some((s) => s.id === unused.id));
+  const logged = server.club.get("SELECT user_id, details FROM audit_log WHERE action = 'fournisseur.supprimer' AND entity_id = ?", unused.id);
+  assert.equal(logged.user_id, server.club.get("SELECT id FROM users WHERE login = 'cha'").id);
+  assert.equal(JSON.parse(logged.details).nom, 'Jamais servi');
+  // The name is free again.
+  ok(await admin.post('/api/suppliers', { name: 'Jamais servi', account: 'alcool' }));
+
+  // A purchase, even cancelled, stays in the books: the supplier only deactivates.
+  const used = ok(await admin.post('/api/suppliers', { name: 'Déjà servi', account: 'alcool' }));
+  const s = ok(await purchase(admin, used.id, { kind: 'achat', amount: 1000 * UM }));
+  ok(await admin.post(`/api/suppliers/purchases/${s.lines[0].purchase_id}/cancel`, { reason: 'Erreur de saisie' }));
+  ok(await admin.put(`/api/suppliers/${used.id}`, { active: false }));
+  refused(await del(admin, used.id), 409, 'FOURNISSEUR_UTILISE');
+  assert.equal(ok(await admin.get(`/api/suppliers/${used.id}`)).supplier.name, 'Déjà servi');
+});

@@ -142,6 +142,20 @@ export const supplierMethods = {
     return this.supplierOrThrow(s.id);
   },
 
+  // Deleting a supplier: only one that is deactivated and never had any operation, even cancelled (a purchase or a
+  // payment stays in the books, so such a supplier only deactivates). The journal keeps the trace.
+  deleteSupplier(actor, id) {
+    requireBoss(actor);
+    const s = this.supplierOrThrow(id);
+    if (s.active) throw conflict('FOURNISSEUR_ACTIF', `« ${s.name} » est actif : désactivez-le avant de le supprimer.`);
+    if (s.has_operations) {
+      throw conflict('FOURNISSEUR_UTILISE', `« ${s.name} » a déjà des achats ou des paiements : il reste dans les comptes et ne se supprime pas.`);
+    }
+    this.run('DELETE FROM suppliers WHERE id = ?', s.id);
+    this.audit(actor, 'fournisseur.supprimer', 'supplier', s.id, { nom: s.name, caisse: CAISSE_LABEL[s.account] });
+    return { ok: true, id: s.id };
+  },
+
   // A purchase moves no money: a cash day closed does not stop it, a closed month does (like any operation).
   assertSupplierMonthOpen(day, what) {
     if (this.get('SELECT 1 AS x FROM closed_periods WHERE month = ?', day.slice(0, 7))) {

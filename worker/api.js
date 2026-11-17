@@ -483,6 +483,7 @@ export function createApi({ db, env = {}, demo = false, sendPush: pushSender = n
   add('POST', '/api/suppliers', CLUB, (ctx) => club.createSupplier(ctx.user, ctx.body));
   add('GET', '/api/suppliers/:id', CLUB, (ctx) => club.supplierSheet(ctx.params.id));
   add('PUT', '/api/suppliers/:id', CLUB, (ctx) => club.updateSupplier(ctx.user, ctx.params.id, ctx.body));
+  add('DELETE', '/api/suppliers/:id', CLUB, (ctx) => club.deleteSupplier(ctx.user, ctx.params.id));
   add('POST', '/api/suppliers/:id/purchases', CLUB, (ctx) => club.recordSupplierPurchase(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/suppliers/purchases/:id/cancel', CLUB, (ctx) => club.cancelSupplierPurchase(ctx.user, ctx.params.id, ctx.body));
   // The cash page's « Compter la caisse »: the first cash fund (the settings change, so the bundle comes back), then counts.
