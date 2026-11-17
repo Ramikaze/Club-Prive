@@ -8,6 +8,8 @@ import PeriodPicker, { usePeriod } from '../components/ui/PeriodPicker.jsx';
 import { api, qs } from '../lib/api.js';
 import { dateTime, money } from '../lib/format.js';
 import { useLoad } from '../lib/hooks.js';
+import { isoTime } from '../lib/sort.js';
+import { SortTh, useSort } from '../components/ui/Sortable.jsx';
 
 const KIND_LABEL = { impression: 'Impression demandée', whatsapp: 'WhatsApp' };
 const FLAG_FROM = 3;
@@ -17,11 +19,25 @@ const API_LIMIT = 1000;
 // The ticket number is a real link (keyboard, middle click); the whole row opens the ticket too.
 function EventsTable({ events }) {
   const navigate = useNavigate();
+  const sorter = useSort(events, {
+    at: (e) => isoTime(e.at),
+    number: (e) => e.number,
+    client: (e) => e.member_name,
+    amount: (e) => e.amount,
+    kind: (e) => KIND_LABEL[e.kind] ?? e.kind,
+    copy: (e) => e.copy_no,
+    by: (e) => e.user_name,
+  });
   if (!events.length) return <Empty icon="receipt">Aucun ticket sorti sur la période.</Empty>;
   return (
     <div className="table-wrap"><table className="table stack-sm">
-      <thead><tr><th>Date</th><th>Ticket</th><th>Client</th><th className="num">Montant</th><th>Type</th><th>Exemplaire</th><th>Par</th></tr></thead>
-      <tbody>{events.map((e, i) => (
+      <thead><tr>
+        <SortTh sorter={sorter} col="at">Date</SortTh><SortTh sorter={sorter} col="number">Ticket</SortTh>
+        <SortTh sorter={sorter} col="client">Client</SortTh><SortTh sorter={sorter} col="amount" className="num">Montant</SortTh>
+        <SortTh sorter={sorter} col="kind">Type</SortTh><SortTh sorter={sorter} col="copy">Exemplaire</SortTh>
+        <SortTh sorter={sorter} col="by">Par</SortTh>
+      </tr></thead>
+      <tbody>{sorter.rows.map((e, i) => (
         <tr key={`${e.payment_id}-${e.copy_no}-${e.at}-${i}`} className="is-clickable" onClick={() => navigate(`/caisse/ticket/${e.payment_id}`)}>
           <td data-label="Date" className="nowrap">{dateTime(e.at)}</td>
           <td data-label="Ticket" className="nowrap">

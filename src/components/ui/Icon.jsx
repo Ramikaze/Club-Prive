@@ -5,6 +5,7 @@ import {
   Landmark, BookOpen, Lock, LockOpen, FileSpreadsheet, Compass, ArrowLeftRight, Ban, Undo2, Play, CircleStop,
   RotateCcw, UserPlus, HandCoins, ArrowDownToLine, ArrowUpFromLine, Trash2,
   DoorOpen, Eye, EyeOff, GraduationCap, MessageCircle, Cigarette, Wine, ImagePlus, Copy, FileText, Store, ScrollText, Truck,
+  ArrowUp, ArrowDown, ArrowUpDown,
 } from 'lucide-react';
 
 const ICONS = {
@@ -18,6 +19,8 @@ const ICONS = {
   deposit: ArrowDownToLine, withdraw: ArrowUpFromLine, trash: Trash2, eye: Eye, 'eye-off': EyeOff,
   demo: GraduationCap, message: MessageCircle, copy: Copy, statement: FileText,
   shop: Store, journal: ScrollText, truck: Truck,
+  // A table column header: not sorted yet, sorted ascending, sorted descending.
+  sort: ArrowUpDown, 'sort-asc': ArrowUp, 'sort-desc': ArrowDown,
   // Product photos: a cigar or a bottle stands in when a product has no picture (lucide has no bottle, the wine
   // glass stands for the drinks); `photo` is the button that adds one.
   cigar: Cigarette, bottle: Wine, drink: GlassWater, photo: ImagePlus,

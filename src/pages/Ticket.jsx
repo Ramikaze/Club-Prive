@@ -14,6 +14,8 @@ import { toast } from '../components/ui/toast.jsx';
 import { api } from '../lib/api.js';
 import { dateTime, money } from '../lib/format.js';
 import { useLoad } from '../lib/hooks.js';
+import { isoTime } from '../lib/sort.js';
+import { SortTh, useSort } from '../components/ui/Sortable.jsx';
 import { useStore } from '../store/useStore.js';
 import { paymentLines, ticketVerifyUrl, ticketWhatsAppText } from '../../shared/ticket.js';
 import { mealWhatsAppText, paymentWhatsAppText, rechargeWhatsAppText } from '../../shared/wallet.js';
@@ -75,13 +77,24 @@ function whatsAppText(ticket, copyNo) {
 
 // Admin only: every copy that went out, with who asked for it.
 function TicketEvents({ events }) {
+  const sorter = useSort(events, {
+    at: (e) => isoTime(e.at),
+    kind: (e) => KIND_LABEL[e.kind] ?? e.kind,
+    copy: (e) => e.copy_no,
+    phone: (e) => e.phone,
+    by: (e) => e.user_name,
+  });
   return (
     <section className="card no-print">
       <div className="card-head"><h2>Historique de ce ticket</h2></div>
       {events.length ? (
         <div className="table-wrap"><table className="table stack-sm">
-          <thead><tr><th>Date</th><th>Type</th><th>Exemplaire</th><th>Numéro</th><th>Par</th></tr></thead>
-          <tbody>{events.map((e) => (
+          <thead><tr>
+            <SortTh sorter={sorter} col="at">Date</SortTh><SortTh sorter={sorter} col="kind">Type</SortTh>
+            <SortTh sorter={sorter} col="copy">Exemplaire</SortTh><SortTh sorter={sorter} col="phone">Numéro</SortTh>
+            <SortTh sorter={sorter} col="by">Par</SortTh>
+          </tr></thead>
+          <tbody>{sorter.rows.map((e) => (
             <tr key={e.copy_no}>
               <td data-label="Date" className="nowrap">{dateTime(e.at)}</td>
               <td data-label="Type">{KIND_LABEL[e.kind] ?? e.kind}</td>

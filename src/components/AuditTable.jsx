@@ -2,12 +2,23 @@
 import { Link } from 'react-router-dom';
 import { ACTION_LABELS, auditAuthor, auditSummary } from '../lib/audit.js';
 import { dateTime } from '../lib/format.js';
+import { isoTime } from '../lib/sort.js';
+import { SortTh, useSort } from './ui/Sortable.jsx';
 
 export default function AuditTable({ audit }) {
+  const sorter = useSort(audit, {
+    at: (a) => isoTime(a.at),
+    user: (a) => auditAuthor(a),
+    op: (a) => ACTION_LABELS[a.action] ?? a.action,
+    detail: (a) => auditSummary(a),
+  });
   return (
     <div className="table-wrap"><table className="table stack-sm">
-      <thead><tr><th>Date</th><th>Utilisateur</th><th>Opération</th><th>Détail</th></tr></thead>
-      <tbody>{audit.map((a) => {
+      <thead><tr>
+        <SortTh sorter={sorter} col="at">Date</SortTh><SortTh sorter={sorter} col="user">Utilisateur</SortTh>
+        <SortTh sorter={sorter} col="op">Opération</SortTh><SortTh sorter={sorter} col="detail">Détail</SortTh>
+      </tr></thead>
+      <tbody>{sorter.rows.map((a) => {
         const label = ACTION_LABELS[a.action] ?? a.action;
         let operation = label;
         if (a.entity === 'reservation' && a.entity_id) operation = <Link to={`/reservations/${a.entity_id}`}>{label}</Link>;

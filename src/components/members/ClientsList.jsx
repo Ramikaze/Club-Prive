@@ -9,18 +9,33 @@ import { toast } from '../ui/toast.jsx';
 import { api, qs } from '../../lib/api.js';
 import { useLoad } from '../../lib/hooks.js';
 import { money, dateTime } from '../../lib/format.js';
+import { isoTime } from '../../lib/sort.js';
+import { SortTh, useSort } from '../ui/Sortable.jsx';
 import { openClientDialog, openConvertClientDialog, openReactivateClientDialog } from '../../dialogs/clientDialogs.jsx';
 
 const STATUTS = [['actifs', 'Actifs'], ['desactives', 'Désactivés']];
 
 function ClientsTable({ items, statut, onConvert, onReactivate }) {
+  const sorter = useSort(items, {
+    name: (c) => c.name,
+    phone: (c) => c.phone,
+    count: (c) => c.purchases_count,
+    total: (c) => c.purchases_total,
+    owed: (c) => c.owed ?? 0,
+    last: (c) => isoTime(c.last_purchase_at),
+  });
   if (!items.length) {
     return <section className="card"><Empty icon="users">{statut === 'desactives' ? 'Aucun client désactivé.' : 'Aucun client régulier ne correspond.'}</Empty></section>;
   }
   return (
     <section className="card clients-card"><div className="table-wrap"><table className="table stack-sm">
-      <thead><tr><th>Client</th><th>Téléphone</th><th className="num">Achats</th><th className="num">Total</th><th className="num">Doit</th><th>Dernier achat</th><th><span className="sr-only">Actions</span></th></tr></thead>
-      <tbody>{items.map((c) => (
+      <thead><tr>
+        <SortTh sorter={sorter} col="name">Client</SortTh><SortTh sorter={sorter} col="phone">Téléphone</SortTh>
+        <SortTh sorter={sorter} col="count" className="num">Achats</SortTh><SortTh sorter={sorter} col="total" className="num">Total</SortTh>
+        <SortTh sorter={sorter} col="owed" className="num">Doit</SortTh><SortTh sorter={sorter} col="last">Dernier achat</SortTh>
+        <th><span className="sr-only">Actions</span></th>
+      </tr></thead>
+      <tbody>{sorter.rows.map((c) => (
         <tr key={c.id}>
           <td data-label="Client"><Link to={`/membres/${c.id}`}><strong>{c.name}</strong></Link> <span className="subtle">{c.member_no}</span>
             {c.active === false && <> <span className="chip chip-danger">désactivé</span></>}</td>

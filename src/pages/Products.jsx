@@ -11,6 +11,8 @@ import { dateTime, money, parseMoney, toMajor } from '../lib/format.js';
 import { useBusy, useLoad, useSubmit } from '../lib/hooks.js';
 import { preparePhoto } from '../lib/photo.js';
 import { useIsBoss, useMe, useSettings, useStore } from '../store/useStore.js';
+import { isoTime } from '../lib/sort.js';
+import { SortTh, Sorted, useSort } from '../components/ui/Sortable.jsx';
 import { writeWorkbook } from '../utils/exportExcel.js';
 import { searchable, smartFilter } from '../../shared/search.js';
 import { CATEGORIES, CATEGORY_LABEL, CATEGORY_PLURAL, accountOfCategory, canSellIn, ownsAccount } from '../../shared/roles.js';
@@ -52,11 +54,25 @@ function StockChip({ p }) {
 }
 
 function MovementsTable({ rows, withProduct = true }) {
+  const sorter = useSort(rows, {
+    at: (mv) => isoTime(mv.created_at),
+    product: (mv) => mv.product_name,
+    kind: (mv) => mv.kind_label,
+    qty: (mv) => mv.quantity,
+    after: (mv) => mv.stock_after,
+    reason: (mv) => mv.reason,
+    by: (mv) => mv.created_by_name,
+  });
   if (!rows.length) return <Empty icon="box">Aucun mouvement.</Empty>;
   return (
     <div className="table-wrap"><table className="table stack-sm">
-      <thead><tr><th>Date</th>{withProduct && <th>Produit</th>}<th>Mouvement</th><th className="num">Quantité</th><th className="num">Stock après</th><th>Motif</th><th>Par</th></tr></thead>
-      <tbody>{rows.map((mv) => (
+      <thead><tr>
+        <SortTh sorter={sorter} col="at">Date</SortTh>{withProduct && <SortTh sorter={sorter} col="product">Produit</SortTh>}
+        <SortTh sorter={sorter} col="kind">Mouvement</SortTh><SortTh sorter={sorter} col="qty" className="num">Quantité</SortTh>
+        <SortTh sorter={sorter} col="after" className="num">Stock après</SortTh><SortTh sorter={sorter} col="reason">Motif</SortTh>
+        <SortTh sorter={sorter} col="by">Par</SortTh>
+      </tr></thead>
+      <tbody>{sorter.rows.map((mv) => (
         <tr key={mv.id}>
           <td data-label="Date" className="nowrap">{dateTime(mv.created_at)}</td>
           {withProduct && <td data-label="Produit">{mv.product_name}</td>}
@@ -460,9 +476,18 @@ export default function Products() {
           </div>
           <section className="card">
             {list.length ? (
-              <div className="table-wrap"><table className="table stack-sm">
-                <thead><tr><th>Produit</th><th>Catégorie</th><th className="num">Prix</th><th>Stock</th><th><span className="sr-only">Actions</span></th></tr></thead>
-                <tbody>{list.map((p) => (
+              <div className="table-wrap"><Sorted rows={list} columns={{
+                name: (p) => p.name,
+                category: (p) => CATEGORY_LABEL[p.category],
+                price: (p) => p.price,
+                stock: (p) => p.stock_qty,
+              }}>{(sorter) => (<table className="table stack-sm">
+                <thead><tr>
+                  <SortTh sorter={sorter} col="name">Produit</SortTh><SortTh sorter={sorter} col="category">Catégorie</SortTh>
+                  <SortTh sorter={sorter} col="price" className="num">Prix</SortTh><SortTh sorter={sorter} col="stock">Stock</SortTh>
+                  <th><span className="sr-only">Actions</span></th>
+                </tr></thead>
+                <tbody>{sorter.rows.map((p) => (
                   <tr key={p.id} className={p.active ? undefined : 'is-muted'}>
                     <td data-label="Produit" className="cell-product">
                       <div className="product-cell">
@@ -487,7 +512,7 @@ export default function Products() {
                     </td>
                   </tr>
                 ))}</tbody>
-              </table></div>
+              </table>)}</Sorted></div>
             ) : <Empty icon="box">{searching ? `Aucun produit ne correspond à « ${search.trim()} ».` : 'Aucun produit dans cette catégorie.'}</Empty>}
           </section>
           <section className="card section-gap">

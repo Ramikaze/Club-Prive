@@ -6,7 +6,8 @@ import MembersTabs from '../components/members/MembersTabs.jsx';
 import { Chip, DemoChip, Empty, Loaded, PageHead, Segmented } from '../components/ui/ui.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import { api, qs } from '../lib/api.js';
-import { fmtDuration, subStateLabel } from '../lib/format.js';
+import { fmtDuration, subStateLabel, STATUS } from '../lib/format.js';
+import { SortTh, useSort } from '../components/ui/Sortable.jsx';
 import { useLoad } from '../lib/hooks.js';
 import {
   openBookingDialog, openMemberDialog, openDeactivateMemberDialog, openReactivateMemberDialog, memberRoomEligibility,
@@ -16,6 +17,13 @@ const creditCell = (sub) => (sub?.credit ? fmtDuration(sub.credit.available) : '
 const STATUTS = [['actifs', 'Actifs'], ['desactives', 'Désactivés']];
 
 function MembersTable({ items, onBook, onDeactivate, onReactivate, statut }) {
+  const sorter = useSort(items, {
+    name: (m) => m.name,
+    phone: (m) => m.phone,
+    plan: (m) => subStateLabel(m.subscription),
+    state: (m) => STATUS.sub[m.subscription?.state]?.[0] ?? m.subscription?.state,
+    credit: (m) => m.subscription?.credit?.available,
+  });
   if (!items.length) {
     return (
       <section className="card">
@@ -25,8 +33,12 @@ function MembersTable({ items, onBook, onDeactivate, onReactivate, statut }) {
   }
   return (
     <section className="card"><div className="table-wrap"><table className="table stack-sm">
-      <thead><tr><th>Membre</th><th>Téléphone</th><th>Formule</th><th>État</th><th className="num">Crédit disponible</th><th><span className="sr-only">Actions</span></th></tr></thead>
-      <tbody>{items.map((m) => {
+      <thead><tr>
+        <SortTh sorter={sorter} col="name">Membre</SortTh><SortTh sorter={sorter} col="phone">Téléphone</SortTh>
+        <SortTh sorter={sorter} col="plan">Formule</SortTh><SortTh sorter={sorter} col="state">État</SortTh>
+        <SortTh sorter={sorter} col="credit" className="num">Crédit disponible</SortTh><th><span className="sr-only">Actions</span></th>
+      </tr></thead>
+      <tbody>{sorter.rows.map((m) => {
         const elig = memberRoomEligibility(m, { card: true });
         return (
           <tr key={m.id}>

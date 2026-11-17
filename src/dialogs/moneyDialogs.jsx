@@ -4,13 +4,14 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, newKey } from '../lib/api.js';
-import { money, parseMoney, dateTime } from '../lib/format.js';
+import { money, parseMoney, dateTime, ACCOUNT_LABEL } from '../lib/format.js';
 import { useStore, useSettings, isBossNow } from '../store/useStore.js';
 import { openDialog, Modal, actionDialog } from '../components/ui/Modal.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import { Hypothesis, AccountTag, FormError, Notice } from '../components/ui/ui.jsx';
 import { useLoad, useSubmit } from '../lib/hooks.js';
 import Icon from '../components/ui/Icon.jsx';
+import { SortTh, useSort } from '../components/ui/Sortable.jsx';
 import { CARD_METHOD } from '../../shared/rules.js';
 import { renewalWhatsAppText } from '../../shared/wallet.js';
 import { caisseMoneyLine } from '../../shared/caisses.js';
@@ -26,6 +27,7 @@ function PaymentDialog({ close, due, memberName, onDone }) {
   const { busy, error, submit } = useSubmit();
   const navigate = useNavigate();
   const [checked, setChecked] = useState(() => new Set(due.map((c) => c.id)));
+  const sorter = useSort(due, { label: (c) => c.label, account: (c) => ACCOUNT_LABEL[c.account] ?? c.account, amount: (c) => c.amount });
   const [picked, setPicked] = useState(null); // null until the manager chooses: the card when it holds money
   const [restMethod, setRestMethod] = useState(methods[0] ?? '');
   const memberId = due[0]?.member_id;
@@ -74,8 +76,11 @@ function PaymentDialog({ close, due, memberName, onDone }) {
         <p className="muted">Membre : <strong>{memberName}</strong>. Chaque ligne cochée est encaissée <strong>intégralement</strong>{' '}
           (pas de paiement partiel en version 1) ; le montant est ventilé automatiquement entre les sous-comptes.</p>
         <div className="table-wrap"><table className="table">
-          <thead><tr><th><span className="sr-only">Inclure</span></th><th>Ligne</th><th>Sous-compte</th><th className="num">Montant</th></tr></thead>
-          <tbody>{due.map((c) => (
+          <thead><tr>
+            <th><span className="sr-only">Inclure</span></th><SortTh sorter={sorter} col="label">Ligne</SortTh>
+            <SortTh sorter={sorter} col="account">Sous-compte</SortTh><SortTh sorter={sorter} col="amount" className="num">Montant</SortTh>
+          </tr></thead>
+          <tbody>{sorter.rows.map((c) => (
             <tr key={c.id}>
               <td><input type="checkbox" name="charge" value={c.id} checked={checked.has(c.id)}
                 onChange={(e) => toggle(c.id, e.target.checked)} aria-label={`Encaisser ${c.label}`} /></td>

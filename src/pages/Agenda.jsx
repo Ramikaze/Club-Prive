@@ -7,6 +7,7 @@ import { partyLabel } from '../../shared/rules.js';
 import { useSettings, useRooms } from '../store/useStore.js';
 import Icon from '../components/ui/Icon.jsx';
 import { Chip, Empty, Loaded, PageHead } from '../components/ui/ui.jsx';
+import { SortTh, useSort } from '../components/ui/Sortable.jsx';
 import {
   openBookingDialog,
   openConsumptionDialog,
@@ -262,16 +263,30 @@ function WeekView({ from, list, now, settings, maxRooms, onSlot }) {
 }
 
 function ListView({ list, onReload }) {
+  const sorter = useSort(list, {
+    day: (r) => `${r.biz_day} ${r.start_time}`,
+    room: (r) => r.room_name || 'Salon',
+    time: (r) => r.start_time,
+    member: (r) => r.member_name,
+    party: (r) => r.party_size || 1,
+    status: (r) => STATUS.res[r.status]?.[0] ?? r.status,
+    due: (r) => r.due_amount ?? 0,
+  });
   if (!list.length) return <section className="card"><Empty icon="calendar">Aucune réservation sur cette période.</Empty></section>;
   return (
     <section className="card">
       <div className="table-wrap">
         <table className="table stack-sm">
           <thead>
-            <tr><th>Journée</th><th>Salle</th><th>Horaire</th><th>Membre</th><th>Personnes</th><th>Statut</th><th className="num">Reste dû</th><th><span className="sr-only">Actions</span></th></tr>
+            <tr>
+              <SortTh sorter={sorter} col="day">Journée</SortTh><SortTh sorter={sorter} col="room">Salle</SortTh>
+              <SortTh sorter={sorter} col="time">Horaire</SortTh><SortTh sorter={sorter} col="member">Membre</SortTh>
+              <SortTh sorter={sorter} col="party">Personnes</SortTh><SortTh sorter={sorter} col="status">Statut</SortTh>
+              <SortTh sorter={sorter} col="due" className="num">Reste dû</SortTh><th><span className="sr-only">Actions</span></th>
+            </tr>
           </thead>
           <tbody>
-            {list.map((r) => (
+            {sorter.rows.map((r) => (
               <tr key={r.id} className={r.status === 'annulee' ? 'is-muted' : undefined}>
                 <td data-label="Journée">{dayLabel(r.biz_day, 'medium')}</td>
                 <td data-label="Salle"><span className="chip">{r.room_name || 'Salon'}</span></td>

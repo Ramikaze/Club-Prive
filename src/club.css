@@ -506,6 +506,17 @@ table.table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
 .table tr.is-muted td .strike { text-decoration: line-through; }
 .table tfoot td { font-weight: 650; border-top: 2px solid var(--border); border-bottom: 0; }
 .table .actions { text-align: right; white-space: nowrap; }
+/* A sortable column header (src/components/ui/Sortable.jsx): the label is a button with an arrow. A right-aligned
+   (number) column puts the arrow before the label, so the label stays above the figures. */
+.th-sort {
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 0; border: 0; background: none; cursor: pointer;
+  font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; white-space: nowrap;
+}
+.th-sort svg { width: 13px; height: 13px; flex: none; opacity: 0.4; }
+.th-sort:hover, .th-sort.is-sorted { color: var(--text); }
+.th-sort:hover svg, .th-sort.is-sorted svg { opacity: 1; }
+.th-sort.is-sorted svg { color: var(--bronze); }
+.table th.num .th-sort { flex-direction: row-reverse; }
 /* The catalogue's row actions: two by two on a narrow table, so the product's name keeps its room; one line when wide. */
 .product-actions { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
 @media (max-width: 1280px) {
@@ -522,6 +533,17 @@ table.table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
   .table.stack-sm td.actions { justify-content: flex-end; }
   .table.stack-sm td.actions::before { content: none; }
   .table.stack-sm tfoot tr { padding: 8px 0; }
+  /* No column headers above the cards: the sortable ones become a row of « Trier » buttons. */
+  table.table.stack-sm thead:has(.th-sort) { display: block; }
+  .table.stack-sm thead tr { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 0 10px; }
+  .table.stack-sm thead tr::before { content: 'Trier :'; color: var(--text-2); font-size: 0.82rem; }
+  .table.stack-sm thead th { display: none; padding: 0; border: 0; }
+  .table.stack-sm thead th:has(.th-sort) { display: block; }
+  .table.stack-sm .th-sort, .table.stack-sm th.num .th-sort {
+    flex-direction: row; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px;
+    text-transform: none; letter-spacing: 0; font-size: 0.8rem;
+  }
+  .table.stack-sm .th-sort.is-sorted { border-color: var(--bronze-line); background: var(--bronze-soft); color: var(--bronze-text); }
 }
 
 /* ------------------------------------------------------------------ forms */
