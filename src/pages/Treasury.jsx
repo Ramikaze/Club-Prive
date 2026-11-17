@@ -5,8 +5,9 @@ import Icon from '../components/ui/Icon.jsx';
 import { AccountTag, AdminTabs, Loaded, Notice, PageHead } from '../components/ui/ui.jsx';
 import PeriodPicker, { usePeriod } from '../components/ui/PeriodPicker.jsx';
 import { api, qs } from '../lib/api.js';
-import { money, dayLabel } from '../lib/format.js';
+import { money, dayLabel, ACCOUNT_LABEL } from '../lib/format.js';
 import { useLoad } from '../lib/hooks.js';
+import { SortTh, Sorted } from '../components/ui/Sortable.jsx';
 import { useIsAdmin } from '../store/useStore.js';
 
 const methodIcon = (m) => (/esp[eè]ce/i.test(m) ? 'cash' : /carte/i.test(m) ? 'card' : /virement|banque/i.test(m) ? 'bank' : 'wallet');
@@ -96,10 +97,19 @@ export default function Treasury() {
                 <div className="card">
                   <div className="card-head"><h2>Par sous-compte</h2></div>
                   <div className="table-wrap">
+                    <Sorted rows={r.accounts} columns={{
+                      account: (a) => ACCOUNT_LABEL[a.account] ?? a.account,
+                      net: (a) => a.net,
+                      expenses: (a) => a.expenses,
+                      margin: (a) => a.margin,
+                    }}>{(sorter) => (
                     <table className="table stack-sm">
-                      <thead><tr><th>Sous-compte</th><th className="num">Encaissé net</th><th className="num">Dépenses affectées</th><th className="num">Marge</th></tr></thead>
+                      <thead><tr>
+                        <SortTh sorter={sorter} col="account">Sous-compte</SortTh><SortTh sorter={sorter} col="net" className="num">Encaissé net</SortTh>
+                        <SortTh sorter={sorter} col="expenses" className="num">Dépenses affectées</SortTh><SortTh sorter={sorter} col="margin" className="num">Marge</SortTh>
+                      </tr></thead>
                       <tbody>
-                        {r.accounts.map((a) => (
+                        {sorter.rows.map((a) => (
                           <tr key={a.account}>
                             <td data-label="Sous-compte"><AccountTag account={a.account} /></td>
                             <td data-label="Encaissé net" className="num">{money(a.net)}</td>
@@ -118,6 +128,7 @@ export default function Treasury() {
                         <tr><td>Total</td><td className="num">{money(r.revenue)}</td><td className="num">− {money(r.expenses)}</td><td className="num">{money(r.result)}</td></tr>
                       </tfoot>
                     </table>
+                    )}</Sorted>
                   </div>
                 </div>
               </div>

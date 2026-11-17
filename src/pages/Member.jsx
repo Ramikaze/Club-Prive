@@ -8,7 +8,8 @@ import MemberCard3D from '../components/ui/MemberCard3D.jsx';
 import CardWhatsAppButton from '../components/ui/CardWhatsAppButton.jsx';
 import SessionTimer, { isRunning } from '../components/ui/SessionTimer.jsx';
 import EndingSoonNotice from '../components/ui/EndingSoonNotice.jsx';
-import { money, fmtDuration, dayLabel, dateTime, dayMonth, paidForLabel, paymentMethodText } from '../lib/format.js';
+import { money, fmtDuration, dayLabel, dateTime, dayMonth, paidForLabel, paymentMethodText, STATUS } from '../lib/format.js';
+import { SortTh, Sorted } from '../components/ui/Sortable.jsx';
 import { useLoad } from '../lib/hooks.js';
 import { useIsBoss } from '../store/useStore.js';
 import PurchaseHistory from '../components/members/PurchaseHistory.jsx';
@@ -382,9 +383,22 @@ function MemberDetail({ m, reload }) {
         <section className="card span-2">
           <div className="card-head"><h2>Réservations</h2></div>
           {m.reservations.length ? (
-            <div className="table-wrap"><table className="table stack-sm">
-              <thead><tr><th>Journée</th><th>Salle</th><th>Horaire</th><th>Personnes</th><th>Durée</th><th className="num">Supplément</th><th>Statut</th></tr></thead>
-              <tbody>{m.reservations.map((r) => (
+            <div className="table-wrap"><Sorted rows={m.reservations} columns={{
+              day: (r) => `${r.biz_day} ${r.start_time}`,
+              room: (r) => r.room_name || 'Salon Principal',
+              time: (r) => r.start_time,
+              party: (r) => r.party_size || 1,
+              duration: (r) => r.duration_min,
+              supplement: (r) => r.supplement_amount,
+              status: (r) => STATUS.res[r.status]?.[0] ?? r.status,
+            }}>{(sorter) => (<table className="table stack-sm">
+              <thead><tr>
+                <SortTh sorter={sorter} col="day">Journée</SortTh><SortTh sorter={sorter} col="room">Salle</SortTh>
+                <SortTh sorter={sorter} col="time">Horaire</SortTh><SortTh sorter={sorter} col="party">Personnes</SortTh>
+                <SortTh sorter={sorter} col="duration">Durée</SortTh><SortTh sorter={sorter} col="supplement" className="num">Supplément</SortTh>
+                <SortTh sorter={sorter} col="status">Statut</SortTh>
+              </tr></thead>
+              <tbody>{sorter.rows.map((r) => (
                 <tr key={r.id} className={r.status === 'annulee' ? 'is-muted' : ''}>
                   <td data-label="Journée"><Link to={`/reservations/${r.id}`}>{dayLabel(r.biz_day, 'medium')}</Link></td>
                   <td data-label="Salle">{r.room_name || 'Salon Principal'}</td>
@@ -393,7 +407,7 @@ function MemberDetail({ m, reload }) {
                   <td data-label="Durée">{fmtDuration(r.duration_min)}</td>
                   <td data-label="Supplément" className="num">{money(r.supplement_amount)}</td>
                   <td data-label="Statut"><Chip group="res" value={r.status} /></td></tr>
-              ))}</tbody></table></div>
+              ))}</tbody></table>)}</Sorted></div>
           ) : <Empty icon="calendar">Aucune réservation.</Empty>}
         </section>
 

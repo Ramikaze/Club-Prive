@@ -8,6 +8,8 @@ import SupplierDialog from '../components/suppliers/SupplierDialog.jsx';
 import { api } from '../lib/api.js';
 import { dayLabel, money } from '../lib/format.js';
 import { useLoad } from '../lib/hooks.js';
+import { isoTime } from '../lib/sort.js';
+import { SortTh, Sorted } from '../components/ui/Sortable.jsx';
 import { CAISSE_LABEL } from '../../shared/caisses.js';
 import { FOREIGN_SYMBOL } from '../../shared/suppliers.js';
 
@@ -32,12 +34,21 @@ export default function Suppliers() {
             </dl>
           </section>
           {suppliers.length ? (
-            <section className="card"><div className="table-wrap"><table className="table stack-sm">
+            <section className="card"><div className="table-wrap"><Sorted rows={suppliers} columns={{
+              name: (s) => s.name,
+              account: (s) => s.account_label,
+              country: (s) => s.country,
+              currency: (s) => s.currency,
+              due: (s) => s.due,
+              last: (s) => isoTime(s.last_date),
+            }}>{(sorter) => (<table className="table stack-sm">
               <thead><tr>
-                <th>Fournisseur</th><th>Caisse</th><th>Pays</th><th>Devise</th><th className="num">Le club doit</th><th>Dernière opération</th>
+                <SortTh sorter={sorter} col="name">Fournisseur</SortTh><SortTh sorter={sorter} col="account">Caisse</SortTh>
+                <SortTh sorter={sorter} col="country">Pays</SortTh><SortTh sorter={sorter} col="currency">Devise</SortTh>
+                <SortTh sorter={sorter} col="due" className="num">Le club doit</SortTh><SortTh sorter={sorter} col="last">Dernière opération</SortTh>
                 <th><span className="sr-only">Actions</span></th>
               </tr></thead>
-              <tbody>{suppliers.map((s) => (
+              <tbody>{sorter.rows.map((s) => (
                 <tr key={s.id} className={s.active ? '' : 'is-muted'}>
                   <td data-label="Fournisseur"><Link to={`/fournisseurs/${s.id}`}><strong>{s.name}</strong></Link> <DemoChip on={s.is_demo} />
                     {!s.active && <> <span className="chip">inactif</span></>}</td>
@@ -49,7 +60,7 @@ export default function Suppliers() {
                   <td className="actions"><Link className="btn btn-sm btn-ghost" to={`/fournisseurs/${s.id}`}>Fiche</Link></td>
                 </tr>
               ))}</tbody>
-            </table></div></section>
+            </table>)}</Sorted></div></section>
           ) : (
             <section className="card"><Empty icon="truck">Aucun fournisseur pour l’instant. Créez-en un avec « Nouveau fournisseur ».</Empty></section>
           )}

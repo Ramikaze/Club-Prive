@@ -8,6 +8,8 @@ import { toast } from '../components/ui/toast.jsx';
 import { api, newKey, qs } from '../lib/api.js';
 import { money, monthTitle, dateTime } from '../lib/format.js';
 import { useLoad, useSubmit } from '../lib/hooks.js';
+import { isoTime } from '../lib/sort.js';
+import { SortTh, Sorted } from '../components/ui/Sortable.jsx';
 
 const CHECKS = [
   'Les espèces ont été comptées et correspondent au solde affiché.',
@@ -136,26 +138,51 @@ export default function Closing() {
               <div className="card">
                 <div className="card-head"><h2>Les douze derniers mois</h2><span className="subtle">Seul un mois terminé peut être clôturé.</span></div>
                 <div className="table-wrap">
-                  <table className="table stack-sm">
-                    <thead><tr><th>Mois</th><th>État</th><th>Réservations</th><th>Clôture</th><th /></tr></thead>
-                    <tbody>
-                      {data.months.map((m) => (
-                        <MonthRow key={m.month} m={m} closing={closings.get(m.month)} onClose={closeMonth} onReopen={reopen} />
-                      ))}
-                    </tbody>
-                  </table>
+                  <Sorted rows={data.months} columns={{
+                    month: (m) => m.month,
+                    state: (m) => (m.closed ? 'Clôturé' : m.current ? 'En cours' : 'Ouvert'),
+                    open: (m) => m.open_reservations,
+                    closing: (m) => isoTime(closings.get(m.month)?.closed_at),
+                  }}>{(sorter) => (
+                    <table className="table stack-sm">
+                      <thead><tr>
+                        <SortTh sorter={sorter} col="month">Mois</SortTh><SortTh sorter={sorter} col="state">État</SortTh>
+                        <SortTh sorter={sorter} col="open">Réservations</SortTh><SortTh sorter={sorter} col="closing">Clôture</SortTh><th />
+                      </tr></thead>
+                      <tbody>
+                        {sorter.rows.map((m) => (
+                          <MonthRow key={m.month} m={m} closing={closings.get(m.month)} onClose={closeMonth} onReopen={reopen} />
+                        ))}
+                      </tbody>
+                    </table>
+                  )}</Sorted>
                 </div>
               </div>
               {data.closed.length > 0 && (
                 <div className="card section-gap">
                   <div className="card-head"><h2>Synthèses établies à la clôture</h2></div>
                   <div className="table-wrap">
+                    <Sorted rows={data.closed} columns={{
+                      month: (c) => c.month,
+                      revenue: (c) => c.summary.result.revenue,
+                      expenses: (c) => c.summary.result.expenses,
+                      result: (c) => c.summary.result.result,
+                      treasury: (c) => c.summary.treasury.total.closing,
+                      wallet: (c) => c.summary.wallet_liability,
+                    }}>{(sorter) => (
                     <table className="table stack-sm">
                       <thead>
-                        <tr><th>Mois</th><th className="num">Encaissé net</th><th className="num">Dépenses</th><th className="num">Résultat</th><th className="num">Trésorerie fin</th><th className="num">Crédits CFA des membres</th></tr>
+                        <tr>
+                          <SortTh sorter={sorter} col="month">Mois</SortTh>
+                          <SortTh sorter={sorter} col="revenue" className="num">Encaissé net</SortTh>
+                          <SortTh sorter={sorter} col="expenses" className="num">Dépenses</SortTh>
+                          <SortTh sorter={sorter} col="result" className="num">Résultat</SortTh>
+                          <SortTh sorter={sorter} col="treasury" className="num">Trésorerie fin</SortTh>
+                          <SortTh sorter={sorter} col="wallet" className="num">Crédits CFA des membres</SortTh>
+                        </tr>
                       </thead>
                       <tbody>
-                        {data.closed.map((c) => (
+                        {sorter.rows.map((c) => (
                           <tr key={c.month}>
                             <td data-label="Mois">{monthTitle(c.month)}</td>
                             <td data-label="Encaissé net" className="num">{money(c.summary.result.revenue)}</td>
@@ -168,6 +195,7 @@ export default function Closing() {
                         ))}
                       </tbody>
                     </table>
+                    )}</Sorted>
                   </div>
                 </div>
               )}

@@ -8,6 +8,8 @@ import { toast } from '../components/ui/toast.jsx';
 import { api, newKey } from '../lib/api.js';
 import { ACCOUNT_LABEL, ROLE_LABEL, dateTime, fmtDuration, parseMoney, toMajor } from '../lib/format.js';
 import { useBusy, useLoad, useSubmit } from '../lib/hooks.js';
+import { isoTime } from '../lib/sort.js';
+import { SortTh, useSort } from '../components/ui/Sortable.jsx';
 import { ROLES, RAYONS, RAYON_LABEL } from '../../shared/roles.js';
 import { ERASE_GROUPS, ERASE_LABEL, eraseClosure } from '../../shared/erase.js';
 import { useIsAdmin, useSettings, useStore } from '../store/useStore.js';
@@ -273,6 +275,12 @@ function RoomDialog({ close, room, onDone }) {
 
 function RoomsSection() {
   const rooms = useStore((st) => st.rooms);
+  const sorter = useSort(rooms, {
+    name: (rm) => rm.name,
+    capacity: (rm) => rm.capacity,
+    description: (rm) => rm.description,
+    state: (rm) => (rm.active ? 'active' : 'désactivée'),
+  });
   // The server answers with the club's whole bundle (its rooms included), not with the list of rooms.
   const updateRooms = (res) => { if (res?.bundle) useStore.getState().setBundle(res.bundle); };
   const onDelete = (rm) => actionDialog({
@@ -295,9 +303,13 @@ function RoomsSection() {
       </div>
       <div className="table-wrap">
         <table className="table stack-sm">
-          <thead><tr><th>Salle</th><th>Capacité</th><th>Description</th><th>État</th><th><span className="sr-only">Actions</span></th></tr></thead>
+          <thead><tr>
+            <SortTh sorter={sorter} col="name">Salle</SortTh><SortTh sorter={sorter} col="capacity">Capacité</SortTh>
+            <SortTh sorter={sorter} col="description">Description</SortTh><SortTh sorter={sorter} col="state">État</SortTh>
+            <th><span className="sr-only">Actions</span></th>
+          </tr></thead>
           <tbody>
-            {rooms.map((rm) => (
+            {sorter.rows.map((rm) => (
               <tr key={rm.id} className={rm.active ? undefined : 'is-muted'}>
                 <td data-label="Salle"><strong>{rm.name}</strong></td>
                 <td data-label="Capacité">{rm.capacity} pers.</td>
@@ -546,13 +558,14 @@ function TreasurySection({ save }) {
 }
 
 function CategoryTable({ title, rows, busy, onRename, onToggle }) {
+  const sorter = useSort(rows, { name: (c) => c.name });
   return (
     <div className="stack">
       <h3>{title}</h3>
       {rows.length ? (
         <div className="table-wrap"><table className="table stack-sm">
-          <thead><tr><th>Nom</th><th><span className="sr-only">Actions</span></th></tr></thead>
-          <tbody>{rows.map((c) => (
+          <thead><tr><SortTh sorter={sorter} col="name">Nom</SortTh><th><span className="sr-only">Actions</span></th></tr></thead>
+          <tbody>{sorter.rows.map((c) => (
             <tr key={c.id} className={c.active ? undefined : 'is-muted'}>
               <td data-label="Nom"><strong>{c.name}</strong> {!c.active && <span className="chip">désactivée</span>}</td>
               <td className="actions">
@@ -650,13 +663,23 @@ function DemoResetSection({ applyBundle }) {
 
 function UsersSection({ users, onChanged }) {
   const me = useStore((st) => st.me);
+  const sorter = useSort(users, {
+    name: (u) => u.name,
+    login: (u) => u.login,
+    role: (u) => `${ROLE_LABEL[u.role]}${u.rayon ? ` · ${RAYON_LABEL[u.rayon]}` : ''}`,
+    last: (u) => isoTime(u.last_login_at),
+  });
   return (
     <section className="card settings-section" id="sec-users">
       <div className="card-head"><h2>Utilisateurs</h2>
         <button type="button" className="btn btn-sm btn-primary" onClick={() => openDialog(UserDialog, { user: null, onDone: onChanged })}><Icon name="plus" /> Nouvel utilisateur</button></div>
       <div className="table-wrap"><table className="table stack-sm">
-        <thead><tr><th>Nom</th><th>Identifiant</th><th>Rôle</th><th>Dernière connexion</th><th><span className="sr-only">Actions</span></th></tr></thead>
-        <tbody>{users.map((u) => (
+        <thead><tr>
+          <SortTh sorter={sorter} col="name">Nom</SortTh><SortTh sorter={sorter} col="login">Identifiant</SortTh>
+          <SortTh sorter={sorter} col="role">Rôle</SortTh><SortTh sorter={sorter} col="last">Dernière connexion</SortTh>
+          <th><span className="sr-only">Actions</span></th>
+        </tr></thead>
+        <tbody>{sorter.rows.map((u) => (
           <tr key={u.id} className={u.active ? undefined : 'is-muted'}>
             <td data-label="Nom"><strong>{u.name}</strong> {!u.active && <span className="chip">désactivé</span>} {u.id === me.id && <span className="chip chip-bronze">vous</span>}</td>
             <td data-label="Identifiant" className="mono">{u.login}</td>

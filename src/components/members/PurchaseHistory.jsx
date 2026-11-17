@@ -5,7 +5,9 @@ import { Link } from 'react-router-dom';
 import { AccountTag, Chip, Empty, Loaded, Segmented } from '../ui/ui.jsx';
 import { api } from '../../lib/api.js';
 import { useLoad } from '../../lib/hooks.js';
-import { money, dateTime } from '../../lib/format.js';
+import { money, dateTime, ACCOUNT_LABEL } from '../../lib/format.js';
+import { isoTime } from '../../lib/sort.js';
+import { SortTh, useSort } from '../ui/Sortable.jsx';
 import { CARD_METHOD } from '../../../shared/rules.js';
 
 const FILTERS = [['tout', 'Tout'], ['boutique', 'Boutique'], ['seance', 'Séance']];
@@ -19,10 +21,24 @@ const methodText = (l) => {
 };
 
 function Lines({ lines }) {
+  const sorter = useSort(lines, {
+    at: (l) => isoTime(l.at),
+    product: (l) => l.label,
+    amount: (l) => l.amount,
+    origin: (l) => (l.origin === 'boutique' ? 'Boutique' : `Séance ${l.reservation_id}`),
+    account: (l) => ACCOUNT_LABEL[l.account] ?? l.account,
+    // « — » (not paid yet) counts as an empty cell: last, whatever the direction.
+    payment: (l) => (methodText(l) === '—' ? null : methodText(l)),
+  });
   return (
     <div className="table-wrap"><table className="table stack-sm">
-      <thead><tr><th>Date</th><th>Produit</th><th className="num">Montant</th><th>Origine</th><th>Compte</th><th>Paiement</th><th><span className="sr-only">Ticket</span></th></tr></thead>
-      <tbody>{lines.map((l) => (
+      <thead><tr>
+        <SortTh sorter={sorter} col="at">Date</SortTh><SortTh sorter={sorter} col="product">Produit</SortTh>
+        <SortTh sorter={sorter} col="amount" className="num">Montant</SortTh><SortTh sorter={sorter} col="origin">Origine</SortTh>
+        <SortTh sorter={sorter} col="account">Compte</SortTh><SortTh sorter={sorter} col="payment">Paiement</SortTh>
+        <th><span className="sr-only">Ticket</span></th>
+      </tr></thead>
+      <tbody>{sorter.rows.map((l) => (
         <tr key={l.charge_id} className={l.status === 'annulee' || l.status === 'remboursee' ? 'is-muted' : ''}>
           <td data-label="Date" className="nowrap">{dateTime(l.at)}</td>
           <td data-label="Produit"><span>{l.label}{l.quantity > 1 ? ` × ${l.quantity}` : ''}
