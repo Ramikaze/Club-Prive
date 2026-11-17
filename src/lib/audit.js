@@ -30,6 +30,8 @@ export const ACTION_LABELS = {
   'client.dette_reprise': 'Dette reprise ajoutée',
   'client.dette_reprise_annulee': 'Dette reprise annulée',
   'import.digibox': 'Reprise des comptes Digibox',
+  'import.inventaire': 'Inventaire importé',
+  'produit.renommer': 'Produit renommé',
   'client.acces.creer': 'Accès client créé',
   'client.acces.code': 'Nouveau code provisoire du client',
   'client.acces.couper': 'Accès client coupé',
@@ -166,6 +168,10 @@ export function auditSummary(a) {
       return `${d.nom ?? ''} : ${money(d.montant)} (${ACCOUNT_LABEL[d.caisse] ?? d.caisse}) — ${d.note ?? ''}`;
     case 'client.dette_reprise_annulee':
       return `${d.nom ?? ''} : ${money(d.montant)} — ${d.motif ?? ''}`;
+    case 'import.inventaire':
+      return `${d.motif ?? ''} : ${d.lignes ?? 0} lignes, ${d.ajustes ?? 0} stocks ajustés, ${d.crees ?? 0} produits créés`;
+    case 'produit.renommer':
+      return `${d.reference ?? ''} : ${d.avant ?? ''} → ${d.apres ?? ''}`;
     case 'import.digibox':
       return `${d.clients ?? 0} clients créés, ${d.dettes ?? 0} dettes reprises (${money(d.total_dettes ?? 0)}), ${d.fournisseurs ?? 0} fournisseurs`;
     case 'client.acces.creer':

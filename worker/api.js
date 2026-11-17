@@ -321,6 +321,8 @@ export function createApi({ db, env = {}, demo = false, sendPush: pushSender = n
     // The Digibox accounts import (worker/importAccounts.js): the clients with their « Dette reprise », the suppliers
     // with their « Solde reporté », the whole file in one call (one transaction), behind the same code.
     add('POST', '/api/admin/accounts-import', { public: true, guard: checkImportToken }, (ctx) => club.importAccounts(ctx.body));
+    // The inventory import (worker/importStock.js): every product's stock set to the quantity counted, one call.
+    add('POST', '/api/admin/stock-import', { public: true, guard: checkImportToken }, (ctx) => club.importStock(ctx.body));
   }
   // Demo space only (the real club answers 404): empties the space and fills it again from the real
   // club's configuration, which handleDemo hands over with the request.
