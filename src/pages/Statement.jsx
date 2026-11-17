@@ -14,26 +14,11 @@ import { api } from '../lib/api.js';
 import { parts, win } from '../lib/format.js';
 import { useLoad } from '../lib/hooks.js';
 import { statementPdf } from '../lib/statementPdf.js';
+import { useA4Page } from '../lib/useA4Page.js';
 import { useStore } from '../store/useStore.js';
 import { addDays } from '../../shared/time.js';
 import { statementWhatsAppText } from '../../shared/wallet.js';
 import { waDigits } from '../../shared/whatsapp.js';
-
-// A4 with 12 mm margins, for this page only: @page applies to the whole printout and cannot be limited to a class,
-// so the rule exists only while the page is open (as the roll's size on the ticket pages). The body class scopes
-// the page's other print rules in club.css.
-function useA4Page() {
-  useEffect(() => {
-    document.body.classList.add('print-statement');
-    const style = document.createElement('style');
-    style.textContent = '@page { size: A4; margin: 12mm; }';
-    document.head.append(style);
-    return () => {
-      document.body.classList.remove('print-statement');
-      style.remove();
-    };
-  }, []);
-}
 
 // The business day an instant belongs to (a member created at 01:00 joined the evening before).
 function bizDayOf(iso) {

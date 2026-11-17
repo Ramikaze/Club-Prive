@@ -5,6 +5,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { Server, Client, ok, UM } from './harness.js';
+import { clientStatementWhatsAppText } from '../shared/wallet.js';
 
 const server = new Server({});
 let admin;
@@ -192,4 +193,24 @@ test('les routes générales des lignes refusent une dette reprise', async () =>
   refused(await admin.post(`/api/charges/${chargeId}/refund`, { reason: 'Erreur', method: 'Espèces' }), 409, 'DETTE_REPRISE');
   const line = server.club.get('SELECT status, settled FROM charges WHERE id = ?', chargeId);
   assert.deepEqual([line.status, line.settled], ['payee', 40000 * UM]);
+});
+
+test('relevé du compte client : le nom et le téléphone pour la page A4', async () => {
+  const c = await newClient();
+  const acc = await account(c);
+  assert.equal(acc.phone, c.phone);
+  assert.equal(acc.name, `${c.first_name} ${c.last_name}`);
+  // A file without a first name gets no leading space.
+  const societe = ok(await ger.post('/api/clients', { last_name: 'société relevé' }));
+  assert.equal((await account(societe)).name, 'SOCIÉTÉ RELEVÉ');
+});
+
+test('message WhatsApp du relevé client : neutre, daté, signé', () => {
+  const text = clientStatementWhatsAppText({ clubName: 'Limen', day: '2026-11-17' });
+  assert.equal(text, [
+    'Bonjour,',
+    'Voici le relevé de votre compte client au 17/11/2026.',
+    'Relevé (ci-dessous)',
+    'Merci de votre confiance. L’équipe Limen',
+  ].join('\n'));
 });

@@ -248,6 +248,7 @@ function ClientDetail({ m, reload }) {
         actions={(
           <>
             <button type="button" className="btn" onClick={() => openClientDialog(m, reload)}><Icon name="edit" /> Modifier</button>
+            <Link className="btn" to={`/clients/${m.id}/releve`}><Icon name="statement" /> Relevé</Link>
             {m.active
               ? <button type="button" className="btn btn-danger" onClick={() => openDeactivateClientDialog(m, reload)}><Icon name="ban" /> Désactiver</button>
               : <button type="button" className="btn" onClick={() => openReactivateClientDialog(m, reload)}><Icon name="undo" /> Réactiver</button>}
