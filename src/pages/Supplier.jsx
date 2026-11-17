@@ -1,7 +1,7 @@
 // A supplier's sheet (/fournisseurs/:id): what the club owes it, and its statement in the order of the dates —
 // Date, Opération, Dû, Réglé, Solde, the same form as a client's receivable sheet. A purchase raises the debt without
 // moving money; a payment is an expense of the supplier's caisse, cancelled like any operation of the cash desk.
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
 import { actionDialog, openDialog } from '../components/ui/Modal.jsx';
 import { CancelledChip, DemoChip, Loaded, Notice, PageHead } from '../components/ui/ui.jsx';
@@ -42,6 +42,7 @@ function Operation({ l }) {
 
 export default function Supplier() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const state = useLoad(async () => {
     const [sheet, categories] = await Promise.all([api.get(`/api/suppliers/${id}`), api.get('/api/ledger/categories')]);
     return { ...sheet, categories };
@@ -66,6 +67,18 @@ export default function Supplier() {
           await api.put(`/api/suppliers/${s.id}`, { active });
           toast(active ? 'Fournisseur réactivé.' : 'Fournisseur désactivé.');
           reload();
+        },
+      });
+      // Only a deactivated supplier that never had any operation (the server checks it too).
+      const remove = () => actionDialog({
+        title: 'Supprimer ce fournisseur',
+        message: `« ${s.name} » disparaît de la liste des fournisseurs, définitivement. Le journal des opérations garde la trace de la suppression.`,
+        confirmLabel: 'Supprimer',
+        danger: true,
+        run: async () => {
+          await api.del(`/api/suppliers/${s.id}`);
+          toast(`Fournisseur « ${s.name} » supprimé.`);
+          navigate('/fournisseurs');
         },
       });
       const cancelPurchase = (l) => actionDialog({
@@ -97,6 +110,11 @@ export default function Supplier() {
                 {s.active
                   ? <button type="button" className="btn btn-sm btn-ghost" disabled={s.due > 0} title={s.due > 0 ? 'Possible seulement quand le club ne lui doit plus rien' : undefined} onClick={() => setActive(false)}><Icon name="ban" /> Désactiver</button>
                   : <button type="button" className="btn btn-sm btn-ghost" onClick={() => setActive(true)}><Icon name="undo" /> Réactiver</button>}
+                {!s.active && (
+                  <button type="button" className="btn btn-sm btn-danger" disabled={s.has_operations}
+                    title={s.has_operations ? 'Impossible : il a déjà des achats ou des paiements, il reste dans les comptes' : undefined}
+                    onClick={remove}><Icon name="trash" /> Supprimer</button>
+                )}
                 <button type="button" className="btn btn-sm" disabled={!s.active} onClick={buy}><Icon name="plus" /> Enregistrer un achat</button>
                 <button type="button" className="btn btn-primary" disabled={s.due <= 0} onClick={pay}><Icon name="withdraw" /> Payer</button>
               </>

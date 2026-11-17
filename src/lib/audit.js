@@ -96,6 +96,7 @@ export const ACTION_LABELS = {
   'caisse.benefices': 'Prise de bénéfices',
   'fournisseur.creer': 'Fournisseur créé',
   'fournisseur.modifier': 'Fournisseur modifié',
+  'fournisseur.supprimer': 'Fournisseur supprimé',
   'fournisseur.achat': 'Achat fournisseur enregistré',
   'fournisseur.achat_annuler': 'Achat fournisseur annulé',
   'caisse.fermer': 'Caisse du jour fermée',
@@ -217,6 +218,8 @@ export function auditSummary(a) {
       return [d.nom, d.caisse, d.pays, d.devise].filter(Boolean).join(' · ');
     case 'fournisseur.modifier':
       return d.apres?.nom ?? '';
+    case 'fournisseur.supprimer':
+      return [d.nom, d.caisse].filter(Boolean).join(' · ');
     case 'fournisseur.achat':
       return `${d.nom} · ${d.type} du ${dayLabel(d.date, 'short')} : ${money(d.montant)}${d.montant_devise ? ` (${formatForeign(d.montant_devise, d.devise)})` : ''}${d.reference ? ` · facture ${d.reference}` : ''}`;
     case 'fournisseur.achat_annuler':
