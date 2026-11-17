@@ -347,6 +347,9 @@ main:focus { outline: none; }
 }
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
 .card-head .subtle { font-weight: 400; }
+/* Buttons grouped in a header or a table cell: one row, centred on each other (a button without an icon no longer
+   sits lower than its neighbours), spaced, wrapping on a narrow screen. */
+.row-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .card + .card { margin-top: 0; }
 .section-gap { margin-top: 16px; }
 .section-gap-bottom { margin-bottom: 16px; }

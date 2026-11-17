@@ -108,6 +108,17 @@ export function bookingWhatsAppText({ clubName, lastName, roomName, day, startTi
 
 // The message sent with the member's statement (its PDF follows it): the period, from `from` to `to`
 // ('YYYY-MM-DD'), signed by the club's team.
+// The message sent with a regular client's account statement (the PDF goes with it). « Bonjour, » alone: a client may be a
+// company or known by one name only.
+export function clientStatementWhatsAppText({ clubName, day }) {
+  return [
+    'Bonjour,',
+    `Voici le relevé de votre compte client au ${dayText(day)}.`,
+    'Relevé (ci-dessous)',
+    `Merci de votre confiance. ${signature(clubName)}`,
+  ].join('\n');
+}
+
 export function statementWhatsAppText({ clubName, lastName, from, to }) {
   return [
     greeting(lastName),

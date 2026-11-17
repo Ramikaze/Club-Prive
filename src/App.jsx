@@ -20,6 +20,7 @@ const Member = lazy(() => import('./pages/Member.jsx'));
 const ClientsList = lazy(() => import('./components/members/ClientsList.jsx'));
 const MemberCard = lazy(() => import('./pages/MemberCard.jsx'));
 const Statement = lazy(() => import('./pages/Statement.jsx'));
+const ClientStatement = lazy(() => import('./pages/ClientStatement.jsx'));
 const Reservation = lazy(() => import('./pages/Reservation.jsx'));
 const BookingConfirmation = lazy(() => import('./pages/BookingConfirmation.jsx'));
 const Products = lazy(() => import('./pages/Products.jsx'));
@@ -214,6 +215,7 @@ function StaffApp() {
             <Route path="boutique" element={<Shop />} />
             <Route path="commandes" element={<Orders />} />
             <Route path="clients" element={<ClientsList />} />
+            <Route path="clients/:id/releve" element={<ClientStatement />} />
             <Route path="parametres" element={<AdminOnly><Settings /></AdminOnly>} />
             <Route path="*" element={<NotFound />} />
           </Route>

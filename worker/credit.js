@@ -318,7 +318,7 @@ export const creditMethods = {
     }
     const owed = this.creditOwed(m.id);
     return {
-      member_id: m.id, name: `${m.first_name} ${m.last_name}`, member_no: m.member_no, active: m.active !== 0,
+      member_id: m.id, name: `${m.first_name} ${m.last_name}`.trim(), member_no: m.member_no, phone: m.phone, active: m.active !== 0,
       credit_limit: m.credit_limit, owed, available: Math.max(0, m.credit_limit - owed), movements: moves,
     };
   },
