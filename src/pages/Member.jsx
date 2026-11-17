@@ -267,7 +267,7 @@ function ClientDetail({ m, reload }) {
         <section className="card">
           <div className="card-head"><h2>Coordonnées</h2></div>
           <dl className="kv">
-            <dt>Téléphone</dt><dd>{m.phone}</dd>
+            <dt>Téléphone</dt><dd>{m.phone || '—'}</dd>
             <dt>Courriel</dt><dd>{m.email ?? '—'}</dd>
             <dt>Notes</dt><dd>{m.notes ?? '—'}</dd>
             <dt>Client depuis</dt><dd>{dateTime(m.created_at)}</dd>
@@ -356,7 +356,7 @@ function MemberDetail({ m, reload }) {
           <section className="card">
             <div className="card-head"><h2>Coordonnées</h2></div>
             <dl className="kv">
-              <dt>Téléphone</dt><dd>{m.phone}</dd>
+              <dt>Téléphone</dt><dd>{m.phone || '—'}</dd>
               <dt>Courriel</dt><dd>{m.email ?? '—'}</dd>
               <dt>Notes</dt><dd>{m.notes ?? '—'}</dd>
               <dt>Membre depuis</dt><dd>{dateTime(m.became_member_at ?? m.created_at)}</dd>

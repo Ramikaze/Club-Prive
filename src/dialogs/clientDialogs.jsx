@@ -37,11 +37,11 @@ function ClientDialog({ close, client, onDone }) {
     <Modal title={editing ? 'Modifier la fiche' : 'Nouveau client régulier'} size="wide" onClose={close}>
       <form className="form-grid" onSubmit={onSubmit} noValidate>
         <div className="form-row">
-          <label className="field"><span>Prénom</span><input {...field('first_name')} required maxLength={60} autoComplete="off" /></label>
+          <label className="field"><span>Prénom (facultatif)</span><input {...field('first_name')} maxLength={60} autoComplete="off" /></label>
           <label className="field"><span>Nom</span><input {...field('last_name')} required maxLength={60} autoComplete="off" /></label>
         </div>
         <div className="form-row">
-          <label className="field"><span>Téléphone</span><input {...field('phone')} type="tel" required maxLength={30} autoComplete="off" disabled={phoneLocked} />
+          <label className="field"><span>Téléphone (facultatif)</span><input {...field('phone')} type="tel" maxLength={30} autoComplete="off" disabled={phoneLocked} />
             {phoneLocked && <span className="help">Ce client a un espace client : seuls l’administrateur et les associés changent son téléphone.</span>}</label>
           <label className="field"><span>Courriel (facultatif)</span><input {...field('email')} type="email" maxLength={120} autoComplete="off" /></label>
         </div>

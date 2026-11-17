@@ -1064,7 +1064,14 @@ const V28 = [
   'CREATE INDEX stock_movements_product ON stock_movements(product_id)',
 ];
 
-export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28];
+// V29: the « Dette reprise » of a regular client (spec docs/superpowers/specs/2026-11-17-dette-reprise-design.md): a
+// debt from before the app is a line of its own (`carryover = 1`, no shop sale, no product), owed and settled like a
+// credit purchase but never billed as a sale of the day it is entered.
+const V29 = [
+  'ALTER TABLE charges ADD COLUMN carryover INTEGER NOT NULL DEFAULT 0 CHECK (carryover IN (0, 1))',
+];
+
+export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29];
 
 export function migrate(db) {
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');

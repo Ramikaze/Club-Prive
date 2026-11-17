@@ -9,7 +9,7 @@ import { toast } from '../components/ui/toast.jsx';
 import { FormError } from '../components/ui/ui.jsx';
 import { money, parseMoney, toMajor } from '../lib/format.js';
 import { useSubmit } from '../lib/hooks.js';
-import { useSettings } from '../store/useStore.js';
+import { useMe, useSettings } from '../store/useStore.js';
 import { CARD_METHOD } from '../../shared/rules.js';
 
 function CreditLimitDialog({ close, account, onDone }) {
@@ -77,8 +77,8 @@ function SettlementDialog({ close, account, onDone }) {
     <Modal title="Enregistrer un règlement" onClose={close}>
       <form className="form-grid" onSubmit={onSubmit} noValidate>
         <p className="muted">
-          <strong>{account.name}</strong> doit {money(account.owed)}. Le règlement paie ses achats à crédit du plus ancien au plus
-          récent ; il peut n’en payer qu’une partie.
+          <strong>{account.name}</strong> doit {money(account.owed)}. Le règlement paie d’abord ses dettes reprises, puis ses achats
+          à crédit du plus ancien au plus récent ; il peut n’en payer qu’une partie.
         </p>
         <div className="form-row">
           <label className="field"><span>Montant reçu</span>
@@ -104,6 +104,75 @@ function SettlementDialog({ close, account, onDone }) {
 
 export function openSettlementDialog(account, onDone) {
   openDialog(SettlementDialog, { account, onDone });
+}
+
+// « Dette reprise » (spec docs/superpowers/specs/2026-11-17-dette-reprise-design.md): what the client owed before the
+// app. No money moves and no stock; it is owed on his account, paid first by his next settlement, into the caisse chosen
+// here (the associé's own rayon by default, else Cigare).
+const CARRYOVER_CAISSES = [['cigares', 'Cigare'], ['alcool', 'Champagne et autres boissons']];
+
+function CarryoverDialog({ close, account, onDone }) {
+  const me = useMe();
+  const [key] = useState(newKey);
+  const { busy, error, submit } = useSubmit();
+  const [text, setText] = useState('');
+  const [caisse, setCaisse] = useState(me?.rayon === 'alcool' ? 'alcool' : 'cigares');
+  const [note, setNote] = useState('');
+  const amount = parseMoney(text);
+  const onSubmit = (e) => {
+    e.preventDefault();
+    submit(async () => {
+      if (!amount) throw new Error('Indiquez le montant que le client devait.');
+      if (!note.trim()) throw new Error('Indiquez d’où vient cette dette (ex. « Reprise Digibox au 17/11/2026 »).');
+      const res = await api.post(`/api/clients/${account.member_id}/carryovers`, { amount, account: caisse, note }, key);
+      close();
+      toast(`Dette reprise de ${money(amount)} ajoutée. ${account.name} doit ${money(res.owed)}.`);
+      onDone?.(res);
+    });
+  };
+  return (
+    <Modal title="Dette reprise" onClose={close}>
+      <form className="form-grid" onSubmit={onSubmit} noValidate>
+        <p className="muted">
+          Ce que <strong>{account.name}</strong> devait déjà avant l’application. Aucun argent ne bouge et ce n’est pas une vente :
+          la dette s’ajoute à son compte et son prochain règlement la paie en premier.
+        </p>
+        <div className="form-row">
+          <label className="field"><span>Montant dû</span>
+            <input name="amount" inputMode="decimal" autoComplete="off" required autoFocus placeholder="150 000" value={text} onChange={(e) => setText(e.target.value)} /></label>
+          <label className="field"><span>Caisse qui recevra le paiement</span>
+            <select name="caisse" value={caisse} onChange={(e) => setCaisse(e.target.value)}>
+              {CARRYOVER_CAISSES.map(([k, label]) => <option key={k} value={k}>{label}</option>)}</select></label>
+        </div>
+        <label className="field"><span>D’où vient cette dette ?</span>
+          <input name="note" maxLength={120} autoComplete="off" required placeholder="Reprise Digibox au 17/11/2026" value={note} onChange={(e) => setNote(e.target.value)} /></label>
+        <FormError error={error} />
+        <div className="modal-actions"><button type="button" className="btn" onClick={close}>Annuler</button>
+          <button type="submit" className="btn btn-primary" disabled={busy || !amount || !note.trim()} aria-busy={busy}>
+            {amount ? `Ajouter ${money(amount)}` : 'Ajouter'}</button></div>
+      </form>
+    </Modal>
+  );
+}
+
+export function openCarryoverDialog(account, onDone) {
+  openDialog(CarryoverDialog, { account, onDone });
+}
+
+export function openCancelCarryoverDialog(move, onDone) {
+  const key = newKey();
+  actionDialog({
+    title: 'Annuler la dette reprise',
+    danger: true,
+    confirmLabel: 'Annuler la dette reprise',
+    message: `${money(move.due)} ne seront plus dus. La ligne reste visible sur le relevé, barrée, avec le motif.`,
+    reasonLabel: 'Motif de l’annulation',
+    run: async ({ reason }) => {
+      const res = await api.post(`/api/clients/carryovers/${move.charge_id}/cancel`, { reason }, key);
+      toast(`Dette reprise annulée. Le client doit ${money(res.owed)}.`);
+      onDone?.(res);
+    },
+  });
 }
 
 export function openCancelSettlementDialog(move, onDone) {

@@ -13,7 +13,7 @@ const KINDS = [['journalier', 'Client journalier'], ['client', 'Client régulier
 const ENDPOINT = { client: '/api/clients', membre: '/api/members' };
 
 // What the sale keeps of a person.
-const asPerson = (m) => ({ id: m.id, name: m.name ?? `${m.first_name} ${m.last_name}`, member_no: m.member_no, in_room: m.in_room === true });
+const asPerson = (m) => ({ id: m.id, name: m.name ?? `${m.first_name} ${m.last_name}`.trim(), member_no: m.member_no, in_room: m.in_room === true });
 
 function NewClientDialog({ close, onDone }) {
   const [key] = useState(newKey);
@@ -33,11 +33,11 @@ function NewClientDialog({ close, onDone }) {
     <Modal title="Nouveau client régulier" size="wide" onClose={close}>
       <form className="form-grid" onSubmit={onSubmit} noValidate>
         <div className="form-row">
-          <label className="field"><span>Prénom</span><input {...field('first_name')} required maxLength={60} autoComplete="off" /></label>
+          <label className="field"><span>Prénom (facultatif)</span><input {...field('first_name')} maxLength={60} autoComplete="off" /></label>
           <label className="field"><span>Nom</span><input {...field('last_name')} required maxLength={60} autoComplete="off" /></label>
         </div>
         <div className="form-row">
-          <label className="field"><span>Téléphone</span><input {...field('phone')} type="tel" required maxLength={30} autoComplete="off" /></label>
+          <label className="field"><span>Téléphone (facultatif)</span><input {...field('phone')} type="tel" maxLength={30} autoComplete="off" /></label>
           <label className="field"><span>Courriel (facultatif)</span><input {...field('email')} type="email" maxLength={120} autoComplete="off" /></label>
         </div>
         <label className="field"><span>Notes (facultatif)</span><textarea {...field('notes')} maxLength={500} /></label>
@@ -92,7 +92,7 @@ export default function BuyerPicker({ buyer, onChange }) {
             renderSuggestion={(m) => (
               <div className="grow">
                 <div className="title">{m.name}</div>
-                <div className="meta">{m.member_no} · {m.phone}</div>
+                <div className="meta">{m.member_no}{m.phone ? ` · ${m.phone}` : ''}</div>
               </div>
             )}
           />

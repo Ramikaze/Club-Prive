@@ -11,6 +11,7 @@ import { shopMethods, buyerShown } from './shop.js';
 import { caisseMethods } from './caisses.js';
 import { supplierMethods } from './suppliers.js';
 import { creditMethods } from './credit.js';
+import { importAccountsMethods } from './importAccounts.js';
 import { giftMethods } from './gifts.js';
 import { ERASE_GROUPS, ERASE_UNLINKS, eraseClosure } from '../shared/erase.js';
 import { clientAccessMethods } from './clientAccess.js';
@@ -151,7 +152,8 @@ const CHARGE_SELECT = `
   LEFT JOIN refunds rf ON rf.id = (SELECT MAX(y.id) FROM refunds y WHERE y.charge_id = c.id)`;
 
 // A line that is no credit purchase of a regular client: those wait on the client's account, not among the open notes.
-const NOT_CREDIT_SQL = 'NOT EXISTS (SELECT 1 FROM shop_sales cs WHERE cs.id = c.shop_sale_id AND cs.on_credit = 1)';
+// A « Dette reprise » (`carryover`) waits on the client's account too.
+const NOT_CREDIT_SQL = '(c.carryover = 0 AND NOT EXISTS (SELECT 1 FROM shop_sales cs WHERE cs.id = c.shop_sale_id AND cs.on_credit = 1))';
 
 // A product with the version of its photo (the date of the photo, null without one). One join serves a whole
 // list, and only the date is read: the picture itself is never loaded with the products.
@@ -754,12 +756,14 @@ export class Club {
     }
   }
 
-  memberFields(input, current = {}) {
+  // A regular client (`client`) may have no first name and no phone (a company, a client known by one name, a number
+  // not known yet): both are then stored empty. A member keeps both required.
+  memberFields(input, current = {}, { client = current.kind === 'client' } = {}) {
     const pick = (k) => (input[k] !== undefined ? input[k] : current[k]);
-    const first = formatFirstName(text(pick('first_name'), 'Prénom', { required: true, max: 60 }));
+    const first = formatFirstName(text(pick('first_name'), 'Prénom', { required: !client, max: 60 }) ?? '');
     const last = formatLastName(text(pick('last_name'), 'Nom', { required: true, max: 60 }));
-    const phone = text(pick('phone'), 'Téléphone', { required: true, max: 30 });
-    if (!/^[0-9+().\s-]{6,30}$/.test(phone)) throw invalid('Téléphone : chiffres, espaces et + uniquement (6 caractères minimum).');
+    const phone = text(pick('phone'), 'Téléphone', { required: !client, max: 30 }) ?? '';
+    if (phone && !/^[0-9+().\s-]{6,30}$/.test(phone)) throw invalid('Téléphone : chiffres, espaces et + uniquement (6 caractères minimum).');
     const email = text(pick('email'), 'Courriel', { max: 120 });
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw invalid('Courriel invalide.');
     const notes = text(pick('notes'), 'Notes', { max: 500 });
@@ -2808,6 +2812,11 @@ export class Club {
   // A Boutique sale is cancelled as a whole (cancelShopSale), never line by line.
   assertNotShopLine(c) {
     if (c.shop_sale_id) throw conflict('VENTE_BOUTIQUE', 'Une vente Boutique s’annule en entier, depuis Caisse › Boutique.');
+    // A « Dette reprise » lives on the client's account: cancelled there (never once settled), paid back only by cancelling
+    // the settlement (worker/credit.js).
+    if (c.carryover) {
+      throw conflict('DETTE_REPRISE', 'Une dette reprise s’annule depuis le compte du client, après l’annulation de ses règlements.');
+    }
   }
 
   cancelCharge(actor, chargeId, input) {
@@ -3533,7 +3542,7 @@ export class Club {
       `SELECT c.account, c.status, c.shop_sale_id IS NOT NULL AS shop, ${DRINK_PART_SQL} AS drink, SUM(c.amount) AS total,
          SUM(c.amount - c.settled) AS left_due, COUNT(*) AS n
        FROM charges c LEFT JOIN products pr ON pr.id = c.product_id
-       WHERE c.created_at >= ? AND c.created_at < ? GROUP BY c.account, c.status, shop, drink`, a, b,
+       WHERE c.created_at >= ? AND c.created_at < ? AND c.carryover = 0 GROUP BY c.account, c.status, shop, drink`, a, b,
     )) {
       const x = acc[r.account];
       const y = part(x, r.shop);
@@ -3562,7 +3571,7 @@ export class Club {
       }
     }
     for (const r of this.all(
-      `SELECT pa.account, (p.shop_sale_id IS NOT NULL OR c.shop_sale_id IS NOT NULL) AS shop, ${DRINK_PART_SQL} AS drink, SUM(pa.amount) AS total
+      `SELECT pa.account, (p.shop_sale_id IS NOT NULL OR c.shop_sale_id IS NOT NULL OR c.carryover = 1) AS shop, ${DRINK_PART_SQL} AS drink, SUM(pa.amount) AS total
        FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
        LEFT JOIN charges c ON c.id = pa.charge_id LEFT JOIN products pr ON pr.id = c.product_id
        WHERE p.paid_at >= ? AND p.paid_at < ? GROUP BY pa.account, shop, drink`, a, b,
@@ -3573,7 +3582,7 @@ export class Club {
       part(acc[r.account], r.shop).collected += r.total;
     }
     for (const r of this.all(
-      `SELECT rf.account, c.shop_sale_id IS NOT NULL AS shop, ${DRINK_PART_SQL} AS drink, SUM(rf.amount) AS total
+      `SELECT rf.account, (c.shop_sale_id IS NOT NULL OR c.carryover = 1) AS shop, ${DRINK_PART_SQL} AS drink, SUM(rf.amount) AS total
        FROM refunds rf JOIN charges c ON c.id = rf.charge_id LEFT JOIN products pr ON pr.id = c.product_id
        WHERE rf.created_at >= ? AND rf.created_at < ? GROUP BY rf.account, shop, drink`, a, b,
     )) {
@@ -3678,7 +3687,7 @@ export class Club {
       case 'lignes': {
         header = ['Date', 'N° ligne', 'Sous-compte', 'Type', 'N° membre', 'Membre', 'Réservation', 'Libellé', 'Quantité',
           `Prix unitaire ${cur}`, `Montant ${cur}`, 'Statut', 'Tarif validé', 'Saisi par'];
-        rows = this.all(`${CHARGE_SELECT} WHERE c.created_at >= ? AND c.created_at < ? ${account ? 'AND c.account = ?' : ''} ORDER BY c.created_at`,
+        rows = this.all(`${CHARGE_SELECT} WHERE c.created_at >= ? AND c.created_at < ? AND c.carryover = 0 ${account ? 'AND c.account = ?' : ''} ORDER BY c.created_at`,
           ...(account ? [a, b, account] : [a, b]))
           .map((c) => [when(c.created_at), c.id, ACCOUNT_LABELS[c.account], CHARGE_KIND[c.kind], buyerShown(c.buyer_kind, c).no ?? '',
             buyerShown(c.buyer_kind, c).name, c.reservation_id ?? '', c.label, c.quantity, money(c.unit_price), money(c.amount), CHARGE_STATUS[c.status],
@@ -3928,6 +3937,7 @@ Object.assign(Club.prototype, caisseMethods);
 Object.assign(Club.prototype, giftMethods);
 Object.assign(Club.prototype, supplierMethods);
 Object.assign(Club.prototype, creditMethods);
+Object.assign(Club.prototype, importAccountsMethods);
 Object.assign(Club.prototype, clientAccessMethods);
 Object.assign(Club.prototype, clientViewMethods);
 Object.assign(Club.prototype, clientOrderMethods);
