@@ -13,7 +13,9 @@ import { useStore } from '../../store/useStore.js';
 import { cardWhatsAppText } from '../../../shared/wallet.js';
 import { waDigits } from '../../../shared/whatsapp.js';
 
-export default function CardWhatsAppButton({ member, card, label = 'Envoyer sur WhatsApp', className = 'btn' }) {
+// `compact`: a discreet icon alone (the member tile, beside the card); the label then names it for screen readers
+// and in the tooltip.
+export default function CardWhatsAppButton({ member, card, label = 'Envoyer sur WhatsApp', compact = false }) {
   const picture = useRef(null);
   const working = useRef(false);
   const [busy, setBusy] = useState(false);
@@ -44,8 +46,14 @@ export default function CardWhatsAppButton({ member, card, label = 'Envoyer sur 
 
   return (
     <>
-      <button type="button" className={className} onClick={send} disabled={busy}>
-        <Icon name="message" /> {busy ? 'Préparation…' : label}</button>
+      {compact ? (
+        <button type="button" className="icon-btn card-send" onClick={send} disabled={busy} aria-busy={busy}
+          aria-label={label} title={busy ? 'Préparation…' : label}>
+          <Icon name="message" /></button>
+      ) : (
+        <button type="button" className="btn" onClick={send} disabled={busy}>
+          <Icon name="message" /> {busy ? 'Préparation…' : label}</button>
+      )}
       {/* Out of sight and out of the printout; the copy of the card the picture is drawn from. */}
       <div className="card-picture-host no-print" aria-hidden="true">
         <div className="card-picture" ref={picture}>

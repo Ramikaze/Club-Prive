@@ -1091,7 +1091,22 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 
 /* ------------------------------------------------------------------ « Carte » tile of the member page */
 
-.card-tile .c3d-stage { margin: 4px auto 0; }
+/* The card in the middle column, the discreet « send on WhatsApp » icon in the right one; the left column stays
+   empty so the card remains centred. On a phone the left column goes, so the card loses as little width as possible. */
+.card-tile-visual {
+  display: grid; grid-template-columns: 36px minmax(0, 420px) 36px; justify-content: center; align-items: start;
+  gap: 8px; margin-top: 4px;
+}
+.card-tile-visual .c3d-stage { grid-column: 2; margin: 0; }
+.card-send { grid-column: 3; width: 36px; height: 36px; color: var(--text-3); }
+.card-send:hover { color: var(--text); }
+.card-send svg { width: 18px; height: 18px; }
+.card-send[aria-busy="true"] { opacity: .5; cursor: progress; }
+@media (max-width: 520px) {
+  .card-tile-visual { grid-template-columns: minmax(0, 1fr) 36px; gap: 4px; }
+  .card-tile-visual .c3d-stage { grid-column: 1; }
+  .card-send { grid-column: 2; }
+}
 .tile-actions-main { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
 .tile-actions-minor { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 8px; }
 .tile-bar { margin-top: 18px; }
