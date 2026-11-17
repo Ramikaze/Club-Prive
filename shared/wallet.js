@@ -75,6 +75,16 @@ export function rechargeWhatsAppText({ clubName, lastName, amount, balance, at, 
   ].filter(Boolean).join('\n');
 }
 
+// The message that goes with the member card's picture (front and back) on WhatsApp: the greeting, the card and its
+// code, signed by the club's team.
+export function cardWhatsAppText({ clubName, lastName, code }) {
+  return [
+    greeting(lastName),
+    `Voici votre carte de membre${clean(clubName) ? ` ${clean(clubName)}` : ''} n° ${clean(code)} (recto et verso ci-dessous).`,
+    `Merci de votre confiance. ${signature(clubName)}`.trim(),
+  ].join('\n');
+}
+
 // A calendar date 'YYYY-MM-DD' with its weekday, as the booking confirmation writes it: 'mar. 27/10/2026'.
 const WEEKDAYS = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'];
 export function weekdayDayText(date) {

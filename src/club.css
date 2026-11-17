@@ -1083,6 +1083,12 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .card-face { margin: 0; flex: 1 1 300px; max-width: 420px; }
 .card-face figcaption { margin-top: 8px; text-align: center; font-size: 0.8rem; color: var(--text-3); }
 
+/* The copy of the card that CardWhatsAppButton draws to a picture: front over back on white, at a fixed width,
+   kept out of sight (a hidden element could not be drawn). */
+.card-picture-host { position: fixed; left: -10000px; top: 0; pointer-events: none; }
+.card-picture { width: 420px; padding: 24px; display: flex; flex-direction: column; gap: 24px; background: #fff; }
+.card-picture .c3d-face { box-shadow: 0 1px 0 rgba(255, 255, 255, .08) inset, 0 6px 14px rgba(0, 0, 0, .25); }
+
 /* ------------------------------------------------------------------ « Carte » tile of the member page */
 
 .card-tile .c3d-stage { margin: 4px auto 0; }
@@ -1254,6 +1260,8 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .share-ticket .ticket-image-box { margin: 0; }
 .share-ticket .ticket-image-preview { max-height: 52vh; }
 @media (max-width: 720px) { .share-ticket { grid-template-columns: minmax(0, 1fr); gap: 16px; } .share-ticket .ticket-image-box { margin: 0 auto; } }
+/* A wide picture (the member card) leaves room on the phone for the copy button beside it, as a narrow ticket does. */
+@media (max-width: 720px) { .share-ticket .ticket-image-box { max-width: calc(100% - 92px); } }
 
 /* The agenda's empty day: a quiet note over the timeline, which stays clickable underneath. */
 .tl-empty { position: absolute; top: 18%; left: 50%; transform: translateX(-50%); z-index: 2; display: inline-flex; align-items: center; gap: 8px; margin: 0; padding: 8px 14px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text-2); font-size: 0.9rem; white-space: nowrap; pointer-events: none; box-shadow: 0 2px 8px rgba(36, 28, 21, 0.08); }

@@ -15,11 +15,21 @@ export async function sheetPicture(name) {
   return new File([blob], name, { type: 'image/png' });
 }
 
+// The words of the dialog for the paper it sends: a ticket by default; the member card says « la carte ».
+export const TICKET_WORDS = {
+  the: 'le ticket', of: 'du ticket', it: 'le', copied: 'Ticket copié', downloaded: 'le ticket téléchargé', label: 'Ticket',
+  who: 'le client', demo: 'Démo : le ticket porte « DÉMO — SANS VALEUR » : rien n\'est réel.',
+};
+export const CARD_WORDS = {
+  the: 'la carte', of: 'de la carte', it: 'la', copied: 'Carte copiée', downloaded: 'la carte téléchargée', label: 'Carte',
+  who: 'le membre', demo: 'Démo : la carte d’un membre fictif : rien n’est réel.',
+};
+
 // The ticket for WhatsApp: its picture (with the QR code) and the written message, together. A phone or a tablet
 // shares both at once (WhatsApp, then the member); a computer opens the member's chat with the message and
 // downloads the picture to attach. Each way needs its own click: a browser refuses a share or a new tab started
 // after the picture was drawn and the copy recorded. The demo shows them and sends nothing.
-export default function ShareTicketDialog({ close, file, text, title, digits, demo }) {
+export default function ShareTicketDialog({ close, file, text, title, digits, demo, words: w = TICKET_WORDS }) {
   const [url] = useState(() => URL.createObjectURL(file));
   useEffect(() => () => URL.revokeObjectURL(url), [url]);
   const canShare = typeof navigator.canShare === 'function' && navigator.canShare({ files: [file], text });
@@ -39,15 +49,15 @@ export default function ShareTicketDialog({ close, file, text, title, digits, de
       await navigator.clipboard.write([new window.ClipboardItem({ 'image/png': file })]);
       setCopied(true);
     } catch {
-      toast('La copie du ticket a échoué : WhatsApp s’ouvre avec le message, joignez le ticket téléchargé.', 'error');
+      toast(`La copie ${w.of} a échoué : WhatsApp s’ouvre avec le message, joignez ${w.downloaded}.`, 'error');
       window.open(waHref, '_blank');
       return;
     }
     const tab = window.open(waHref, '_blank');
     if (tab) tab.opener = null;
     toast(tab
-      ? 'Ticket copié : dans WhatsApp, envoyez le message (Entrée), puis faites Cmd + V (ou Ctrl + V) et Entrée pour envoyer le ticket.'
-      : 'Ticket copié : cliquez encore sur « Ouvrir WhatsApp », envoyez le message, puis Cmd + V et Entrée pour le ticket.');
+      ? `${w.copied} : dans WhatsApp, envoyez le message (Entrée), puis faites Cmd + V (ou Ctrl + V) et Entrée pour envoyer ${w.the}.`
+      : `${w.copied} : cliquez encore sur « Ouvrir WhatsApp », envoyez le message, puis Cmd + V et Entrée pour ${w.the}.`);
   };
   const share = async () => {
     try {
@@ -60,9 +70,9 @@ export default function ShareTicketDialog({ close, file, text, title, digits, de
   const copyImage = async () => {
     try {
       await navigator.clipboard.write([new window.ClipboardItem({ 'image/png': file })]);
-      toast('Ticket copié : collez-le (Cmd + V ou Ctrl + V) dans la conversation WhatsApp.');
+      toast(`${w.copied} : collez-${w.it} (Cmd + V ou Ctrl + V) dans la conversation WhatsApp.`);
     } catch {
-      toast('La copie du ticket a échoué : utilisez « Télécharger le ticket ».', 'error');
+      toast(`La copie ${w.of} a échoué : utilisez « Télécharger ${w.the} ».`, 'error');
     }
   };
   const copyText = async () => {
@@ -79,27 +89,27 @@ export default function ShareTicketDialog({ close, file, text, title, digits, de
   return (
     <Modal title={title} size="wide" onClose={close}>
       <div className="form-grid">
-        {demo ? <Notice kind="info">Démo : le ticket porte « DÉMO — SANS VALEUR » : rien n'est réel.</Notice> : null}
+        {demo ? <Notice kind="info">{w.demo}</Notice> : null}
         <p className="muted">{useShare
-            ? 'Touchez « Envoyer sur WhatsApp », choisissez WhatsApp puis le client : le ticket et le message partent ensemble.'
+            ? `Touchez « Envoyer sur WhatsApp », choisissez WhatsApp puis ${w.who} : ${w.the} et le message partent ensemble.`
             : canCopy
-              ? '« Envoyer sur WhatsApp » copie le ticket et ouvre la conversation avec le message écrit. Dans WhatsApp : 1. Entrée pour envoyer le message ; 2. Cmd + V (ou Ctrl + V) puis Entrée pour envoyer le ticket.'
-              : '« Envoyer sur WhatsApp » ouvre la conversation avec le message écrit ; joignez le ticket téléchargé (trombone, puis Photos ou Document).'}</p>
+              ? `« Envoyer sur WhatsApp » copie ${w.the} et ouvre la conversation avec le message écrit. Dans WhatsApp : 1. Entrée pour envoyer le message ; 2. Cmd + V (ou Ctrl + V) puis Entrée pour envoyer ${w.the}.`
+              : `« Envoyer sur WhatsApp » ouvre la conversation avec le message écrit ; joignez ${w.downloaded} (trombone, puis Photos ou Document).`}</p>
         <div className="modal-actions share-actions">
-          <a className="btn btn-ghost" href={url} download={file.name}><Icon name="download" /> Télécharger le ticket</a>
+          <a className="btn btn-ghost" href={url} download={file.name}><Icon name="download" /> Télécharger {w.the}</a>
           {useShare
             ? <button type="button" className="btn btn-primary" onClick={share}><Icon name="message" /> Envoyer sur WhatsApp</button>
             : (
               <a className="btn btn-primary" href={waHref} target="_blank" rel="noopener noreferrer" onClick={openWhatsApp}>
-                <Icon name="message" /> {copied ? 'Ouvrir WhatsApp (ticket copié)' : 'Envoyer sur WhatsApp'}</a>
+                <Icon name="message" /> {copied ? `Ouvrir WhatsApp (${w.copied.toLowerCase()})` : 'Envoyer sur WhatsApp'}</a>
             )}
         </div>
         {/* The picture and the message side by side, under the buttons: nothing to scroll to send. */}
         <div className="share-ticket">
           <div className="ticket-image-box">
-            <img src={url} alt={`Ticket ${file.name}`} className="ticket-image-preview" />
+            <img src={url} alt={`${w.label} ${file.name}`} className="ticket-image-preview" />
             {canCopy ? (
-              <button type="button" className="btn btn-sm btn-ghost wa-copy" onClick={copyImage} title="Copier l’image du ticket" aria-label="Copier l’image du ticket">
+              <button type="button" className="btn btn-sm btn-ghost wa-copy" onClick={copyImage} title={`Copier l’image ${w.of}`} aria-label={`Copier l’image ${w.of}`}>
                 <Icon name="copy" /></button>
             ) : null}
           </div>

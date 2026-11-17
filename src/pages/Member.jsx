@@ -5,6 +5,7 @@ import { toast } from '../components/ui/toast.jsx';
 import { actionDialog } from '../components/ui/Modal.jsx';
 import { api, newKey } from '../lib/api.js';
 import MemberCard3D from '../components/ui/MemberCard3D.jsx';
+import CardWhatsAppButton from '../components/ui/CardWhatsAppButton.jsx';
 import SessionTimer, { isRunning } from '../components/ui/SessionTimer.jsx';
 import EndingSoonNotice from '../components/ui/EndingSoonNotice.jsx';
 import { money, fmtDuration, dayLabel, dateTime, dayMonth, paidForLabel, paymentMethodText } from '../lib/format.js';
@@ -204,6 +205,7 @@ function CardTile({ m, current, summary, reload, book }) {
         <button type="button" className="btn" onClick={() => openOutsideMealDialog(m, reload)} disabled={!m.active} title={inactiveTitle}>
           <Icon name="receipt" /> Repas extérieur</button>
         {shown ? <Link className="btn" to={`/cartes/${shown.id}`}><Icon name="printer" /> Imprimer la carte</Link> : null}
+        {activeCard ? <CardWhatsAppButton member={m} card={activeCard} label="Envoyer la carte" /> : null}
       </div>
       <div className="tile-actions-minor">
         {isAdmin && current ? <button type="button" className="btn btn-sm btn-ghost" onClick={() => openAdjustCreditDialog(m, current, reload)}>Ajuster le crédit temps</button> : null}
