@@ -318,6 +318,9 @@ export function createApi({ db, env = {}, demo = false, sendPush: pushSender = n
   // belongs to the real club alone (the demo space answers 404).
   if (!demo) {
     add('POST', '/api/admin/catalog-import', { public: true, ...WITH_PHOTO, guard: checkImportToken }, (ctx) => club.importCatalog(ctx.body));
+    // The Digibox accounts import (worker/importAccounts.js): the clients with their « Dette reprise », the suppliers
+    // with their « Solde reporté », the whole file in one call (one transaction), behind the same code.
+    add('POST', '/api/admin/accounts-import', { public: true, guard: checkImportToken }, (ctx) => club.importAccounts(ctx.body));
   }
   // Demo space only (the real club answers 404): empties the space and fills it again from the real
   // club's configuration, which handleDemo hands over with the request.
@@ -358,6 +361,9 @@ export function createApi({ db, env = {}, demo = false, sendPush: pushSender = n
   add('PUT', '/api/clients/:id/credit-limit', {}, (ctx) => club.setCreditLimit(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/clients/:id/settlements', {}, (ctx) => club.recordSettlement(ctx.user, ctx.params.id, ctx.body));
   add('POST', '/api/payments/:id/cancel-settlement', {}, (ctx) => club.cancelSettlement(ctx.user, ctx.params.id, ctx.body));
+  // « Dette reprise » (worker/credit.js): added and cancelled by the administrator and the associés, checked inside.
+  add('POST', '/api/clients/:id/carryovers', {}, (ctx) => club.addCarryover(ctx.user, ctx.params.id, ctx.body));
+  add('POST', '/api/clients/carryovers/:id/cancel', {}, (ctx) => club.cancelCarryover(ctx.user, ctx.params.id, ctx.body));
   add('GET', '/api/members/:id', {}, (ctx) => club.memberDetail(ctx.params.id));
   add('GET', '/api/members/:id/purchases', {}, (ctx) => club.purchaseHistory(ctx.params.id));
   add('GET', '/api/members/:id/statement', {}, (ctx) => club.memberStatement(ctx.params.id, ctx.query.from, ctx.query.to));

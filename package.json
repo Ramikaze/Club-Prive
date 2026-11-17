@@ -13,6 +13,7 @@
     "build": "vite build",
     "test": "node --test test/*.test.js",
     "import:catalogue": "node scripts/import-catalogue.mjs",
+    "import:reprise": "node scripts/import-reprise.mjs",
     "deploy": "vite build && wrangler deploy"
   },
   "dependencies": {

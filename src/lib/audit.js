@@ -27,6 +27,9 @@ export const ACTION_LABELS = {
   'client.plafond': 'Plafond de crédit modifié',
   'client.reglement': 'Règlement de créance',
   'client.reglement.annuler': 'Règlement de créance annulé',
+  'client.dette_reprise': 'Dette reprise ajoutée',
+  'client.dette_reprise_annulee': 'Dette reprise annulée',
+  'import.digibox': 'Reprise des comptes Digibox',
   'client.acces.creer': 'Accès client créé',
   'client.acces.code': 'Nouveau code provisoire du client',
   'client.acces.couper': 'Accès client coupé',
@@ -159,6 +162,12 @@ export function auditSummary(a) {
       return `${money(d.montant)} — ${d.moyen}`;
     case 'client.reglement.annuler':
       return `${money(d.montant)} — ${d.motif}`;
+    case 'client.dette_reprise':
+      return `${d.nom ?? ''} : ${money(d.montant)} (${ACCOUNT_LABEL[d.caisse] ?? d.caisse}) — ${d.note ?? ''}`;
+    case 'client.dette_reprise_annulee':
+      return `${d.nom ?? ''} : ${money(d.montant)} — ${d.motif ?? ''}`;
+    case 'import.digibox':
+      return `${d.clients ?? 0} clients créés, ${d.dettes ?? 0} dettes reprises (${money(d.total_dettes ?? 0)}), ${d.fournisseurs ?? 0} fournisseurs`;
     case 'client.acces.creer':
     case 'client.acces.code':
     case 'client.acces.couper':

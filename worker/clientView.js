@@ -131,6 +131,18 @@ export const clientViewMethods = {
         item(s.created_at, 'abonnement', `Abonnement — ${s.plan_name}`, s.price, paid.payment_id, paid.ticket_number, status);
       }
     }
+    // A « Dette reprise » (a debt from before the app): « à régler » while owed, else the ticket of its latest standing
+    // settlement.
+    for (const c of this.all(
+      `SELECT c.id, c.created_at, c.label, c.amount, c.status, p.id AS payment_id FROM charges c
+       LEFT JOIN payments p ON p.id = (
+         SELECT x.payment_id FROM payment_allocations x JOIN payments xp ON xp.id = x.payment_id
+         WHERE x.charge_id = c.id AND xp.cancelled_at IS NULL ORDER BY x.id DESC LIMIT 1)
+       WHERE c.member_id = ? AND c.carryover = 1 AND c.created_at >= ? AND c.created_at < ?`, memberId, startAt, endAt,
+    )) {
+      const paid = c.status === 'due' ? null : c.payment_id;
+      item(c.created_at, 'reprise', c.label, c.amount, paid, paid ? formatTicketNumber(paid) : null, CHARGE_STATUS[c.status] ?? c.status);
+    }
     for (const l of this.purchaseHistory(memberId).lines) {
       if (l.at >= startAt && l.at < endAt) {
         item(l.at, 'achat', `${l.quantity}× ${l.label}`, l.amount, l.payment_id, l.ticket_number, CHARGE_STATUS[l.status] ?? l.status);

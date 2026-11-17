@@ -164,3 +164,21 @@ test('listMembers indique qui est en salle', async () => {
   const row = ok(await ger.get('/api/members')).find((x) => x.id === m.id);
   assert.equal(row.in_room, false);
 });
+
+test('client sans prénom ni téléphone : une entreprise ou un client connu par un seul nom', async () => {
+  const c = ok(await ger.post('/api/clients', { last_name: 'société test' }));
+  assert.equal(c.last_name, 'SOCIÉTÉ TEST');
+  assert.equal(c.first_name, '');
+  assert.equal(c.phone, '');
+  // The phone, when typed, keeps its rule; a member keeps first name and phone required.
+  assert.equal((await ger.post('/api/clients', { last_name: 'société deux', phone: 'abc' })).status, 400);
+  assert.equal((await ger.post('/api/members', { first_name: 'jean', last_name: 'sans téléphone' })).status, 400);
+  assert.equal((await ger.post('/api/members', { last_name: 'sans prénom', phone: '00 00 02 01' })).status, 400);
+  // Its file can be edited and stays without them.
+  const edited = ok(await ger.put(`/api/members/${c.id}`, { last_name: 'société test', notes: 'Livraison : centre ville' }));
+  assert.equal(edited.notes ?? edited.member?.notes, 'Livraison : centre ville');
+  // Passing it to member needs the first name and the phone first.
+  const r = await ger.post(`/api/clients/${c.id}/convert`, {});
+  assert.equal(r.status, 409);
+  assert.equal(code(r), 'FICHE_INCOMPLETE');
+});

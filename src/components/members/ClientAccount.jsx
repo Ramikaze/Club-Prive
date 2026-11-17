@@ -10,10 +10,12 @@ import { api } from '../../lib/api.js';
 import { useLoad } from '../../lib/hooks.js';
 import { money, dateTime } from '../../lib/format.js';
 import { useIsBoss } from '../../store/useStore.js';
-import { openCancelSettlementDialog, openCreditLimitDialog, openSettlementDialog } from '../../dialogs/creditDialogs.jsx';
+import {
+  openCancelCarryoverDialog, openCancelSettlementDialog, openCarryoverDialog, openCreditLimitDialog, openSettlementDialog,
+} from '../../dialogs/creditDialogs.jsx';
 
 function Statement({ movements, isBoss, onChanged }) {
-  if (!movements.length) return <Empty icon="receipt">Aucun achat à crédit pour l’instant.</Empty>;
+  if (!movements.length) return <Empty icon="receipt">Aucun achat à crédit ni dette reprise pour l’instant.</Empty>;
   return (
     <div className="table-wrap"><table className="table stack-sm account-statement">
       <thead><tr><th>Date</th><th>Opération</th><th className="num">Dû</th><th className="num">Réglé</th><th className="num">Solde</th><th><span className="sr-only">Actions</span></th></tr></thead>
@@ -31,6 +33,8 @@ function Statement({ movements, isBoss, onChanged }) {
             {x.kind === 'reglement' ? <Link className="btn btn-sm" to={`/caisse/ticket/${x.payment_id}`} title={x.ticket_number}>Ticket</Link> : null}
             {x.kind === 'reglement' && !x.cancelled_at && isBoss
               ? <button type="button" className="btn btn-sm btn-ghost" onClick={() => openCancelSettlementDialog(x, onChanged)}>Annuler le règlement</button> : null}
+            {x.kind === 'reprise' && x.status === 'due' && !x.settled && isBoss
+              ? <button type="button" className="btn btn-sm btn-ghost" onClick={() => openCancelCarryoverDialog(x, onChanged)}>Annuler</button> : null}
           </span></td>
         </tr>
       ))}</tbody>
@@ -58,6 +62,7 @@ export default function ClientAccount({ clientId, file, onChanged }) {
           <div className="card-head"><h2>Compte client</h2>
             <span className="row-actions">
               {isBoss && <button type="button" className="btn btn-sm" onClick={() => openCreditLimitDialog(a, changed)}><Icon name="edit" /> Plafond</button>}
+              {isBoss && a.active && <button type="button" className="btn btn-sm" onClick={() => openCarryoverDialog(a, changed)}><Icon name="plus" /> Dette reprise</button>}
               {a.owed > 0 && <button type="button" className="btn btn-sm btn-primary" onClick={() => openSettlementDialog(a, changed)}>Enregistrer un règlement</button>}
             </span>
           </div>

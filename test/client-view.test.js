@@ -319,3 +319,22 @@ test('historique : abonnement et temps payant d’une séance, à régler puis r
   assert.equal(paid.payment_id, timePayment.id);
   assert.match(paid.ticket_number, /\d/);
 });
+
+test('le client voit sa dette reprise « à régler »', async () => {
+  const c = ok(await manager.post('/api/clients', { first_name: 'awa', last_name: 'reprise', phone: '06 444 44 44' }));
+  ok(await admin.post(`/api/clients/${c.id}/carryovers`, { amount: 30000 * UM, account: 'cigares', note: 'Reprise Digibox' }));
+  const client = await signedIn(c, 'awa.reprise');
+  assert.deepEqual(ok(await client.get('/api/client/account')).credit, { owed: 30000 * UM, limit: 0, available: 0 });
+  const items = ok(await client.get('/api/client/history')).items;
+  const reprise = items.find((i) => i.kind === 'reprise');
+  assert.ok(reprise, JSON.stringify(items));
+  assert.equal(reprise.label, 'Dette reprise — Reprise Digibox');
+  assert.equal(reprise.amount, 30000 * UM);
+  assert.equal(reprise.status, 'a_regler');
+  assert.equal(items.filter((i) => i.kind === 'achat').length, 0);
+  // Settled in full: the line opens the settlement's ticket.
+  const r = ok(await manager.post(`/api/clients/${c.id}/settlements`, { amount: 30000 * UM, method: 'Espèces' }));
+  const paid = ok(await client.get('/api/client/history')).items.find((i) => i.kind === 'reprise');
+  assert.equal(paid.status, 'valide');
+  assert.equal(paid.payment_id, r.payment.id);
+});

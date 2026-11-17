@@ -12,24 +12,84 @@ import { isBoss, SHOP } from '../shared/roles.js';
 import { CARD_METHOD } from '../shared/rules.js';
 import { formatTicketNumber } from '../shared/ticket.js';
 
-// The due credit lines of a client, oldest first: the order a settlement pays them in.
+// A line the client owes on his account: a credit purchase, or a « Dette reprise » (`carryover`, a debt from before
+// the app, spec docs/superpowers/specs/2026-11-17-dette-reprise-design.md). Read with `c` the charge and `s` its shop
+// sale (LEFT JOIN: a dette reprise has none).
+const ACCOUNT_LINE_SQL = '(s.on_credit = 1 OR c.carryover = 1)';
+
+// The due lines of a client's account in the order a settlement pays them: the dettes reprises first (the oldest debt
+// of all), then the credit purchases, oldest first.
 const DUE_CREDIT_LINES = `
-  SELECT c.* FROM charges c JOIN shop_sales s ON s.id = c.shop_sale_id
-  WHERE c.member_id = ? AND s.on_credit = 1 AND c.status = 'due'
-  ORDER BY c.created_at, c.id`;
+  SELECT c.* FROM charges c LEFT JOIN shop_sales s ON s.id = c.shop_sale_id
+  WHERE c.member_id = ? AND ${ACCOUNT_LINE_SQL} AND c.status = 'due'
+  ORDER BY c.carryover DESC, c.created_at, c.id`;
+
+const CARRYOVER_ACCOUNTS = ['cigares', 'alcool'];
 
 export const creditMethods = {
-  // What a client owes now: the unpaid part of his credit lines.
+  // What a client owes now: the unpaid part of his account lines (credit purchases and dettes reprises).
   creditOwed(memberId) {
     return this.get(
-      `SELECT COALESCE(SUM(c.amount - c.settled), 0) AS n FROM charges c JOIN shop_sales s ON s.id = c.shop_sale_id
-       WHERE c.member_id = ? AND s.on_credit = 1 AND c.status = 'due'`, memberId,
+      `SELECT COALESCE(SUM(c.amount - c.settled), 0) AS n FROM charges c LEFT JOIN shop_sales s ON s.id = c.shop_sale_id
+       WHERE c.member_id = ? AND ${ACCOUNT_LINE_SQL} AND c.status = 'due'`, memberId,
     ).n;
   },
 
-  // Whether a line belongs to a credit sale: such a line is paid only by a settlement.
+  // Whether a line belongs to a client's account (a credit sale or a dette reprise): such a line is paid only by a
+  // settlement.
   isCreditLine(c) {
+    if (c.carryover) return true;
     return !!c.shop_sale_id && !!this.get('SELECT on_credit FROM shop_sales WHERE id = ?', c.shop_sale_id)?.on_credit;
+  },
+
+  // « Dette reprise »: what a client owed before the app, entered by the administrator or an associé (or by the import
+  // door, actor null). No money moves and no stock: the line is only owed, on the client's account, dated the day it is
+  // entered (the note says where it comes from), and its settlement goes into the caisse chosen here.
+  addCarryover(actor, id, input) {
+    if (!isBoss(actor)) throw forbidden('Seuls l’administrateur et les associés ajoutent une dette reprise.');
+    const m = this.clientRow(toId(id, 'Client'));
+    return this.insertCarryover(actor, m, input);
+  },
+
+  // The rights are checked by the caller (addCarryover, or the import door's code).
+  insertCarryover(actor, m, input) {
+    this.assertMemberActive(m, 'de lui ajouter une dette reprise');
+    const amount = int(input?.amount, 'Montant', { min: 1, max: 1e13 });
+    const account = input?.account;
+    if (!CARRYOVER_ACCOUNTS.includes(account)) throw invalid('Caisse invalide : Cigare ou Champagne et autres boissons.');
+    const note = text(input?.note, 'Note', { required: true, max: 120 });
+    const chargeId = this.insert(
+      `INSERT INTO charges (account, kind, member_id, label, quantity, unit_price, amount, status, created_at, created_by, carryover)
+       VALUES (?, 'produit', ?, ?, 1, ?, ?, 'due', ?, ?, 1)`,
+      account, m.id, `Dette reprise — ${note}`, amount, amount, this.nowIso(), actor?.id ?? null,
+    );
+    this.audit(actor, 'client.dette_reprise', 'member', m.id, {
+      nom: `${m.first_name} ${m.last_name}`.trim(), charge_id: chargeId, montant: amount, caisse: account, note,
+    });
+    return this.clientAccount(m.id);
+  },
+
+  // A dette reprise typed by mistake: the administrator or an associé cancels it, with a reason, while nothing of it is
+  // settled (a settlement is cancelled first). It stays on the statement, struck through, with its reason.
+  cancelCarryover(actor, chargeId, input) {
+    if (!isBoss(actor)) throw forbidden('Seuls l’administrateur et les associés annulent une dette reprise.');
+    const c = this.get('SELECT * FROM charges WHERE id = ?', toId(chargeId, 'Dette reprise'));
+    if (!c || !c.carryover) throw notFound('Dette reprise');
+    if (c.status === 'annulee') throw conflict('DEJA_ANNULEE', 'Cette dette reprise est déjà annulée.');
+    if (c.status !== 'due' || c.settled > 0) {
+      throw conflict('DEJA_REGLEE', 'Une partie de cette dette est déjà réglée : annulez d’abord le règlement.');
+    }
+    const reason = text(input?.reason, 'Motif d’annulation', { required: true, min: 3, max: 300 });
+    const res = this.run(
+      "UPDATE charges SET status = 'annulee', cancelled_at = ?, cancelled_by = ?, cancel_reason = ? WHERE id = ? AND status = 'due' AND settled = 0",
+      this.nowIso(), actor.id, reason, c.id,
+    );
+    if (res.changes !== 1) throw conflict('DEJA_TRAITEE', 'Cette dette reprise a été traitée entre-temps.');
+    const m = this.fileRow(c.member_id);
+    this.audit(actor, 'client.dette_reprise_annulee', 'member', m.id, {
+      nom: `${m.first_name} ${m.last_name}`.trim(), charge_id: c.id, montant: c.amount, motif: reason,
+    });
+    return this.clientAccount(m.id);
   },
 
   clientRow(id) {
@@ -213,6 +273,23 @@ export const creditMethods = {
             detail: s.cancel_reason, due: back, paid: 0, sale_id: s.id, by: s.cancelled_by_name ?? null,
           });
         }
+      }
+    }
+    for (const c of this.all(
+      `SELECT c.*, u.name AS created_by_name, cu.name AS cancelled_by_name FROM charges c
+       LEFT JOIN users u ON u.id = c.created_by LEFT JOIN users cu ON cu.id = c.cancelled_by
+       WHERE c.member_id = ? AND c.carryover = 1 ORDER BY c.created_at, c.id`, m.id,
+    )) {
+      moves.push({
+        key: `D-${c.id}`, at: c.created_at, order: 0, kind: 'reprise', label: c.label, detail: null, due: c.amount, paid: 0,
+        charge_id: c.id, account: c.account, status: c.status, settled: c.settled, by: c.created_by_name ?? null,
+        cancelled_at: c.cancelled_at ?? null,
+      });
+      if (c.status === 'annulee') {
+        moves.push({
+          key: `DA-${c.id}`, at: c.cancelled_at, order: 2, kind: 'annulation_reprise', label: 'Dette reprise annulée',
+          detail: c.cancel_reason, due: 0, paid: c.amount, charge_id: c.id, by: c.cancelled_by_name ?? null,
+        });
       }
     }
     for (const p of this.all(

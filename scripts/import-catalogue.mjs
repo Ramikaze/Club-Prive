@@ -416,7 +416,7 @@ function loadManifests(dir) {
 }
 
 // The site's address: https anywhere, http for this very computer only, since a code sent over http travels in the open.
-function siteAddress(raw) {
+export function siteAddress(raw) {
   let url;
   try {
     url = new URL(raw);
@@ -443,7 +443,7 @@ const isFile = (file) => {
 // Gives { token, origin } or { problem }. `origin` says where the code was read (« dans la variable IMPORT_TOKEN »,
 // « dans le fichier <nom> »), never the code. A variable left over in the shell wins over a file that is up to date,
 // and a code refused for that reason is hard to understand, so when both exist the origin says that the variable wins.
-function importCode({ env, cwd, tokenFile }) {
+export function importCode({ env, cwd, tokenFile }) {
   const fromEnv = String(env.IMPORT_TOKEN ?? '').trim();
   const name = tokenFile ?? 'import-token.local'; // as the owner wrote it, to be said back
   const file = path.resolve(cwd, name);

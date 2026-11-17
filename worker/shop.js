@@ -44,14 +44,14 @@ export const shopMethods = {
   },
 
   createClient(actor, input) {
-    const f = this.memberFields(input);
+    const f = this.memberFields(input, {}, { client: true });
     const memberNo = this.nextMemberNo('C');
     const id = this.insert(
       `INSERT INTO members (member_no, first_name, last_name, phone, email, notes, kind, created_at, created_by)
        VALUES (?, ?, ?, ?, ?, ?, 'client', ?, ?)`,
-      memberNo, f.first, f.last, f.phone, f.email, f.notes, this.nowIso(), actor.id,
+      memberNo, f.first, f.last, f.phone, f.email, f.notes, this.nowIso(), actor?.id ?? null,
     );
-    this.audit(actor, 'client.creer', 'member', id, { member_no: memberNo, nom: `${f.first} ${f.last}` });
+    this.audit(actor, 'client.creer', 'member', id, { member_no: memberNo, nom: `${f.first} ${f.last}`.trim() });
     return this.memberDetail(id);
   },
 
@@ -60,6 +60,10 @@ export const shopMethods = {
     const m = this.fileRow(id);
     if (m.kind !== 'client') throw conflict('PAS_CLIENT', `${m.first_name} ${m.last_name} est déjà membre.`);
     this.assertMemberActive(m, 'de le passer en membre');
+    // A member has a first name and a phone; a client's file may lack them (memberFields).
+    if (!m.first_name || !String(m.phone ?? '').trim()) {
+      throw conflict('FICHE_INCOMPLETE', `Complétez d’abord le prénom et le téléphone de la fiche de ${`${m.first_name} ${m.last_name}`.trim()}.`);
+    }
     // The debt stays on a client's account, never among a member's notes (spec 2026-11-07-credit-clients-design.md).
     const owed = this.creditOwed(m.id);
     if (owed > 0) {
@@ -303,7 +307,7 @@ export const shopMethods = {
        LEFT JOIN payments p ON p.id = (
          SELECT x.payment_id FROM payment_allocations x JOIN payments xp ON xp.id = x.payment_id WHERE x.charge_id = c.id
          ORDER BY (xp.cancelled_at IS NULL) DESC, x.id DESC LIMIT 1)
-       WHERE c.member_id = ? AND c.kind = 'produit'
+       WHERE c.member_id = ? AND c.kind = 'produit' AND c.carryover = 0
        ORDER BY c.created_at DESC, c.id DESC LIMIT 500`, m.id,
     ).map((c) => ({
       charge_id: c.id, at: c.created_at, label: c.label, quantity: c.quantity, amount: c.amount, account: c.account,
