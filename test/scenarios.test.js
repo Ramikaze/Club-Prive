@@ -282,7 +282,7 @@ test('12. restrictions du rôle gérant (contrôlées côté serveur)', async ()
     manager.get('/api/users'),
     manager.post('/api/users', { login: 'pirate', name: 'X', role: 'admin', password: 'xxxxxxxxxxxx' }),
     manager.get('/api/audit'),
-    manager.get(`/api/finance/summary?from=${today}&to=${today}`),
+    // The day's summary is his since 2026-11-18 (cash page); the period's exports are not.
     manager.get(`/api/export/lignes?from=${today}&to=${today}`),
     manager.post('/api/products', { category: 'cigare', name: 'X', reference: 'X-1', price: 1 }),
     manager.put(`/api/products/${whisky}`, { price: 1 }),

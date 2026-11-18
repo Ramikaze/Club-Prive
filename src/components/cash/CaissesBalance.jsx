@@ -8,6 +8,7 @@ import { PendingDaysBand } from './VerifyDays.jsx';
 import { caisseTiles } from './caisses.js';
 import { bizToday, dayLabel, money } from '../../lib/format.js';
 import { useMe, useStore } from '../../store/useStore.js';
+import { isBoss } from '../../../shared/roles.js';
 
 const ACTION_LABEL = { fournisseur: 'Payer un fournisseur', benefices: 'Prendre des bénéfices', apport: 'Faire un apport' };
 
@@ -55,7 +56,8 @@ export default function CaissesBalance({ b, onCount, onAction, onChange }) {
           ))}
         </div>
       )}
-      {tiles && b.to >= bizToday() && <PendingDaysBand days={b.pending_days} onChange={onChange} />}
+      {/* Verifying a day is the bosses': the manager does not see the band. */}
+      {tiles && isBoss(me) && b.to >= bizToday() && <PendingDaysBand days={b.pending_days} onChange={onChange} />}
     </section>
   );
 }

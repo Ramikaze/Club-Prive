@@ -112,7 +112,9 @@ test('16. dépenses, entrées et transferts : droits et contrôles', async () =>
   assert.equal(mine.restricted, true);
   assert.equal(mine.from, today);
   assert.equal(mine.entries.length, 4); // the cancelled one stays listed
-  for (const url of [`/api/treasury?from=${today}`, `/api/ledger/book?from=${today}`, '/api/closings', `/api/export/grand-livre?from=${today}`]) {
+  // The treasury of the day is his since 2026-11-18 (cash page): today only, whatever period he asks for.
+  assert.equal(ok(await manager.get('/api/treasury?from=2020-01-01&to=2020-12-31')).from, today);
+  for (const url of [`/api/ledger/book?from=${today}`, '/api/closings', `/api/export/grand-livre?from=${today}`]) {
     assert.equal((await manager.get(url)).status, 403, url);
   }
   assert.equal((await manager.post('/api/admin/reset', { confirm: 'EFFACER' })).status, 403);

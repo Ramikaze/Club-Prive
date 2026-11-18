@@ -179,8 +179,9 @@ test('dates : la liste suit la facturation, la recette suit l’encaissement', a
   assert.equal((await billed(yesterday)).columns.autres_boissons.lines.find((l) => l.charge_id === drk.id).status, 'payee');
 });
 
-test('le gérant n’a pas les colonnes de la caisse', async () => {
-  refused(await ger.get(`/api/finance/billed?from=${today}`), 403);
+// Owner's request (2026-11-18): the manager sees the columns too, for today only.
+test('le gérant a les colonnes de la caisse du jour seulement', async () => {
+  assert.equal(ok(await ger.get(`/api/finance/billed?from=${yesterday}&to=${yesterday}`)).from, today);
   ok(await cig.get(`/api/finance/billed?from=${today}`));
   ok(await cha.get(`/api/finance/billed?from=${today}`));
 });

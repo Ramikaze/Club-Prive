@@ -1,9 +1,9 @@
 // The cash desk (/caisse), one page: « Soldes » (administrators), then « Argent encaissé » and « Dépenses » side by
 // side, each with its summary, its detailed list and its total, and under them what is left to collect, the
 // transfers and the folded details. « Par catégorie » (three columns, their sum the recette, with the line from it
-// to the money received) sits between the balances and the receipts. The manager sees the day only, without the
-// balances (treasury is the administrators'), and records the day's expenses within his cap: his page is unchanged
-// (« Recettes du jour »).
+// to the money received) sits between the balances and the receipts. The manager sees the same blocks for the
+// current day only (owner's request, 2026-11-18), without their buttons, and records the day's expenses within his
+// cap.
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
@@ -182,12 +182,18 @@ function AdminCash() {
 
 function ManagerCash() {
   const today = bizToday();
+  const settings = useSettings();
+  // The server answers today whatever is asked: the manager reads the current business day only.
   const state = useLoad(async (signal) => {
-    const [journal, open, ledger, categories] = await Promise.all([
+    const [sum, billed, journal, open, ledger, categories, treasury, caisses] = await Promise.all([
+      api.get('/api/finance/summary', { signal }),
+      // As on the bosses' page: a failure of the billed lines says so in its block, the page stays.
+      api.get('/api/finance/billed', { signal }).catch(() => null),
       api.get('/api/finance/journal', { signal }), api.get('/api/finance/open', { signal }),
       api.get('/api/ledger/entries', { signal }), api.get('/api/ledger/categories', { signal }),
+      api.get('/api/treasury', { signal }), api.get('/api/caisses', { signal }),
     ]);
-    return { journal, open, entries: ledger.entries, categories };
+    return { sum, billed, journal, open, entries: ledger.entries, categories, treasury, caisses };
   }, []);
   const add = () => openDialog(EntryDialog, { kind: 'depense', categories: state.data?.categories ?? [], onDone: state.reload });
   return (
@@ -203,11 +209,20 @@ function ManagerCash() {
       </div>
       <Loaded state={state}>{(d) => (
         <div className="cash-page">
-          <DayClosingBar isAdmin={false} onChange={state.reload} />
+          {/* The bosses' blocks, today only and without their buttons (owner's request, 2026-11-18). */}
+          <CaissesBalance b={d.caisses} />
+          <CategoryColumns
+            sum={d.sum} billed={d.billed} method="" oneDay
+            journal={d.journal} entries={d.entries} t={d.treasury} openingBalances={settings.opening_balances}
+            closing={<DayClosingBar isAdmin={false} inline onChange={state.reload} />}
+          />
           <div className="cash-columns">
             <div className="cash-columns-inner">
-              <ReceiptsBlock journal={d.journal} entries={d.entries} oneDay isAdmin={false} onChange={state.reload} title="Recettes du jour" />
-              <ExpensesBlock entries={d.entries} oneDay isAdmin={false} onChange={state.reload} title="Dépenses du jour" />
+              <ReceiptsBlock
+                journal={d.journal} entries={d.entries} oneDay isAdmin={false} onChange={state.reload} shopSplit
+                title="Argent encaissé" emptyText="Aucun argent encaissé aujourd’hui."
+              />
+              <ExpensesBlock entries={d.entries} oneDay isAdmin={false} onChange={state.reload} />
             </div>
           </div>
           <OpenNotes groups={d.open} onDone={state.reload} />
