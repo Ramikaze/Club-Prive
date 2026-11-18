@@ -313,7 +313,7 @@ function OutsideMealDialog({ close, member, onDone }) {
   };
 
   return (
-    <Modal title="Repas commandé à l’extérieur" onClose={close}>
+    <Modal title="Livraison repas" onClose={close}>
       <form className="form-grid" onSubmit={onSubmit} noValidate>
         <p className="muted">Membre : <strong>{member.name}</strong>. Le livreur est payé en espèces avec l’argent de la caisse, et le même montant exact est débité du crédit CFA de la carte.</p>
         <label className="field"><span>Prix payé au livreur (espèces)</span>
@@ -377,7 +377,7 @@ export function openCancelMealDialog(payment, onDone) {
   const key = newKey();
   actionDialog({
     title: 'Annuler le repas',
-    message: `${payment.label ?? 'Repas extérieur'} : ${money(payment.amount)} du ${dateTime(payment.paid_at)}.`,
+    message: `${payment.label ?? 'Livraison repas'} : ${money(payment.amount)} du ${dateTime(payment.paid_at)}.`,
     reasonLabel: 'Motif de l’annulation',
     danger: true,
     confirmLabel: 'Annuler le repas',

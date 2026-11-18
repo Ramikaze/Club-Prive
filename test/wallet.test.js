@@ -563,7 +563,7 @@ test('repas extérieur couvert : le club paie le livreur, la carte rembourse le 
   assert.equal(expense.cat, 'Avance repas client');
   assert.equal(expense.method, 'Espèces');
   assert.equal(expense.amount, 18500 * UM);
-  assert.equal(expense.label, 'Repas extérieur — Pizzeria Roma — Ivan CARTE');
+  assert.equal(expense.label, 'Livraison repas — Pizzeria Roma — Ivan CARTE');
   const afterwards = await treasury();
   assert.equal(flow(afterwards, 'Espèces').out, flow(before, 'Espèces').out + 18500 * UM);
   assert.equal(flow(afterwards, 'Espèces').in, flow(before, 'Espèces').in);

@@ -67,7 +67,7 @@ export function receiptSummary(journal, entries, { method = '', to, dayOf }) {
     .reduce((s, e) => s + e.amount, 0);
   const lines = [
     ['Réservations', by.reservations, 'reservations'], ['Alcool', by.alcool, 'alcool'], ['Cigares', by.cigares, 'cigares'],
-    ['Repas extérieurs', meals], ['Approvisionnements cartes', recharges], ['Entrées diverses', other],
+    ['Livraisons repas', meals], ['Approvisionnements cartes', recharges], ['Entrées diverses', other],
   ];
   return { lines, refunds, card, boutique, total: lines.reduce((s, [, v]) => s + v, 0) - refunds };
 }
@@ -96,7 +96,7 @@ export function recetteToCash(sum, journal, entries, { to, dayOf }) {
     { key: 'cartes', label: 'argent mis sur les cartes', amount: recharges },
     { key: 'ventes_carte', label: 'ventes payées par carte membre', amount: cardSales },
     { key: 'remboursements_carte', label: 'remboursements rendus sur la carte', amount: cardRefunds },
-    { key: 'repas', label: 'argent reçu pour les repas extérieurs (hors carte)', amount: meals },
+    { key: 'repas', label: 'argent reçu pour les livraisons repas (hors carte)', amount: meals },
     { key: 'entrees', label: 'entrées diverses', amount: other },
   ];
   const recette = sum.total.net;

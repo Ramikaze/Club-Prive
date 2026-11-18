@@ -45,7 +45,7 @@ function receiptRows(journal, entries, method, oneDay) {
 
 // The groups, in this order. A row's nature, and what it counts in the total, as receiptSummary counts it, so the
 // groups add up to the total.
-const GROUPS = [['abonnement', 'Abonnements'], ['vente', 'Ventes et réservations'], ['boutique', 'Boutique'], ['repas', 'Repas extérieurs'],
+const GROUPS = [['abonnement', 'Abonnements'], ['vente', 'Ventes et réservations'], ['boutique', 'Boutique'], ['repas', 'Livraisons repas'],
   ['recharge', 'Recharges cartes'], ['entree', 'Entrées diverses'], ['refund', 'Remboursements']];
 
 function natureOf(row) {

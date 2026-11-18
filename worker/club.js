@@ -1644,7 +1644,7 @@ export class Club {
         `INSERT INTO ledger_entries (kind, biz_date, category_id, account, method, to_method, amount, label, reference,
            status, is_demo, created_at, created_by)
          VALUES ('depense', ?, ?, NULL, ?, NULL, ?, ?, ?, 'active', ?, ?, ?)`,
-        today, category.id, courier, amount, `Repas extérieur — ${label} — ${memberName}`, `ENC-${id}`, demo ? 1 : 0, now, actor.id,
+        today, category.id, courier, amount, `Livraison repas — ${label} — ${memberName}`, `ENC-${id}`, demo ? 1 : 0, now, actor.id,
       );
       if (cardAmount > 0) this.walletMove(actor, m.id, 'paiement', -cardAmount, { paymentId: id });
       return id;
@@ -1660,7 +1660,7 @@ export class Club {
   // Only an administrator cancels an outside meal, with a reason: the courier's expense is cancelled, the card
   // part goes back on the card, and the cash share leaves the till on the day of the cancellation.
   cancelOutsideMeal(actor, paymentId, input) {
-    if (!isBoss(actor)) throw forbidden("L'annulation d'un repas extérieur est réservée à un administrateur.");
+    if (!isBoss(actor)) throw forbidden("L'annulation d'une livraison repas est réservée à un administrateur.");
     const p = this.get('SELECT * FROM payments WHERE id = ?', toId(paymentId, 'Encaissement'));
     if (!p) throw notFound('Encaissement');
     if (p.kind !== 'repas') throw conflict('PAS_UN_REPAS', "Cet encaissement n'est pas un repas commandé à l'extérieur.");

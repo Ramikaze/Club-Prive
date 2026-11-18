@@ -672,13 +672,13 @@ export const ledgerMethods = {
       const member = `${r.first_name} ${r.last_name}`;
       if (r.paid_at >= a && r.paid_at < b) {
         rows.push({
-          ...base, key: `M-${r.id}`, ...when(r.paid_at), type: 'encaissement', label: `Repas extérieur : ${r.label}`,
+          ...base, key: `M-${r.id}`, ...when(r.paid_at), type: 'encaissement', label: `Livraison repas : ${r.label}`,
           detail: member, in: r.amount - r.card_amount, out: 0,
         });
       }
       if (r.cancelled_at && r.cancelled_at >= a && r.cancelled_at < b) {
         rows.push({
-          ...base, key: `MA-${r.id}`, ...when(r.cancelled_at), type: 'annulation_repas', label: `Annulation du repas extérieur : ${r.label}`,
+          ...base, key: `MA-${r.id}`, ...when(r.cancelled_at), type: 'annulation_repas', label: `Annulation de la livraison repas : ${r.label}`,
           detail: `${member} — ${r.cancel_reason}`, in: 0, out: r.amount - r.card_amount,
         });
       }
