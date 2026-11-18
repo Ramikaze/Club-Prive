@@ -56,7 +56,23 @@ test('l’associé gère le club mais pas l’application', async () => {
   refused(await cig.post('/api/rooms', { name: 'Salle X' }), 403);
   refused(await cig.post('/api/ledger/categories', { kind: 'depense', name: 'Autre' }), 403);
   refused(await ger.get('/api/audit'), 403);
-  refused(await ger.get(`/api/treasury?from=${today}`), 403);
+  refused(await ger.get(`/api/ledger/book?from=${today}`), 403);
+});
+
+// The manager's cash page shows the bosses' blocks (owner's request, 2026-11-18), for the current day only: whatever
+// period he asks for, the server answers today.
+test('le gérant lit la caisse du jour, jamais un autre jour', async () => {
+  const past = `?from=${yesterday}&to=${yesterday}`;
+  for (const url of ['/api/treasury', '/api/finance/summary', '/api/finance/billed']) {
+    const r = ok(await ger.get(`${url}${past}`));
+    assert.deepEqual([r.from, r.to], [today, today], url);
+  }
+  assert.equal(ok(await ger.get(`/api/caisses?to=${yesterday}`)).to, today);
+  // The bosses still read the day they ask for.
+  assert.equal(ok(await cig.get(`/api/treasury${past}`)).from, yesterday);
+  assert.equal(ok(await cig.get(`/api/caisses?to=${yesterday}`)).to, yesterday);
+  // Verifying a day stays theirs.
+  refused(await ger.post(`/api/day-closing/${yesterday}/verify`, {}), 403);
 });
 
 test('chacun son rayon pour les fiches produits', async () => {

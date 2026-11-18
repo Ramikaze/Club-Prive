@@ -446,8 +446,15 @@ export function createApi({ db, env = {}, demo = false, sendPush: pushSender = n
     }
     return { ticket };
   });
-  add('GET', '/api/finance/summary', CLUB, (ctx) => club.financeSummary(ctx.query.from, ctx.query.to ?? ctx.query.from));
-  add('GET', '/api/finance/billed', CLUB, (ctx) => club.billedLines(ctx.query.from, ctx.query.to ?? ctx.query.from));
+  // The manager's cash page shows the bosses' figures for the current business day only (owner's request,
+  // 2026-11-18): whatever period he asks for, he reads today.
+  const dayRange = (ctx) => {
+    if (isBoss(ctx.user)) return [ctx.query.from, ctx.query.to ?? ctx.query.from];
+    const today = club.bizToday();
+    return [today, today];
+  };
+  add('GET', '/api/finance/summary', {}, (ctx) => club.financeSummary(...dayRange(ctx)));
+  add('GET', '/api/finance/billed', {}, (ctx) => club.billedLines(...dayRange(ctx)));
   add('GET', '/api/shop/summary', CLUB, (ctx) => club.shopSummary(ctx.query.from, ctx.query.to ?? ctx.query.from));
   add('GET', '/api/finance/journal', {}, (ctx) => {
     if (!isBoss(ctx.user)) {
@@ -473,9 +480,10 @@ export function createApi({ db, env = {}, demo = false, sendPush: pushSender = n
   add('POST', '/api/ledger/entries', {}, (ctx) => club.createEntry(ctx.user, ctx.body));
   add('POST', '/api/ledger/entries/:id/cancel', CLUB, (ctx) => club.cancelEntry(ctx.user, ctx.params.id, ctx.body));
   add('GET', '/api/ledger/book', CLUB, (ctx) => club.ledgerBook(ctx.query));
-  add('GET', '/api/treasury', CLUB, (ctx) => club.treasury(ctx.query.from, ctx.query.to ?? ctx.query.from));
-  // The associés' caisses: the six tiles of « Soldes » at the end of a business day (today by default).
-  add('GET', '/api/caisses', CLUB, (ctx) => club.caisseBalances(ctx.query.to || undefined));
+  add('GET', '/api/treasury', {}, (ctx) => club.treasury(...dayRange(ctx)));
+  // The associés' caisses: the six tiles of « Soldes » at the end of a business day (today by default; the manager
+  // reads today only).
+  add('GET', '/api/caisses', {}, (ctx) => club.caisseBalances(isBoss(ctx.user) ? ctx.query.to || undefined : undefined));
   add('POST', '/api/caisses/retrait', CLUB, (ctx) => club.takeProfits(ctx.user, ctx.body));
   // Supplier accounts: what the club owes each supplier, its credit purchases and the balances carried over (a payment
   // is an expense: POST /api/ledger/entries with supplier_id).

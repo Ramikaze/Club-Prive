@@ -175,10 +175,11 @@ test('un repas d’avant le fond ne s’annule plus : son argent est dans le fon
   } finally { c.server.destroy(); }
 });
 
-test('le gérant ne lit pas les caisses', async () => {
+// Owner's request (2026-11-18): the manager sees « Soldes » too, the same figures as the bosses, for today only.
+test('le gérant lit les caisses du jour, les mêmes que l’administrateur', async () => {
   const c = await club('rights');
   try {
-    assert.equal((await c.ger.get('/api/caisses')).status, 403);
+    assert.deepEqual(ok(await c.ger.get('/api/caisses')), await c.caisses());
   } finally { c.server.destroy(); }
 });
 
