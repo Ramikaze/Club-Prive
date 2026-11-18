@@ -442,6 +442,8 @@ a.list-item:hover .list-go { color: var(--text); transform: translateX(2px); }
 .btn-danger:hover { background: var(--danger-soft); }
 .btn-ghost { border-color: transparent; background: transparent; }
 .btn-ghost:hover { background: var(--surface-3); }
+/* A quiet warning that asks to be done (« 7 produits sans prix de revient »). */
+.btn-warn-soft { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
 .btn-sm { min-height: 36px; padding: 0 12px; font-size: 0.875rem; border-radius: 8px; }
 .btn-block { width: 100%; }
 .btn[disabled], .btn[aria-busy="true"] { opacity: 0.55; cursor: not-allowed; transform: none; }

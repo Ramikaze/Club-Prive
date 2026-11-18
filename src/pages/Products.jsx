@@ -143,7 +143,7 @@ function ProductDialog({ close, product, onDone }) {
           <label className="field"><span>Seuil d’alerte</span><input type="number" name="low_stock_threshold" min="0" step="1" defaultValue={threshold} inputMode="numeric" /></label>
         </div>
         <label className="field"><span>Prix de revient ({settings.currency.label}, facultatif)</span><input name="cost_price" inputMode="decimal" defaultValue={toMajor(product?.cost_price)} />
-          <span className="help">Ce que le produit coûte au club. Il sert à compter les produits offerts ; le gérant ne le voit pas.</span></label>
+          <span className="help">Ce que le produit coûte au club (prix d’achat). Nécessaire pour calculer le bénéfice réel et compter les produits offerts ; laissez vide s’il n’est pas encore connu. Le gérant ne le voit pas.</span></label>
         {editing && (
           <>
             <label className="check"><input type="checkbox" name="active" value="1" defaultChecked={product.active} /><span>Produit actif (proposé à la vente)</span></label>
@@ -415,6 +415,8 @@ export default function Products() {
   const catParam = searchParams.get('cat');
   const cat = CATEGORIES.includes(catParam) ? catParam : '';
   const showInactive = searchParams.get('inactifs') === '1';
+  // ?revient=manquant: only the products whose cost price is still to enter (the bosses', who alone receive it).
+  const missingOnly = boss && searchParams.get('revient') === 'manquant';
   const [search, setSearch] = useState('');
   const setQuery = (q) => setSearchParams(Object.fromEntries(Object.entries(q).filter(([, v]) => v !== undefined && v !== null && v !== '')));
 
@@ -426,7 +428,10 @@ export default function Products() {
 
   return (
     <Loaded state={state}>{([products, movements]) => {
-      const inCategory = products.filter((p) => !cat || p.category === cat);
+      const ofCategory = products.filter((p) => !cat || p.category === cat);
+      // Active products of the category without a cost price: the real profit cannot count them yet.
+      const missingCount = boss ? ofCategory.filter((p) => p.active && p.cost_price == null).length : 0;
+      const inCategory = missingOnly ? ofCategory.filter((p) => p.cost_price == null) : ofCategory;
       const searching = searchable(search);
       const list = searching
         ? smartFilter(inCategory, search, (p) => [p.name, p.reference, CATEGORY_LABEL[p.category], p.description])
@@ -467,11 +472,17 @@ export default function Products() {
               label="Catégorie"
               value={cat}
               options={[['', 'Tous'], ...CATEGORIES.map((k) => [k, CATEGORY_PLURAL[k]])]}
-              onChange={(c) => setQuery({ cat: c, inactifs: showInactive ? '1' : '' })}
+              onChange={(c) => setQuery({ cat: c, inactifs: showInactive ? '1' : '', revient: missingOnly ? 'manquant' : '' })}
             />
             {boss && (
-              <label className="check"><input type="checkbox" checked={showInactive} onChange={(e) => setQuery({ cat, inactifs: e.target.checked ? '1' : '' })} />
+              <label className="check"><input type="checkbox" checked={showInactive} onChange={(e) => setQuery({ cat, inactifs: e.target.checked ? '1' : '', revient: missingOnly ? 'manquant' : '' })} />
                 <span>Afficher les produits inactifs</span></label>
+            )}
+            {boss && (missingOnly || missingCount > 0) && (
+              <button type="button" className={`btn btn-sm${missingOnly ? '' : ' btn-warn-soft'}`} aria-pressed={missingOnly}
+                onClick={() => setQuery({ cat, inactifs: showInactive ? '1' : '', revient: missingOnly ? '' : 'manquant' })}>
+                {missingOnly ? 'Tous les produits' : <><Icon name="alert" /> {missingCount} produit{missingCount > 1 ? 's' : ''} sans prix de revient</>}
+              </button>
             )}
           </div>
           <section className="card">
@@ -480,11 +491,14 @@ export default function Products() {
                 name: (p) => p.name,
                 category: (p) => CATEGORY_LABEL[p.category],
                 price: (p) => p.price,
+                cost: (p) => p.cost_price ?? -1,
                 stock: (p) => p.stock_qty,
               }}>{(sorter) => (<table className="table stack-sm">
                 <thead><tr>
                   <SortTh sorter={sorter} col="name">Produit</SortTh><SortTh sorter={sorter} col="category">Catégorie</SortTh>
-                  <SortTh sorter={sorter} col="price" className="num">Prix</SortTh><SortTh sorter={sorter} col="stock">Stock</SortTh>
+                  <SortTh sorter={sorter} col="price" className="num">Prix</SortTh>
+                  {boss && <SortTh sorter={sorter} col="cost" className="num">Prix de revient</SortTh>}
+                  <SortTh sorter={sorter} col="stock">Stock</SortTh>
                   <th><span className="sr-only">Actions</span></th>
                 </tr></thead>
                 <tbody>{sorter.rows.map((p) => (
@@ -501,6 +515,11 @@ export default function Products() {
                     </td>
                     <td data-label="Catégorie">{CATEGORY_LABEL[p.category]}</td>
                     <td data-label="Prix" className="num">{money(p.price)}</td>
+                    {boss && (
+                      <td data-label="Prix de revient" className="num nowrap">
+                        {p.cost_price == null ? <span className="chip chip-warn">à renseigner</span> : money(p.cost_price)}
+                      </td>
+                    )}
                     <td data-label="Stock"><StockChip p={p} /> <span className="subtle">seuil {p.low_stock_threshold}</span></td>
                     <td className="actions">
                       <div className="product-actions">
@@ -513,7 +532,8 @@ export default function Products() {
                   </tr>
                 ))}</tbody>
               </table>)}</Sorted></div>
-            ) : <Empty icon="box">{searching ? `Aucun produit ne correspond à « ${search.trim()} ».` : 'Aucun produit dans cette catégorie.'}</Empty>}
+            ) : <Empty icon="box">{searching ? `Aucun produit ne correspond à « ${search.trim()} ».`
+              : missingOnly ? 'Tous les produits de cette catégorie ont un prix de revient.' : 'Aucun produit dans cette catégorie.'}</Empty>}
           </section>
           <section className="card section-gap">
             <div className="card-head"><h2>Derniers mouvements de stock</h2></div>
