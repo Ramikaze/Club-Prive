@@ -9,6 +9,7 @@ import { money, dayLabel, ACCOUNT_LABEL } from '../lib/format.js';
 import { useLoad } from '../lib/hooks.js';
 import { SortTh, Sorted } from '../components/ui/Sortable.jsx';
 import { useIsAdmin } from '../store/useStore.js';
+import { ProfitCard } from '../components/cash/ProfitBlock.jsx';
 
 const methodIcon = (m) => (/esp[eè]ce/i.test(m) ? 'cash' : /carte/i.test(m) ? 'card' : /virement|banque/i.test(m) ? 'bank' : 'wallet');
 
@@ -28,7 +29,11 @@ function AccountCard({ a, from, to, total = false }) {
 export default function Treasury() {
   const period = usePeriod('month');
   const { from, to } = period;
-  const state = useLoad((signal) => api.get(`/api/treasury${qs({ from, to })}`, { signal }), [from, to]);
+  const state = useLoad((signal) => Promise.all([
+    api.get(`/api/treasury${qs({ from, to })}`, { signal }),
+    // The real profit of the products: a failure hides its card, never the page.
+    api.get(`/api/finance/profit${qs({ from, to })}`, { signal }).catch(() => null),
+  ]), [from, to]);
   // The opening balances are part of the application's settings: only the administrator types them.
   const isAdmin = useIsAdmin();
 
@@ -42,7 +47,7 @@ export default function Treasury() {
       />
       <div className="toolbar"><PeriodPicker period={period} /></div>
       <Loaded state={state}>
-        {(t) => {
+        {([t, profit]) => {
           const r = t.result;
           const noOpening = !t.opening_date && t.accounts.every((a) => a.opening === 0) && t.total.in + t.total.out === 0;
           return (
@@ -145,6 +150,7 @@ export default function Treasury() {
                   </div>
                 </div>
               )}
+              {profit && <ProfitCard report={profit} />}
             </>
           );
         }}

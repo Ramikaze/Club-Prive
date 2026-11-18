@@ -72,7 +72,8 @@ function Bridge({ bridge, cash, oneDay }) {
 // `journal`, `entries`, `t` (the treasury) and `openingBalances`: what « Soldes » reads, for the line under the
 // columns. The columns ignore the account filter, so the line is shown on all accounts only.
 // `closing`: the day's closing bar (« Fermer la caisse »), shown in this tile at the owner's request (2026-11-10).
-export default function CategoryColumns({ sum, billed, method, oneDay, journal, entries, t, openingBalances, closing = null }) {
+// `footer`: drawn at the end of the tile on all accounts only (the bosses' real profit band, ProfitBlock.jsx).
+export default function CategoryColumns({ sum, billed, method, oneDay, journal, entries, t, openingBalances, closing = null, footer = null }) {
   const bridge = !method && recetteToCash(sum, journal, entries, { to: t.to, dayOf: bizDayOf });
   const cash = !method && tillFigures(t, '', { entries, journal, openingBalances, dayOf: bizDayOf }).in;
   return (
@@ -105,6 +106,7 @@ export default function CategoryColumns({ sum, billed, method, oneDay, journal, 
       {method ? <p className="subtle cash-note">Choisissez « Toutes » les caisses et comptes pour voir le passage de la recette à l’argent encaissé.</p>
         : <Bridge bridge={bridge} cash={cash} oneDay={oneDay} />}
       <p className="subtle cash-note">La recette compte chaque vente le jour où elle est payée (carte membre comprise) ou remboursée ; la liste montre ce qui a été facturé à la date de facturation, payé ou non.</p>
+      {!method && footer}
     </section>
   );
 }
