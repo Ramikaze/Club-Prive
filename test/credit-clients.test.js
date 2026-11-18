@@ -57,6 +57,8 @@ test('plafond : sans plafond pas de crédit ; seuls l’administrateur et les as
   const acc = ok(await cha.put(`/api/clients/${c.id}/credit-limit`, { credit_limit: 100000 * UM }));
   assert.equal(acc.credit_limit, 100000 * UM);
   assert.equal(acc.available, 100000 * UM);
+  // The list of regular clients shows each one's limit (« Plafond » column, owner's request 2026-11-18).
+  assert.equal(ok(await ger.get('/api/clients')).find((x) => x.id === c.id).credit_limit, 100000 * UM);
   assert.ok(server.club.get("SELECT 1 AS x FROM audit_log WHERE action = 'client.plafond'"));
   // Members and walk-ins never buy on credit.
   const m = ok(await ger.post('/api/members', { first_name: 'jean', last_name: 'credit', phone: '00 00 07 99' }));
