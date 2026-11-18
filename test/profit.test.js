@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 import { Server, Client, ok, UM, fundCaisse } from './harness.js';
 import { MIGRATIONS } from '../worker/schema.js';
 
-const server = new Server({});
+const server = new Server({}, { lenientTariffs: true });
+let bundle;
 let admin;
 let ger;
 let cig;
@@ -25,7 +26,7 @@ before(async () => {
   ger = new Client(server);
   cig = new Client(server);
   cha = new Client(server);
-  await admin.login('admin', 'profit-admin-password');
+  bundle = await admin.login('admin', 'profit-admin-password');
   await ger.login('ger', 'profit-ger-password');
   await cig.login('cig', 'profit-cig-password');
   await cha.login('cha', 'profit-cha-password');
@@ -82,4 +83,126 @@ test('le gérant ne reçoit jamais le prix de revient', async () => {
   assert.ok(list.every((p) => !('cost_price' in p) && !('unit_cost' in p)));
   const sale = await sell('cigares', CIG, 1);
   assert.ok(!JSON.stringify(sale).includes('unit_cost'));
+});
+
+// ---------------------------------------------------------------- the report (GET /api/finance/profit)
+
+// The club's clock at noon of a business day; every scenario below has days of its own.
+const at = (day) => { server.club.at = Date.parse(server.club.dayStartIso(day)) + 12 * 3600 * 1000; };
+const release = () => { server.club.at = null; };
+const report = async (from, to = from) => ok(await admin.get(`/api/finance/profit?from=${from}&to=${to}`));
+const acc = (r, key) => r.accounts.find((a) => a.account === key);
+const figures = (f) => ({ sales: f.sales, cost: f.cost, gifts_cost: f.gifts_cost, profit: f.profit });
+
+test('bénéfice du jour : ventes − prix d’achat − offerts, par caisse', async () => {
+  at('2027-01-08');
+  try {
+    await sell('alcool', CHP, 2);
+    await sell('cigares', CIG, 3);
+    ok(await cig.post(`/api/products/${CIG}/offer`, { quantity: 1, reason: 'Anniversaire' }));
+    const r = await report('2027-01-08');
+    assert.deepEqual(figures(acc(r, 'alcool')), { sales: 100000 * UM, cost: 60000 * UM, gifts_cost: 0, profit: 40000 * UM });
+    assert.deepEqual(figures(acc(r, 'cigares')), { sales: 30000 * UM, cost: 12000 * UM, gifts_cost: 4000 * UM, profit: 14000 * UM });
+    assert.equal(r.total.profit, 54000 * UM);
+    assert.equal(r.complete, true);
+    const cigar = r.products.find((p) => p.product_id === CIG);
+    assert.equal(cigar.quantity, 3);
+    assert.equal(cigar.gifts_quantity, 1);
+    assert.equal(cigar.margin, 14000 / 30000);
+  } finally { release(); }
+});
+
+test('vente sans prix de revient : hors bénéfice, signalée, puis comptée quand le prix est saisi', async () => {
+  at('2027-01-09');
+  try {
+    await sell('alcool', DRK, 1);
+    let r = await report('2027-01-09');
+    assert.equal(acc(r, 'alcool').sales, 0);
+    assert.deepEqual(r.total.missing, { sales_count: 1, sales_amount: 20000 * UM, gifts_count: 0 });
+    assert.equal(r.complete, false);
+    ok(await admin.put(`/api/products/${DRK}`, { cost_price: 12000 * UM }));
+    r = await report('2027-01-09');
+    assert.deepEqual(figures(acc(r, 'alcool')), { sales: 20000 * UM, cost: 12000 * UM, gifts_cost: 0, profit: 8000 * UM });
+    assert.equal(r.complete, true);
+  } finally { release(); }
+});
+
+test('remboursement un autre jour : compté ce jour-là, le jour de la vente ne bouge pas', async () => {
+  at('2027-01-11');
+  try {
+    // Two bottles served during a session (a Boutique sale is cancelled whole, never refunded line by line), paid.
+    const m = ok(await ger.post('/api/members', { first_name: 'bob', last_name: 'benefice', phone: '00 00 09 02' }));
+    ok(await ger.post(`/api/members/${m.id}/subscriptions`, { plan_id: bundle.plans.find((x) => x.code === 'MENSUELLE').id, start_date: '2027-01-11' }));
+    const r = ok(await ger.post('/api/reservations', { member_id: m.id, room_id: bundle.rooms[0].id, date: '2027-01-11', start_time: '18:00', duration_min: 60 }));
+    const serve = async () => ok(await ger.post(`/api/reservations/${r.reservation.id}/items`, { product_id: CHP, quantity: 1 }))
+      .charges.filter((c) => c.status === 'due' && c.kind === 'produit').at(-1).id;
+    const a = await serve();
+    const b = await serve();
+    ok(await ger.post('/api/payments', { charge_ids: [a, b], method: 'Espèces' }));
+    assert.equal(acc(await report('2027-01-11'), 'alcool').profit, 40000 * UM);
+    at('2027-01-12');
+    ok(await admin.post(`/api/charges/${a}/refund`, { reason: 'Bouteille cassée', method: 'Espèces', restock: false }));
+    ok(await admin.post(`/api/charges/${b}/refund`, { reason: 'Bouteille bouchonnée', method: 'Espèces', restock: true }));
+    assert.equal(acc(await report('2027-01-11'), 'alcool').profit, 40000 * UM);
+    // The broken bottle is lost (its cost stays); the other one is back in stock (its cost comes back).
+    assert.deepEqual(figures(acc(await report('2027-01-12'), 'alcool')),
+      { sales: -100000 * UM, cost: -30000 * UM, gifts_cost: 0, profit: -70000 * UM });
+  } finally { release(); }
+});
+
+test('vente Boutique annulée le lendemain : ventes et prix d’achat reviennent ce jour-là', async () => {
+  at('2027-01-13');
+  try {
+    const sale = await sell('cigares', CIG, 2);
+    at('2027-01-14');
+    ok(await admin.post(`/api/shop/sales/${sale.sale.id}/cancel`, { reason: 'Erreur de produit' }));
+    // A sale cancelled the same day nets to nothing on that day.
+    const same = await sell('cigares', CIG, 1);
+    ok(await admin.post(`/api/shop/sales/${same.sale.id}/cancel`, { reason: 'Erreur de quantité' }));
+    const r = acc(await report('2027-01-14'), 'cigares');
+    assert.deepEqual([r.sales, r.cost], [-20000 * UM, -8000 * UM]);
+    assert.equal(acc(await report('2027-01-13'), 'cigares').sales, 20000 * UM);
+  } finally { release(); }
+});
+
+test('annuler un règlement à crédit ne défait pas la vente', async () => {
+  at('2027-01-15');
+  try {
+    const client = ok(await ger.post('/api/clients', { first_name: 'awa', last_name: 'benefice', phone: '00 00 09 01' }));
+    ok(await cha.put(`/api/clients/${client.id}/credit-limit`, { credit_limit: 100000 * UM }));
+    ok(await ger.post('/api/shop/sales', {
+      account: 'alcool', buyer: { kind: 'client', member_id: client.id }, lines: [{ product_id: CHP, quantity: 1 }], credit: true,
+    }));
+    const paid = ok(await ger.post(`/api/clients/${client.id}/settlements`, { amount: 20000 * UM, method: 'Espèces' }));
+    at('2027-01-16');
+    ok(await cha.post(`/api/payments/${paid.payment.id}/cancel-settlement`, { reason: 'Erreur de montant' }));
+    assert.deepEqual(figures(acc(await report('2027-01-16'), 'alcool')), { sales: 0, cost: 0, gifts_cost: 0, profit: 0 });
+    assert.deepEqual(figures(acc(await report('2027-01-15'), 'alcool')),
+      { sales: 50000 * UM, cost: 30000 * UM, gifts_cost: 0, profit: 20000 * UM });
+  } finally { release(); }
+});
+
+test('prix de revient changé après la vente : la vente garde le sien', async () => {
+  at('2027-01-17');
+  try {
+    await sell('cigares', CIG, 1);
+    ok(await admin.put(`/api/products/${CIG}`, { cost_price: 6000 * UM }));
+    assert.equal(acc(await report('2027-01-17'), 'cigares').cost, 4000 * UM);
+  } finally {
+    ok(await admin.put(`/api/products/${CIG}`, { cost_price: 4000 * UM }));
+    release();
+  }
+});
+
+test('période sans vente de produit : zéros, complète', async () => {
+  const r = await report('2027-02-01');
+  assert.deepEqual(figures(r.total), { sales: 0, cost: 0, gifts_cost: 0, profit: 0 });
+  assert.deepEqual(r.products, []);
+  assert.equal(r.complete, true);
+});
+
+test('droits : le gérant est refusé, un associé voit les deux caisses', async () => {
+  assert.equal((await ger.get('/api/finance/profit?from=2027-01-08')).status, 403);
+  const r = ok(await cig.get('/api/finance/profit?from=2027-01-08'));
+  assert.deepEqual(r.accounts.map((a) => a.account), ['alcool', 'cigares']);
 });

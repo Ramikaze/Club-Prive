@@ -455,6 +455,8 @@ export function createApi({ db, env = {}, demo = false, sendPush: pushSender = n
   };
   add('GET', '/api/finance/summary', {}, (ctx) => club.financeSummary(...dayRange(ctx)));
   add('GET', '/api/finance/billed', {}, (ctx) => club.billedLines(...dayRange(ctx)));
+  // The real profit of the products (worker/profit.js): margin figures, the bosses' only.
+  add('GET', '/api/finance/profit', CLUB, (ctx) => club.profitReport(ctx.query.from, ctx.query.to ?? ctx.query.from));
   add('GET', '/api/shop/summary', CLUB, (ctx) => club.shopSummary(ctx.query.from, ctx.query.to ?? ctx.query.from));
   add('GET', '/api/finance/journal', {}, (ctx) => {
     if (!isBoss(ctx.user)) {
