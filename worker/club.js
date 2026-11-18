@@ -2704,11 +2704,13 @@ export class Club {
   insertCharge(actor, c) {
     return this.insert(
       `INSERT INTO charges (account, kind, member_id, reservation_id, subscription_id, product_id, label, quantity,
-         unit_price, amount, status, tariff_validated, created_at, created_by, deposit, shop_sale_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'due', ?, ?, ?, ?, ?)`,
+         unit_price, amount, status, tariff_validated, created_at, created_by, deposit, shop_sale_id, unit_cost)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'due', ?, ?, ?, ?, ?, (SELECT cost_price FROM products WHERE id = ?))`,
       c.account, c.kind, c.member_id, c.reservation_id ?? null, c.subscription_id ?? null, c.product_id ?? null,
       c.label, c.quantity, c.unit_price, c.quantity * c.unit_price, c.tariff_validated ?? 1, this.nowIso(), actor.id,
       c.deposit ? 1 : 0, c.shop_sale_id ?? null,
+      // The cost price of the day, kept with the line (V30): only a product line has one.
+      c.kind === 'produit' ? c.product_id ?? null : null,
     );
   }
 
@@ -3256,7 +3258,14 @@ export class Club {
          updated_at = ?, updated_by = ? WHERE id = ?`,
       f.category, f.name, f.reference, f.description, f.price, f.cost, f.threshold, f.active ? 1 : 0, this.nowIso(), actor.id, p.id,
     );
+    // A cost entered (or changed) fills the sales and gifts of this product that had none; one that had a cost keeps
+    // it (spec 2026-11-18 « bénéfice réel », §2).
+    const filled = f.cost === null ? null : {
+      ventes: this.run("UPDATE charges SET unit_cost = ? WHERE product_id = ? AND kind = 'produit' AND unit_cost IS NULL", f.cost, p.id).changes,
+      offerts: this.run('UPDATE gifts SET unit_cost = ? WHERE product_id = ? AND unit_cost IS NULL', f.cost, p.id).changes,
+    };
     this.audit(actor, 'produit.modifier', 'product', p.id, {
+      ...(filled && (filled.ventes || filled.offerts) ? { prix_de_revient_rempli: filled } : {}),
       avant: { category: p.category, name: p.name, reference: p.reference, price: p.price, cost_price: p.cost_price ?? null, low_stock_threshold: p.low_stock_threshold, active: !!p.active },
       apres: { category: f.category, name: f.name, reference: f.reference, price: f.price, cost_price: f.cost, low_stock_threshold: f.threshold, active: f.active },
     });

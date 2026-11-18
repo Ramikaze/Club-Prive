@@ -1071,7 +1071,16 @@ const V29 = [
   'ALTER TABLE charges ADD COLUMN carryover INTEGER NOT NULL DEFAULT 0 CHECK (carryover IN (0, 1))',
 ];
 
-export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29];
+// V30: the real profit (spec docs/superpowers/specs/2026-11-18-benefice-reel-design.md): each product line keeps the
+// cost price of its day, so a cost changed later never rewrites a past profit. Lines sold before V30 take their
+// product's current cost (the best known); NULL while it is not known.
+const V30 = [
+  'ALTER TABLE charges ADD COLUMN unit_cost INTEGER CHECK (unit_cost IS NULL OR unit_cost >= 0)',
+  `UPDATE charges SET unit_cost = (SELECT cost_price FROM products p WHERE p.id = charges.product_id)
+   WHERE kind = 'produit' AND product_id IS NOT NULL`,
+];
+
+export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30];
 
 export function migrate(db) {
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
