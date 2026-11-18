@@ -208,7 +208,7 @@ function CardTile({ m, current, summary, reload, book }) {
           <Icon name="wallet" /> Approvisionner</button>
         <button type="button" className="btn" onClick={book}><Icon name="calendar" /> Réserver</button>
         <button type="button" className="btn" onClick={() => openOutsideMealDialog(m, reload)} disabled={!m.active} title={inactiveTitle}>
-          <Icon name="receipt" /> Repas extérieur</button>
+          <Icon name="receipt" /> Livraison repas</button>
         {shown ? <Link className="btn" to={`/cartes/${shown.id}`}><Icon name="printer" /> Imprimer la carte</Link> : null}
       </div>
       <div className="tile-actions-minor">

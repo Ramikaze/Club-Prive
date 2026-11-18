@@ -115,7 +115,7 @@ test('recettes, dépenses et soldes racontent la même histoire : l’argent re�
   assert.equal(sum.Alcool, 0); // paid with the card
   assert.equal(sum.Cigares, 15000 * UM); // the cash part only
   assert.equal(sum['Réservations'], 12000 * UM);
-  assert.equal(sum['Repas extérieurs'], 7000 * UM);
+  assert.equal(sum['Livraisons repas'], 7000 * UM);
   assert.equal(sum['Approvisionnements cartes'], 58000 * UM); // 50 000 + 5 000 + 3 000, the cancelled 4 000 left out
   assert.equal(sum['Entrées diverses'], (30000 + 1500) * UM);
   assert.equal(all.receipts.refunds, 12000 * UM); // the card refund gives no money back

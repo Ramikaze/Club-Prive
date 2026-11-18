@@ -94,7 +94,7 @@ export const subStateLabel = (summary) => {
 // plain payment, whose lines say it. A Boutique sale has lines: the Caisse names its products.
 export function paymentPurpose(p) {
   if (p.kind === 'recharge') return RECHARGE_LINE_LABEL;
-  if (p.kind === 'repas') return `Repas extérieur : ${p.label ?? ''}`;
+  if (p.kind === 'repas') return `Livraison repas : ${p.label ?? ''}`;
   return null;
 }
 
