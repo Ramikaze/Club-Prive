@@ -22,6 +22,7 @@ function ClientsTable({ items, statut, onConvert, onReactivate }) {
     count: (c) => c.purchases_count,
     total: (c) => c.purchases_total,
     owed: (c) => c.owed ?? 0,
+    limit: (c) => c.credit_limit ?? 0,
     last: (c) => isoTime(c.last_purchase_at),
   });
   if (!items.length) {
@@ -32,7 +33,8 @@ function ClientsTable({ items, statut, onConvert, onReactivate }) {
       <thead><tr>
         <SortTh sorter={sorter} col="name">Client</SortTh><SortTh sorter={sorter} col="phone">Téléphone</SortTh>
         <SortTh sorter={sorter} col="count" className="num">Achats</SortTh><SortTh sorter={sorter} col="total" className="num">Total</SortTh>
-        <SortTh sorter={sorter} col="owed" className="num">Doit</SortTh><SortTh sorter={sorter} col="last">Dernier achat</SortTh>
+        <SortTh sorter={sorter} col="owed" className="num">Doit</SortTh><SortTh sorter={sorter} col="limit" className="num">Plafond</SortTh>
+        <SortTh sorter={sorter} col="last">Dernier achat</SortTh>
         <th><span className="sr-only">Actions</span></th>
       </tr></thead>
       <tbody>{sorter.rows.map((c) => (
@@ -43,6 +45,8 @@ function ClientsTable({ items, statut, onConvert, onReactivate }) {
           <td data-label="Achats" className="num">{c.purchases_count}</td>
           <td data-label="Total" className="num">{money(c.purchases_total)}</td>
           <td data-label="Doit" className="num">{c.owed ? <strong>{money(c.owed)}</strong> : '—'}</td>
+          {/* The credit limit set on his file (« Compte client »); none means no credit at the Boutique. */}
+          <td data-label="Plafond" className="num nowrap">{c.credit_limit ? money(c.credit_limit) : <span className="subtle">pas de crédit</span>}</td>
           <td data-label="Dernier achat" className="nowrap nowrap-date">{c.last_purchase_at ? dateTime(c.last_purchase_at) : '—'}</td>
           <td className="actions"><span className="row-actions">
             <Link className="btn btn-sm btn-ghost" to={`/membres/${c.id}`}>Fiche</Link>
