@@ -63,7 +63,8 @@ function useCashPeriod() {
 
 // A link to a block (the former expenses page, /depenses?type=depense, now redirected here) scrolls to it once
 // the page is loaded.
-const BLOCKS = { recette: 'caisse-recettes', depense: 'caisse-depenses', transfert: 'caisse-transferts' };
+// « reste »: the members' open notes, from the « Membres » tile of « Membres / Clients ».
+const BLOCKS = { recette: 'caisse-recettes', depense: 'caisse-depenses', transfert: 'caisse-transferts', reste: 'caisse-reste' };
 function useScrollToBlock(type, loaded) {
   useEffect(() => {
     if (loaded && BLOCKS[type]) document.getElementById(BLOCKS[type])?.scrollIntoView({ block: 'start' });
@@ -199,6 +200,8 @@ function ManagerCash() {
     ]);
     return { sum, billed, journal, open, entries: ledger.entries, categories, treasury, caisses };
   }, []);
+  const [params] = useSearchParams();
+  useScrollToBlock(params.get('type'), !!state.data);
   const add = () => openDialog(EntryDialog, { kind: 'depense', categories: state.data?.categories ?? [], onDone: state.reload });
   return (
     <>

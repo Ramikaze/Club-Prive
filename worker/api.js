@@ -345,6 +345,8 @@ export function createApi({ db, env = {}, demo = false, sendPush: pushSender = n
   add('GET', '/api/members', {}, (ctx) => club.listMembers(ctx.query.q, ctx.query.statut));
   add('POST', '/api/members', {}, (ctx) => club.createMember(ctx.user, ctx.body));
   add('GET', '/api/clients', {}, (ctx) => club.listClients(ctx.query.q, ctx.query.statut));
+  // What is owed to the club, clients and members (the tiles of « Membres / Clients »).
+  add('GET', '/api/receivables', {}, () => club.receivables());
   add('POST', '/api/clients', {}, (ctx) => club.createClient(ctx.user, ctx.body));
   // Open to every signed-in user: the rights (gérant, or the boss of the rayon) are checked inside.
   add('POST', '/api/shop/sales', {}, (ctx) => club.createShopSale(ctx.user, ctx.body));

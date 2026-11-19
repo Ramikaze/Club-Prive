@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
 import SmartSearch from '../components/ui/SmartSearch.jsx';
 import MembersTabs from '../components/members/MembersTabs.jsx';
+import ReceivablesTiles from '../components/members/ReceivablesTiles.jsx';
 import { Chip, DemoChip, Empty, Loaded, PageHead, Segmented } from '../components/ui/ui.jsx';
 import { toast } from '../components/ui/toast.jsx';
 import { api, qs } from '../lib/api.js';
@@ -143,6 +144,7 @@ function MemberSearch({ initialQ, setQuery }) {
             actions={<button type="button" className="btn btn-primary" onClick={() => openMemberDialog(null, (m) => navigate(`/membres/${m.id}`))}><Icon name="plus" /> Nouveau membre</button>}
             tour="members"
           />
+          <ReceivablesTiles />
           <MembersTabs />
           <form className="toolbar" role="search" onSubmit={(e) => e.preventDefault()}>
             <SmartSearch

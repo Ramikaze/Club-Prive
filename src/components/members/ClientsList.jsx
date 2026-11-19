@@ -5,6 +5,7 @@ import Icon from '../ui/Icon.jsx';
 import SmartSearch from '../ui/SmartSearch.jsx';
 import { Empty, Loaded, PageHead, Segmented } from '../ui/ui.jsx';
 import MembersTabs from './MembersTabs.jsx';
+import ReceivablesTiles from './ReceivablesTiles.jsx';
 import { toast } from '../ui/toast.jsx';
 import { api, qs } from '../../lib/api.js';
 import { useLoad } from '../../lib/hooks.js';
@@ -99,15 +100,15 @@ export default function ClientsList() {
   return (
     <Loaded state={state}>{(list) => {
       const items = found ? found.items : list;
-      // What the listed clients owe on credit (their « Compte client »).
-      const owedTotal = items.reduce((n, c) => n + (c.owed ?? 0), 0);
       return (
         <>
           <PageHead
             title="Membres / Clients"
-            lead={`${items.length} ${items.length > 1 ? 'clients réguliers' : 'client régulier'}${owedTotal ? ` · créances : ${money(owedTotal)}` : ''}`}
+            lead={`${items.length} ${items.length > 1 ? 'clients réguliers' : 'client régulier'}`}
             actions={<button type="button" className="btn btn-primary" onClick={() => openClientDialog(null, (c) => navigate(`/membres/${c.id}`))}><Icon name="plus" /> Nouveau client régulier</button>}
           />
+          {/* What is owed to the club, in the open (owner, 2026-11-19): it replaces « créances : … » of the line above. */}
+          <ReceivablesTiles />
           <MembersTabs />
           <form className="toolbar" role="search" onSubmit={(e) => e.preventDefault()}>
             <SmartSearch
