@@ -206,3 +206,19 @@ test('droits : le gérant est refusé, un associé voit les deux caisses', async
   const r = ok(await cig.get('/api/finance/profit?from=2027-01-08'));
   assert.deepEqual(r.accounts.map((a) => a.account), ['alcool', 'cigares']);
 });
+
+// Final review: a product without a cost price still shows how many were sold and for how much; its profit is unknown.
+test('produit sans prix de revient : quantité et ventes visibles, bénéfice inconnu', async () => {
+  const id = ok(await admin.post('/api/products', { category: 'bouteille', name: 'Sans prix test', reference: 'CHZ-P', price: 30000 * UM, initial_stock: 10 })).id;
+  at('2027-01-20');
+  try {
+    await sell('alcool', id, 2);
+    const r = await report('2027-01-20');
+    const row = r.products.find((p) => p.product_id === id);
+    assert.deepEqual({ quantity: row.quantity, sales: row.sales, profit: row.profit, margin: row.margin, cost_missing: row.cost_missing },
+      { quantity: 2, sales: 60000 * UM, profit: null, margin: null, cost_missing: true });
+    // The caisse's profit still leaves it out.
+    assert.equal(acc(r, 'alcool').sales, 0);
+    assert.equal(r.products.at(-1).product_id, id); // unknown profits come last
+  } finally { release(); }
+});

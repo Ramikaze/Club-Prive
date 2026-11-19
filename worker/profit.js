@@ -32,9 +32,12 @@ export const profitMethods = {
     const figuresOf = (account) => accounts.get(account) ?? accounts.set(account, zero()).get(account);
 
     // A sale (sign 1) or its undoing (sign −1): its amount and quantity; its cost only when sold (goods back are below).
+    // The product row shows every unit sold, cost known or not; the caisse's profit only the lines whose cost is known.
     const sale = (r, sign, withCost) => {
       const f = figuresOf(r.account);
       const p = productOf(r);
+      p.sales += sign * r.amount;
+      p.quantity += sign * r.quantity;
       if (r.unit_cost === null) {
         f.missing.sales_amount += sign * r.amount;
         if (sign > 0) f.missing.sales_count += 1;
@@ -42,8 +45,6 @@ export const profitMethods = {
         return;
       }
       f.sales += sign * r.amount;
-      p.sales += sign * r.amount;
-      p.quantity += sign * r.quantity;
       if (withCost) {
         f.cost += sign * r.quantity * r.unit_cost;
         p.cost += sign * r.quantity * r.unit_cost;
@@ -95,10 +96,12 @@ export const profitMethods = {
       for (const k of ['sales_count', 'sales_amount', 'gifts_count']) total.missing[k] += f.missing[k];
       return { account, label: ACCOUNT_LABELS[account], ...f };
     });
+    // A product with a line of unknown cost has no profit yet (null), listed after those that have one.
     const rows = [...products.values()].map((p) => {
+      if (p.cost_missing) return { ...p, profit: null, margin: null };
       const profit = p.sales - p.cost - p.gifts_cost;
       return { ...p, profit, margin: p.sales > 0 ? profit / p.sales : null };
-    }).sort((x, y) => y.profit - x.profit || x.name.localeCompare(y.name, 'fr'));
+    }).sort((x, y) => (x.profit === null) - (y.profit === null) || (y.profit ?? 0) - (x.profit ?? 0) || x.name.localeCompare(y.name, 'fr'));
     const m = total.missing;
     return { from, to, complete: !m.sales_count && !m.sales_amount && !m.gifts_count, accounts: list, total, products: rows };
   },

@@ -6,24 +6,19 @@ import { Link } from 'react-router-dom';
 import { SortTh, Sorted } from '../ui/Sortable.jsx';
 import { money } from '../../lib/format.js';
 import { qs } from '../../lib/api.js';
+import { missingText } from './profitText.js';
 
 const CAISSE_LABEL = { alcool: 'Champagne et autres boissons', cigares: 'Cigare' };
 const effect = (n) => (n ? money(-n) : '—');
 const percent = (m) => (m == null ? '—' : `${Math.round(m * 100)} %`);
-const plural = (n, word) => `${n} ${word}${n > 1 ? 's' : ''}`;
-const unknown = (m) => m.sales_count > 0 || m.sales_amount !== 0 || m.gifts_count > 0;
 
 // What the profit leaves out, and where to complete it.
 function Missing({ m }) {
-  if (!unknown(m)) return null;
-  const parts = [];
-  if (m.sales_count > 0 || m.sales_amount !== 0) {
-    parts.push(`${plural(m.sales_count, 'vente')} (${money(m.sales_amount)}) sans prix de revient ${m.sales_count > 1 ? 'ne sont pas comptées' : 'n’est pas comptée'}`);
-  }
-  if (m.gifts_count > 0) parts.push(`${plural(m.gifts_count, 'produit')} offert${m.gifts_count > 1 ? 's' : ''} sans prix de revient`);
+  const text = missingText(m, money);
+  if (!text) return null;
   return (
     <p className="subtle cash-note">
-      {parts.join(' ; ')}. <Link to="/produits?revient=manquant">Voir les produits à compléter</Link>
+      {text} <Link to="/produits?revient=manquant">Voir les produits à compléter</Link>
     </p>
   );
 }
@@ -62,7 +57,7 @@ export function ProfitCard({ report: r }) {
             sales: (p) => p.sales,
             cost: (p) => p.cost,
             gifts: (p) => p.gifts_cost,
-            profit: (p) => p.profit,
+            profit: (p) => p.profit ?? -Infinity,
             margin: (p) => p.margin ?? -Infinity,
           }}>{(sorter) => (
             <table className="table stack-sm">
@@ -80,7 +75,8 @@ export function ProfitCard({ report: r }) {
                   <td data-label="Ventes" className="num">{money(p.sales)}</td>
                   <td data-label="Prix d’achat" className="num">{effect(p.cost)}</td>
                   <td data-label="Offerts" className="num">{effect(p.gifts_cost)}</td>
-                  <td data-label="Bénéfice" className={`num${p.profit < 0 ? ' amount-out' : ''}`}>{money(p.profit)}</td>
+                  {/* An unknown cost leaves the profit unknown: « — », never a profit counted at a cost of 0. */}
+                  <td data-label="Bénéfice" className={`num${p.profit < 0 ? ' amount-out' : ''}`}>{p.profit === null ? '—' : money(p.profit)}</td>
                   <td data-label="Marge" className="num">{percent(p.margin)}</td>
                 </tr>
               ))}</tbody>
