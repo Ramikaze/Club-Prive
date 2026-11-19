@@ -3535,6 +3535,19 @@ export class Club {
     return result;
   }
 
+  // What is owed to the club (the tiles of « Membres / Clients »): the regular clients' credit (their credit purchases
+  // and debts taken over) and the members' open notes, as the home page counts them, each with how many owe.
+  receivables() {
+    const owed = (credit) => {
+      const r = this.get(
+        `SELECT COALESCE(SUM(c.amount - c.settled), 0) AS total, COUNT(DISTINCT c.member_id) AS count
+         FROM charges c WHERE c.status = 'due' AND ${credit ? 'NOT ' : ''}${NOT_CREDIT_SQL}`,
+      );
+      return { total: r.total, count: r.count };
+    };
+    return { clients: owed(true), members: owed(false) };
+  }
+
   financeSummary(from, to) {
     const [a, b] = this.periodBounds(from, to);
     const FIELDS = ['billed', 'collected', 'refunded', 'net', 'outstanding', 'cancelled', 'lines'];
