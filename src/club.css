@@ -727,6 +727,23 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
 .toolbar input[type="date"] { width: auto; }
 .date-nav { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+/* Phones (< 900 px, as the side menu): some controls fold into one button that opens a window (owner, 2026-11-19:
+   the cash page « prend trop de place »). Both versions are in the page; the width chooses. */
+@media (min-width: 900px) { .only-phone { display: none !important; } }
+@media (max-width: 899px) { .only-desktop { display: none !important; } }
+.period-presets.period-sheet { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.period-presets.period-sheet .btn { justify-content: center; }
+.period-sheet-dates { margin-top: 16px; }
+/* The cash page's buttons: on a computer, a row as before; on a phone, three entries and « Plus » on one line. */
+.cash-desk-actions { display: contents; }
+.cash-phone-actions { display: flex; gap: 6px; width: 100%; }
+.cash-phone-actions .btn { flex: none; gap: 4px; padding: 0 10px; font-size: 0.875rem; }
+.cash-phone-actions .btn svg { width: 16px; height: 16px; }
+.cash-phone-actions .btn-primary { flex: 1; min-width: 0; }
+.cash-phone-actions .btn-more { width: 40px; padding: 0; }
+@media (max-width: 369px) { .cash-phone-actions .btn:not(.btn-primary):not(.btn-more) svg { display: none; } }
+@media (max-width: 899px) { .page-head .actions:has(> .cash-phone-actions) { flex: 1 1 100%; } }
+.menu-group { margin: 6px 0 0; color: var(--text-2); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; }
 .date-range-field { display: inline-flex; align-items: center; gap: 6px; font-size: 0.9rem; color: var(--text-2); }
 
 /* ------------------------------------------------------------------ calculation panel */
