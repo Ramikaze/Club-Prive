@@ -16,24 +16,7 @@ import { enterDemo, leaveDemo } from '../../lib/space.js';
 import { ROLE_LABEL } from '../../lib/format.js';
 import { useStore } from '../../store/useStore.js';
 import { isBoss } from '../../../shared/roles.js';
-
-export const NAV = [
-  { group: 'Opérations' },
-  { path: '/', label: 'Accueil', short: 'Accueil', icon: 'home', tab: true },
-  { path: '/salles', label: 'Salles', short: 'Salles', icon: 'rooms', tab: true },
-  { path: '/agenda', label: 'Agenda', short: 'Agenda', icon: 'calendar', tab: true, also: ['/reservations'] },
-  { path: '/membres', label: 'Membres / Clients', short: 'Membres', icon: 'users', tab: true, also: ['/clients', '/cartes'] },
-  { path: '/boutique', label: 'Boutique', short: 'Boutique', icon: 'shop', tab: true },
-  // Orders and reservation requests from the client space; the counter is what waits (useOrderCounter).
-  { path: '/commandes', label: 'Commandes', short: 'Commandes', icon: 'receipt', counter: true },
-  { path: '/produits', label: 'Stocks', short: 'Stocks', icon: 'box' },
-  { path: '/caisse', label: 'Caisse', short: 'Caisse', icon: 'wallet', tab: true },
-  // Supplier accounts (owner, 2026-11-07: « Les fournisseurs s'afficheront ici. Ils auront leur icône. »): the
-  // administrator and the associés only.
-  { path: '/fournisseurs', label: 'Fournisseurs', short: 'Fournisseurs', icon: 'truck', boss: true },
-  { group: 'Administration', admin: true },
-  { path: '/parametres', label: 'Administration', short: 'Admin', icon: 'settings', admin: true, also: ['/tresorerie', '/grand-livre', '/cloture', '/journal'] },
-];
+import { NAV, visibleNav } from './nav.js';
 
 
 const navFor = (pathname) => NAV.find((n) => n.path && (n.path === '/'
@@ -123,7 +106,6 @@ function AccountMenu({ close, onTour }) {
   const demo = useStore((s) => s.demo);
   const navigate = useNavigate();
   const orderCount = useStore((s) => s.orderCounts);
-  const isAdmin = me.role === 'admin';
   const go = (path) => {
     close();
     navigate(path);
@@ -133,7 +115,7 @@ function AccountMenu({ close, onTour }) {
     <Modal title={me.name} onClose={close}>
       <div className="menu-list">
         <p className="muted">{ROLE_LABEL[me.role]}{!demo && ` · identifiant ${me.login}`}</p>
-        {NAV.filter((n) => n.path && !n.tab && (!n.admin || isAdmin) && (!n.boss || isBoss(me))).map((n) => (
+        {visibleNav(me).filter((n) => n.path && !n.tab).map((n) => (
           <button key={n.path} type="button" className="btn btn-block" onClick={() => go(n.path)}><Icon name={n.icon} /> {n.label}{n.counter ? <NavCount n={orderCount} /> : null}</button>
         ))}
         <hr />
@@ -216,7 +198,7 @@ export default function AppShell() {
           </button>
         </div>
         <nav className="side-nav" id="side-nav" data-tour="nav">
-          {NAV.filter((n) => (!n.admin || isAdmin) && (!n.boss || isBoss(me))).map((n) => (n.group
+          {visibleNav(me).map((n) => (n.group
             ? <div key={n.group} className="side-nav-label">{n.group}</div>
             : <Link key={n.path} to={n.path} aria-current={aria(n.path)} title={tip(n.label)}><Icon name={n.icon} /><span className="side-label">{n.label}</span>{n.counter ? <NavCount n={orderCount} /> : null}</Link>))}
         </nav>
