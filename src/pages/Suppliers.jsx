@@ -25,13 +25,23 @@ export default function Suppliers() {
       />
       <Loaded state={state}>{({ suppliers, totals }) => (
         <div className="supplier-page">
-          <section className="card">
-            <div className="card-head"><h2>Dû aux fournisseurs</h2><span className="subtle">payé seulement depuis la caisse du fournisseur</span></div>
-            <dl className="calc">
-              <div><dt>{CAISSE_LABEL.cigares}</dt><dd className="nowrap">{money(totals.cigares)}</dd></div>
-              <div><dt>{CAISSE_LABEL.alcool}</dt><dd className="nowrap">{money(totals.alcool)}</dd></div>
-              <div className="total"><dt>Total</dt><dd className="nowrap">{money(totals.cigares + totals.alcool)}</dd></div>
-            </dl>
+          {/* What the club owes, as the tiles of « Membres / Clients » (owner, 2026-11-19): one per caisse, then the total. */}
+          <section className="kpis" aria-label="Dû aux fournisseurs">
+            {['cigares', 'alcool'].map((key) => {
+              const owed = suppliers.filter((s) => s.account === key && s.due > 0).length;
+              return (
+                <div key={key} className="kpi">
+                  <div className="label">{CAISSE_LABEL[key]}</div>
+                  <div className="value">{money(totals[key])}</div>
+                  <div className="hint">{owed ? `${owed} fournisseur${owed > 1 ? 's' : ''} à payer, depuis cette caisse` : 'Rien à payer'}</div>
+                </div>
+              );
+            })}
+            <div className="kpi accent">
+              <div className="label">Total dû aux fournisseurs</div>
+              <div className="value">{money(totals.cigares + totals.alcool)}</div>
+              <div className="hint">Payé seulement depuis la caisse du fournisseur</div>
+            </div>
           </section>
           {suppliers.length ? (
             <section className="card"><div className="table-wrap"><Sorted rows={suppliers} columns={{
