@@ -21,6 +21,7 @@ import ExpensesBlock, { ProfitsBlock, TransfersBlock } from '../components/cash/
 import CategoryColumns from '../components/cash/CategoryColumns.jsx';
 import { Details, OpenNotes } from '../components/cash/CashDetails.jsx';
 import { DayClosingBar } from '../components/cash/CloseDay.jsx';
+import { ProfitBand } from '../components/cash/ProfitBlock.jsx';
 import { api, qs } from '../lib/api.js';
 import { ACCOUNT_LABEL, bizToday, dayLabel } from '../lib/format.js';
 import { useLoad } from '../lib/hooks.js';
@@ -77,9 +78,9 @@ function AdminCash() {
   const settings = useSettings();
   const period = useCashPeriod();
   const { from, to } = period;
-  // `signal`: a new period cancels the eight downloads of the previous one.
+  // `signal`: a new period cancels the nine downloads of the previous one.
   const state = useLoad(async (signal) => {
-    const [sum, billed, journal, open, ledger, categories, treasury, caisses] = await Promise.all([
+    const [sum, billed, journal, open, ledger, categories, treasury, caisses, profit] = await Promise.all([
       api.get(`/api/finance/summary${qs({ from, to })}`, { signal }),
       // A failure of the billed lines must not take the whole page down: the block says so instead.
       api.get(`/api/finance/billed${qs({ from, to })}`, { signal }).catch(() => null),
@@ -89,8 +90,10 @@ function AdminCash() {
       api.get('/api/ledger/categories', { signal }),
       api.get(`/api/treasury${qs({ from, to })}`, { signal }),
       api.get(`/api/caisses${qs({ to })}`, { signal }),
+      // The real profit of the products (bosses only): a failure hides its band, never the page.
+      api.get(`/api/finance/profit${qs({ from, to })}`, { signal }).catch(() => null),
     ]);
-    return { sum, billed, journal, open, entries: ledger.entries, categories, treasury, caisses };
+    return { sum, billed, journal, open, entries: ledger.entries, categories, treasury, caisses, profit };
   }, [from, to]);
   useScrollToBlock(period.params.get('type'), !!state.data);
 
@@ -159,6 +162,7 @@ function AdminCash() {
             sum={d.sum} billed={d.billed} method={method} oneDay={oneDay}
             journal={d.journal} entries={d.entries} t={d.treasury} openingBalances={settings.opening_balances}
             closing={<DayClosingBar isAdmin inline onChange={state.reload} refresh={barTick} />}
+            footer={d.profit && <ProfitBand report={d.profit} oneDay={oneDay} />}
           />
           <div className="cash-columns">
             <div className="cash-columns-inner">

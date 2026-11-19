@@ -442,6 +442,12 @@ a.list-item:hover .list-go { color: var(--text); transform: translateX(2px); }
 .btn-danger:hover { background: var(--danger-soft); }
 .btn-ghost { border-color: transparent; background: transparent; }
 .btn-ghost:hover { background: var(--surface-3); }
+/* The bosses' real profit under « Recette du jour par catégorie » (ProfitBlock.jsx). */
+.profit-band { margin-top: 12px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--bronze-soft); display: grid; gap: 4px; }
+.profit-band > div { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: baseline; font-variant-numeric: tabular-nums; }
+.profit-band .cash-note { margin: 0; }
+/* A quiet warning that asks to be done (« 7 produits sans prix de revient »). */
+.btn-warn-soft { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
 .btn-sm { min-height: 36px; padding: 0 12px; font-size: 0.875rem; border-radius: 8px; }
 .btn-block { width: 100%; }
 .btn[disabled], .btn[aria-busy="true"] { opacity: 0.55; cursor: not-allowed; transform: none; }
