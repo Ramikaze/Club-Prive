@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
-import { openDialog } from '../components/ui/Modal.jsx';
+import { Modal, openDialog } from '../components/ui/Modal.jsx';
 import { Loaded, Notice, PageHead } from '../components/ui/ui.jsx';
 import PeriodPicker, { usePeriod } from '../components/ui/PeriodPicker.jsx';
 import EntryDialog, { MANAGER_CAP_TEXT } from '../components/cash/EntryDialog.jsx';
@@ -69,6 +69,27 @@ function useScrollToBlock(type, loaded) {
   useEffect(() => {
     if (loaded && BLOCKS[type]) document.getElementById(BLOCKS[type])?.scrollIntoView({ block: 'start' });
   }, [type, loaded]);
+}
+
+// On phones, the cash page shows its three entries and folds the reports into « Plus » (owner, 2026-11-19).
+const MORE = [
+  ['Consulter', [['/caisse/historique-tickets', 'receipt', 'Historique des tickets'], ['/journal', 'journal', 'Journal des opérations']]],
+  ['Comptabilité', [['/tresorerie', 'bank', 'Trésorerie et bilans'], ['/grand-livre', 'book', 'Grand livre'], ['/cloture', 'lock', 'Clôture mensuelle']]],
+];
+
+function MoreDialog({ close }) {
+  return (
+    <Modal title="Plus" onClose={close}>
+      <div className="menu-list">
+        {MORE.map(([group, links]) => [
+          <p key={group} className="menu-group">{group}</p>,
+          ...links.map(([to, icon, label]) => (
+            <Link key={to} className="btn btn-block" to={to} onClick={close}><Icon name={icon} /> {label}</Link>
+          )),
+        ])}
+      </div>
+    </Modal>
+  );
 }
 
 const periodLabel = (from, to) => (from === to ? dayLabel(from, 'title') : `Du ${dayLabel(from, 'medium')} au ${dayLabel(to, 'medium')}`);
@@ -133,23 +154,31 @@ function AdminCash() {
         tour="cash"
         actions={(
           <>
-            <button type="button" className="btn btn-sm btn-ghost" disabled={!state.data} onClick={() => add('recette')}><Icon name="plus" /> Entrée diverse</button>
-            <button type="button" className="btn btn-sm btn-ghost" disabled={!state.data} onClick={() => add('transfert')}><Icon name="transfer" /> Transfert</button>
-            <Link className="btn btn-sm btn-ghost" to="/caisse/historique-tickets"><Icon name="receipt" /> Historique des tickets</Link>
-            <Link className="btn btn-sm btn-ghost" to="/tresorerie"><Icon name="bank" /> Trésorerie & Bilans</Link>
-            <Link className="btn btn-sm btn-ghost" to="/grand-livre"><Icon name="book" /> Grand livre</Link>
-            <Link className="btn btn-sm btn-ghost" to="/cloture"><Icon name="lock" /> Clôture mensuelle</Link>
-            <Link className="btn btn-sm btn-ghost" to="/journal"><Icon name="journal" /> Journal des opérations</Link>
-            <button type="button" className="btn btn-primary" disabled={!state.data} onClick={() => add('depense')}><Icon name="plus" /> Nouvelle dépense</button>
+            <div className="cash-desk-actions only-desktop">
+              <button type="button" className="btn btn-sm btn-ghost" disabled={!state.data} onClick={() => add('recette')}><Icon name="plus" /> Entrée diverse</button>
+              <button type="button" className="btn btn-sm btn-ghost" disabled={!state.data} onClick={() => add('transfert')}><Icon name="transfer" /> Transfert</button>
+              <Link className="btn btn-sm btn-ghost" to="/caisse/historique-tickets"><Icon name="receipt" /> Historique des tickets</Link>
+              <Link className="btn btn-sm btn-ghost" to="/tresorerie"><Icon name="bank" /> Trésorerie & Bilans</Link>
+              <Link className="btn btn-sm btn-ghost" to="/grand-livre"><Icon name="book" /> Grand livre</Link>
+              <Link className="btn btn-sm btn-ghost" to="/cloture"><Icon name="lock" /> Clôture mensuelle</Link>
+              <Link className="btn btn-sm btn-ghost" to="/journal"><Icon name="journal" /> Journal des opérations</Link>
+              <button type="button" className="btn btn-primary" disabled={!state.data} onClick={() => add('depense')}><Icon name="plus" /> Nouvelle dépense</button>
+            </div>
+            <div className="cash-phone-actions only-phone">
+              <button type="button" className="btn btn-primary" disabled={!state.data} onClick={() => add('depense')}><Icon name="plus" /> Dépense</button>
+              <button type="button" className="btn" disabled={!state.data} onClick={() => add('recette')}><Icon name="plus" /> Entrée</button>
+              <button type="button" className="btn" disabled={!state.data} onClick={() => add('transfert')}><Icon name="transfer" /> Transfert</button>
+              <button type="button" className="btn btn-more" aria-label="Plus" title="Plus" onClick={() => openDialog(MoreDialog)}><Icon name="more" /></button>
+            </div>
           </>
         )}
       />
       <CashTabs />
       <div className="toolbar">
         <PeriodPicker period={period} />
-        <label className="cash-account"><span className="subtle">Caisse ou compte</span>
-          <select value={method} onChange={(e) => period.setParam('compte', e.target.value)}>
-            <option value="">Toutes</option>
+        <label className="cash-account"><span className="subtle only-desktop">Caisse ou compte</span>
+          <select value={method} aria-label="Caisse ou compte" onChange={(e) => period.setParam('compte', e.target.value)}>
+            <option value="">Toutes les caisses</option>
             {methods.map((m) => <option key={m} value={m}>{m}</option>)}
           </select></label>
       </div>

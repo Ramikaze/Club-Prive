@@ -1,8 +1,11 @@
 // Period of business days kept in the query string (?from=YYYY-MM-DD&to=YYYY-MM-DD), with presets.
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import Icon from './Icon.jsx';
+import { Modal, openDialog } from './Modal.jsx';
 import { addDays, addMonths, isValidDate } from '../../../shared/time.js';
 import { bizToday } from '../../lib/format.js';
+import { periodButtonLabel } from '../../lib/period.js';
 
 export function periodPresets(today) {
   const first = `${today.slice(0, 8)}01`;
@@ -57,11 +60,50 @@ export function DateInput({ value, onCommit, ...props }) {
   return <input type="date" ref={ref} defaultValue={value} {...props} />;
 }
 
+// On phones the presets and the dates fold into one button (owner, 2026-11-19: the cash page « prend trop de place »).
+// Its window keeps the dates it is given until « Afficher »: the period it was opened with is a snapshot, so it is
+// set once, when the window closes.
+function PeriodDialog({ period, close }) {
+  const { presets, today, setPeriod } = period;
+  const [range, setRange] = useState({ from: period.from, to: period.to });
+  const pick = (r) => {
+    setPeriod(r);
+    close();
+  };
+  const current = (p) => p.from === period.from && p.to === period.to;
+  return (
+    <Modal title="Période" onClose={close}>
+      <div className="period-presets period-sheet" role="group" aria-label="Période">
+        {presets.map((p) => (
+          <button key={p.key} type="button" className="btn" aria-pressed={current(p)} data-autofocus={current(p) || undefined} onClick={() => pick(p)}>
+            {p.label}
+          </button>
+        ))}
+      </div>
+      {/* As beside the presets: while one day is chosen, « Du » moves that day; « au » then widens it. */}
+      <div className="date-nav period-sheet-dates">
+        <label className="row"><span className="subtle">Du</span>
+          <DateInput value={range.from} max={today} aria-label="Début de la période" onCommit={(d) => setRange((r) => ({ from: d, to: r.from === r.to ? d : r.to }))} /></label>
+        <label className="row"><span className="subtle">au</span>
+          <DateInput value={range.to} max={today} aria-label="Fin de la période" onCommit={(d) => setRange((r) => ({ ...r, to: d }))} /></label>
+      </div>
+      <div className="modal-actions">
+        <button type="button" className="btn" onClick={close}>Annuler</button>
+        <button type="button" className="btn btn-primary" onClick={() => pick(range)}>Afficher</button>
+      </div>
+    </Modal>
+  );
+}
+
 export default function PeriodPicker({ period }) {
   const { from, to, today, presets, setPeriod } = period;
   return (
     <>
-      <div className="period-presets" role="group" aria-label="Période">
+      <button type="button" className="btn btn-sm only-phone" aria-label={`Période : ${periodButtonLabel(from, to, presets)}`}
+        onClick={() => openDialog(PeriodDialog, { period })}>
+        <Icon name="calendar" /> {periodButtonLabel(from, to, presets)} <Icon name="down" />
+      </button>
+      <div className="period-presets only-desktop" role="group" aria-label="Période">
         {presets.map((p) => (
           <button key={p.key} type="button" className="btn btn-sm" aria-pressed={p.from === from && p.to === to} onClick={() => setPeriod(p)}>
             {p.label}
@@ -69,7 +111,7 @@ export default function PeriodPicker({ period }) {
         ))}
       </div>
       {/* While one day is shown, a date chosen in « Du » shows that day instead; « au » then widens it. */}
-      <div className="date-nav">
+      <div className="date-nav only-desktop">
         <label className="row"><span className="subtle">Du</span>
           <DateInput value={from} max={today} aria-label="Début de la période" onCommit={(d) => setPeriod({ from: d, to: from === to ? d : to })} /></label>
         <label className="row"><span className="subtle">au</span>
