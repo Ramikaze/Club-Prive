@@ -1,5 +1,5 @@
-// The three tiles at the top of « Membres / Clients » (owner's choice, 2026-11-19): what the regular clients owe on
-// credit, the members' open notes, and the total owed to the club (GET /api/receivables). The first two open who owes.
+// The three tiles at the top of « Membres / Clients » (owner's choice, 2026-11-19): the members' open notes, what the
+// regular clients owe on credit, and the total owed to the club (GET /api/receivables). The first two open their list.
 import { Link } from 'react-router-dom';
 import Icon from '../ui/Icon.jsx';
 import { api } from '../../lib/api.js';
@@ -20,15 +20,16 @@ export default function ReceivablesTiles() {
   if (!r) return null;
   return (
     <section className="kpis" aria-label="Créances du club">
+      {/* In the order of the tabs below (owner, 2026-11-19): Membres, then Clients réguliers; each opens its list. */}
+      <Link className="kpi kpi-link" to="/membres">
+        <div className="label">Membres</div>
+        <div className="value">{money(r.members.total)}</div>
+        <div className="hint">{r.members.count ? `${some(r.members.count, 'membre', 'membres')} avec une note ouverte` : 'Toutes les notes sont soldées'}</div>
+      </Link>
       <Link className="kpi kpi-link" to="/clients">
         <div className="label">Clients réguliers</div>
         <div className="value">{money(r.clients.total)}</div>
         <div className="hint">{r.clients.count ? `${some(r.clients.count, 'client', 'clients')} avec une dette` : 'Aucune dette'}</div>
-      </Link>
-      <Link className="kpi kpi-link" to="/caisse?type=reste">
-        <div className="label">Membres</div>
-        <div className="value">{money(r.members.total)}</div>
-        <div className="hint">{r.members.count ? `${some(r.members.count, 'membre', 'membres')} avec une note ouverte` : 'Toutes les notes sont soldées'}</div>
       </Link>
       <div className="kpi accent">
         <div className="label">Total dû au club</div>
