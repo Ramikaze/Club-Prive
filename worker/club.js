@@ -2860,7 +2860,8 @@ export class Club {
       reservation_id: p.reservation_id, amount: p.amount, method: p.method, reference: p.reference,
       paid_at: p.paid_at, ticket_code: p.ticket_code ?? null, created_by_name: p.created_by_name ?? null, allocations, by_account: byAccount,
       kind: p.kind ?? 'encaissement', card_amount: p.card_amount ?? 0, label: p.label ?? null,
-      cancelled_at: p.cancelled_at ?? null, cancel_reason: p.cancel_reason ?? null, shop_sale_id: p.shop_sale_id ?? null,
+      cancelled_at: p.cancelled_at ?? null, cancel_reason: p.cancel_reason ?? null, cancelled_by_name: p.cancelled_by_name ?? null,
+      shop_sale_id: p.shop_sale_id ?? null,
       shop_cancelled_at: shop?.cancelled_at ?? null, shop_cancel_reason: shop?.cancel_reason ?? null,
       settlement: !!p.settlement,
     };
@@ -3666,8 +3667,8 @@ export class Club {
   journal(from, to) {
     const [a, b] = this.periodBounds(from, to);
     const payments = this.all(
-      `SELECT p.*, m.first_name, m.last_name, m.member_no, u.name AS created_by_name FROM payments p
-       JOIN members m ON m.id = p.member_id LEFT JOIN users u ON u.id = p.created_by
+      `SELECT p.*, m.first_name, m.last_name, m.member_no, u.name AS created_by_name, cu.name AS cancelled_by_name FROM payments p
+       JOIN members m ON m.id = p.member_id LEFT JOIN users u ON u.id = p.created_by LEFT JOIN users cu ON cu.id = p.cancelled_by
        WHERE p.paid_at >= ? AND p.paid_at < ? ORDER BY p.paid_at DESC`, a, b,
     ).map((p) => this.paymentDTO(p));
     const refunds = this.all(

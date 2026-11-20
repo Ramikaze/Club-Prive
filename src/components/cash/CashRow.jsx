@@ -1,5 +1,6 @@
 // One operation in a list of the cash page, compact enough for a column: what it is, then a muted line (when,
-// ticket, client or category, account), the signed amount on the right and the action under it.
+// client or category, account), the signed amount on the right and the action (a small cross) beside it.
+import Icon from '../ui/Icon.jsx';
 import { actionDialog } from '../ui/Modal.jsx';
 import { toast } from '../ui/toast.jsx';
 import { api } from '../../lib/api.js';
@@ -28,6 +29,17 @@ export function CashRow({ title, meta, note, amount, sign = '', cancelled = fals
 // The muted line: its parts joined by « · », the empty ones left out.
 export const metaLine = (...items) => items.filter(Boolean).map((x, i) => <span key={i}>{i ? ' · ' : ''}{x}</span>);
 
+// A block's cancelled operations, apart under its total in one closed fold: listed, struck through, never counted.
+export function CancelledFold({ count, children }) {
+  if (!count) return null;
+  return (
+    <details className="cash-group cash-group-cancelled">
+      <summary><span>{count === 1 ? '1 annulation · non comptée' : `${count} annulations · non comptées`}</span></summary>
+      {children}
+    </details>
+  );
+}
+
 export function TotalLine({ label, amount, sign = '' }) {
   return <dl className="calc section-gap"><div className="total"><dt>{label}</dt><dd>{sign}{money(amount)}</dd></div></dl>;
 }
@@ -53,5 +65,10 @@ export function cancelEntry(e, onDone) {
 
 export function EntryCancel({ e, isAdmin, onDone }) {
   if (!isAdmin || e.status !== 'active' || e.period_closed) return null;
-  return <button type="button" className="btn btn-sm btn-ghost" onClick={() => cancelEntry(e, onDone)}>Annuler l’opération<span className="sr-only"> : {e.label}</span></button>;
+  return (
+    <button type="button" className="icon-btn cash-cancel" title="Annuler l’opération" aria-label={`Annuler l’opération : ${e.label}`}
+      onClick={() => cancelEntry(e, onDone)}>
+      <Icon name="x" />
+    </button>
+  );
 }
