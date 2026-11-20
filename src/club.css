@@ -1249,8 +1249,16 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .cash-row { align-items: flex-start; min-height: 0; padding: 9px 2px; }
 .cash-row .title, .cash-row .meta { overflow-wrap: anywhere; }
 .cash-row-end { flex: none; display: grid; justify-items: end; gap: 2px; }
+.cash-row-end:has(> .cash-cancel) { display: flex; align-items: flex-start; }
 .cash-amount { font-weight: 650; white-space: nowrap; }
 .cash-amount.is-quiet { color: var(--text-3); font-weight: 500; }
+/* In « Argent encaissé » and « Dépenses », only the totals are green or red and bold: a row's amount is plain text. */
+.cash-block-plain .cash-row:not(.is-cancelled) .cash-amount:not(.is-quiet) { color: var(--text); font-weight: 500; }
+.cash-block-plain .cash-row.is-cancelled .cash-amount { font-weight: 500; }
+/* « Annuler l’opération »: a small cross beside the amount, its words in the tooltip and for screen readers. */
+.cash-cancel { width: 28px; height: 28px; margin: -4px -4px 0 0; color: var(--text-3); }
+.cash-cancel svg { width: 16px; height: 16px; }
+.cash-cancel:hover { color: var(--text); }
 .cash-account { display: inline-flex; align-items: center; gap: 6px; }
 .cash-account select { width: auto; }
 .list-item.is-muted { color: var(--text-3); }
@@ -1267,8 +1275,15 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .cash-group > summary > span:first-child { flex: 1; }
 .cash-group > summary:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 6px; }
 .cash-group > .list { padding-left: 14px; }
-.cash-group-card { margin-top: 14px; border: 1px dashed var(--border); border-radius: var(--radius-sm); padding: 0 10px; color: var(--text-2); }
-.cash-group-card > summary { font-weight: 500; }
+.cash-group-card, .cash-group-cancelled { margin-top: 14px; border: 1px dashed var(--border); border-radius: var(--radius-sm); padding: 0 10px; color: var(--text-2); }
+.cash-group-card > summary, .cash-group-cancelled > summary { font-weight: 500; }
+/* The Boutique group's money by rayon: one small line under the group's title. */
+.cash-group-sub { display: block; margin-top: 2px; font-size: 0.85rem; font-weight: 400; }
+.cash-group-sub > span > span { white-space: nowrap; }
+/* A row's title opens its ticket: the text's colour, a faint underline. */
+.cash-row .title { overflow: visible; }
+.cash-block-plain .cash-row .title a { color: inherit; text-decoration: underline; text-decoration-color: var(--text-3); }
+.cash-block-plain .cash-row .title a:hover { text-decoration-color: currentColor; }
 .cash-group-card > summary svg { width: 16px; height: 16px; vertical-align: -3px; }
 .cash-details { padding-top: 14px; padding-bottom: 14px; }
 .cash-details > summary { cursor: pointer; font-weight: 600; color: var(--text-2); padding: 4px 0; }

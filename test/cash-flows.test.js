@@ -159,6 +159,17 @@ test('recettes : la Boutique est comptée et montrée à part', async () => {
   assert.equal(figures(data, 'MTN MoMo').receipts.boutique, 0);
 });
 
+// « Argent encaissé » lists a cancelled recharge in its fold with who cancelled it, as it does for a ledger entry.
+test('journal : une recharge annulée dit qui l’a annulée', async () => {
+  const zoe = await newMember('Zoé');
+  const { payment } = await recharge(zoe.id, 2000, 'Espèces');
+  ok(await admin.post(`/api/payments/${payment.id}/cancel-recharge`, { reason: 'Doublon' }));
+  const { journal } = await pageData();
+  const shown = journal.payments.find((p) => p.id === payment.id);
+  assert.equal(shown.cancel_reason, 'Doublon');
+  assert.equal(shown.cancelled_by_name, 'Admin');
+});
+
 test('tillFigures sépare les bénéfices pris des dépenses', () => {
   const t = { from: '2026-11-07', to: '2026-11-07', accounts: [{ method: 'Espèces', opening: 10000 * UM, in: 0, out: 7000 * UM, closing: 3000 * UM }] };
   const entries = [{ kind: 'retrait', status: 'active', method: 'Espèces', amount: 7000 * UM }];

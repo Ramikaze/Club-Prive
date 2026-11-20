@@ -1,8 +1,8 @@
-// « Dépenses »: the expenses by category, then every expense of the period, newest first, and the total. The
-// transfers between treasury accounts are neither: they get their own quiet list, only when there are any.
+// « Dépenses »: the expenses by category, then every expense of the period, newest first, and the total; the
+// cancelled ones apart under the total, in one fold. The transfers between treasury accounts are neither: they get their own quiet list, only when there are any.
 import Icon from '../ui/Icon.jsx';
 import { AccountTag, CancelledChip, DemoChip } from '../ui/ui.jsx';
-import { CashRow, EntryCancel, TotalLine, metaLine } from './CashRow.jsx';
+import { CancelledFold, CashRow, EntryCancel, TotalLine, metaLine } from './CashRow.jsx';
 import { byCategory, expenseTotal, onAccount } from './flows.js';
 import { entryWhen } from './when.js';
 import { money } from '../../lib/format.js';
@@ -14,17 +14,19 @@ const supplierPart = (e) => (e.supplier_name
   ? `${e.supplier_name}${e.foreign_amount ? ` (${formatForeign(e.foreign_amount, e.foreign_currency)})` : ''}`
   : null);
 
-function EntryTitle({ e }) {
+// `folded`: listed in the fold of cancellations, which already says so (no « annulée » chip).
+function EntryTitle({ e, folded = false }) {
   return (
     <>
       {e.label} <DemoChip on={e.is_demo} />
-      {e.status !== 'active' && <> <CancelledChip label="annulée" /></>}
+      {e.status !== 'active' && !folded && <> <CancelledChip label="annulée" /></>}
       {e.period_closed && <> <span className="chip" title="Mois clôturé"><Icon name="lock" /> Clôturé</span></>}
     </>
   );
 }
 
-const cancelNote = (e) => (e.status !== 'active' && e.cancel_reason ? `Annulée par ${e.cancelled_by_name} : ${e.cancel_reason}` : null);
+const cancelNote = (e) => (e.status !== 'active' && e.cancel_reason
+  ? `Annulée${e.cancelled_by_name ? ` par ${e.cancelled_by_name}` : ''} : ${e.cancel_reason}` : null);
 const newestFirst = (list, oneDay) => list.map((e) => ({ e, w: entryWhen(e, oneDay) })).sort((x, y) => y.w.ms - x.w.ms);
 
 export default function ExpensesBlock({ entries, method = '', oneDay, isAdmin, onChange, title = 'Dépenses' }) {
@@ -32,8 +34,25 @@ export default function ExpensesBlock({ entries, method = '', oneDay, isAdmin, o
   const total = expenseTotal(list);
   const cats = byCategory(list);
   const max = cats[0]?.[1] ?? 0;
+  const active = list.filter((e) => e.status === 'active');
+  const cancelled = list.filter((e) => e.status !== 'active');
+  const rows = (items, folded) => (
+    <div className="list">
+      {newestFirst(items, oneDay).map(({ e, w }) => (
+        <CashRow
+          key={e.id}
+          title={<EntryTitle e={e} folded={folded} />}
+          meta={metaLine(w.text, e.category_name, supplierPart(e), e.method, e.account && <AccountTag account={e.account} />, e.reference,
+            e.created_by_name && `par ${e.created_by_name}`)}
+          note={cancelNote(e)}
+          amount={e.amount} sign="−" cancelled={e.status !== 'active'}
+          action={<EntryCancel e={e} isAdmin={isAdmin} onDone={onChange} />}
+        />
+      ))}
+    </div>
+  );
   return (
-    <section className="card cash-block" id="caisse-depenses" aria-labelledby="caisse-depenses-title">
+    <section className="card cash-block cash-block-plain" id="caisse-depenses" aria-labelledby="caisse-depenses-title">
       <div className="card-head">
         <h2 id="caisse-depenses-title"><Icon name="withdraw" /> {title}</h2>
         <span className="cash-block-total amount-out">{money(total)}</span>
@@ -50,21 +69,14 @@ export default function ExpensesBlock({ entries, method = '', oneDay, isAdmin, o
               ))}
             </div>
           )}
-          <h3 className="sub-section-title cash-list-title">Détail ({list.length})</h3>
-          <div className="list">
-            {newestFirst(list, oneDay).map(({ e, w }) => (
-              <CashRow
-                key={e.id}
-                title={<EntryTitle e={e} />}
-                meta={metaLine(w.text, e.category_name, supplierPart(e), e.method, e.account && <AccountTag account={e.account} />, e.reference,
-                  e.created_by_name && `par ${e.created_by_name}`)}
-                note={cancelNote(e)}
-                amount={e.amount} sign="−" cancelled={e.status !== 'active'}
-                action={<EntryCancel e={e} isAdmin={isAdmin} onDone={onChange} />}
-              />
-            ))}
-          </div>
+          {active.length > 0 && (
+            <>
+              <h3 className="sub-section-title cash-list-title">Détail ({active.length})</h3>
+              {rows(active, false)}
+            </>
+          )}
           <TotalLine label="Total des dépenses" amount={total} />
+          <CancelledFold count={cancelled.length}>{rows(cancelled, true)}</CancelledFold>
         </>
       ) : <p className="subtle">Aucune dépense sur la période.</p>}
     </section>
