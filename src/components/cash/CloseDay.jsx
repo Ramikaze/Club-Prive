@@ -13,6 +13,7 @@ import { bizToday, dateTime, dayLabel, money, parseMoney, paymentPurpose } from 
 import { useLoad, useSubmit } from '../../lib/hooks.js';
 import { formatTicketNumber } from '../../../shared/ticket.js';
 import { entryTicketRow } from './flows.js';
+import { verifyDayDialog } from './VerifyDays.jsx';
 
 // The notes counted one by one in the cash till; the coins are typed as one amount.
 const NOTES = [10000, 5000, 2000, 1000, 500];
@@ -201,11 +202,14 @@ function Wizard({ close, day, data, onDone }) {
 // The day's closing on the cash page: a button to close it, or who closed it and the gap, and for an administrator a
 // way to reopen it.
 // `inline`: drawn inside another card (the « Recette du jour par catégorie » tile of the bosses), not as a card of its own.
-export function DayClosingBar({ isAdmin, onChange, refresh = 0, inline = false }) {
-  const day = bizToday();
-  const state = useLoad(() => api.get(`/api/day-closing${qs({ day })}`), [day, refresh]);
+// `day`: the day the cash page shows (today by default; a day of « Journées à vérifier » opens the page on it). A day
+// not yet begun has nothing to close. Closed and not yet verified, the administrator and the associés verify it here.
+export function DayClosingBar({ isAdmin, onChange, refresh = 0, inline = false, day = bizToday() }) {
+  const future = day > bizToday();
+  const state = useLoad(() => (future ? Promise.resolve(null) : api.get(`/api/day-closing${qs({ day })}`)), [day, refresh, future]);
   const reload = () => { state.reload(); onChange?.(); };
   const c = state.data?.closed;
+  if (future) return null;
   // Unread is not « nothing to show »: whether the day is open or closed stays unknown until read again.
   if (state.error && !state.data) {
     return (
@@ -237,6 +241,9 @@ export function DayClosingBar({ isAdmin, onChange, refresh = 0, inline = false }
       <span><Icon name="lock" /> Caisse fermée le {dateTime(c.closed_at)}{c.closed_by_name ? ` par ${c.closed_by_name}` : ''} · {gapText(gap)}
         {c.summary.unchecked.length > 0 && ` · ${c.summary.unchecked.length} ticket(s) non pointé(s)`}
         {c.verified ? (c.verified.verified_by_name ? ` · vérifiée par ${c.verified.verified_by_name}` : ' · vérifiée') : ' · en attente de vérification'}</span>
+      {isAdmin && !c.verified && (
+        <button type="button" className="btn btn-sm btn-primary" onClick={() => verifyDayDialog(day, reload)}><Icon name="check" /> Vérifier</button>
+      )}
       {isAdmin && <button type="button" className="btn btn-sm" onClick={reopen}><Icon name="unlock" /> Rouvrir</button>}
     </div>
   );

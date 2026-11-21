@@ -12,7 +12,7 @@ import { isBoss } from '../../../shared/roles.js';
 
 const ACTION_LABEL = { fournisseur: 'Payer un fournisseur', benefices: 'Prendre des bénéfices', apport: 'Faire un apport' };
 
-export default function CaissesBalance({ b, onCount, onAction, onChange }) {
+export default function CaissesBalance({ b, onCount, onAction }) {
   const me = useMe();
   const currency = useStore((s) => s.settings.currency.label);
   // The lines read as in the owner's mock-up: « +420 000 », the currency once, on the tile's figure.
@@ -57,7 +57,7 @@ export default function CaissesBalance({ b, onCount, onAction, onChange }) {
         </div>
       )}
       {/* Verifying a day is the bosses': the manager does not see the band. */}
-      {tiles && isBoss(me) && b.to >= bizToday() && <PendingDaysBand days={b.pending_days} onChange={onChange} />}
+      {tiles && isBoss(me) && b.to >= bizToday() && <PendingDaysBand days={b.pending_days} />}
     </section>
   );
 }
