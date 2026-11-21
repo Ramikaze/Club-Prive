@@ -1,7 +1,7 @@
 // Purchase history of a file: Boutique and session product lines mixed, newest first.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { Server, Client, ok, UM } from './harness.js';
+import { Server, Client, ok, UM, postSale } from './harness.js';
 
 const server = new Server({}, { lenientTariffs: true });
 let admin;
@@ -29,7 +29,7 @@ before(async () => {
 after(() => server.destroy());
 
 const newClient = async () => ok(await ger.post('/api/clients', { first_name: 'awa', last_name: `achat${++n}`, phone: `00 00 06 ${String(n).padStart(2, '0')}` }));
-const sell = async (client, product, method = 'Espèces') => ok(await ger.post('/api/shop/sales', {
+const sell = async (client, product, method = 'Espèces') => ok(await postSale(ger, {
   account: product === CIG ? 'cigares' : 'alcool', buyer: { kind: 'client', member_id: client.id },
   lines: [{ product_id: product, quantity: 1 }], method,
 }));
@@ -92,7 +92,7 @@ test('une ligne de séance due n’a ni moyen ni paiement', async () => {
 });
 
 test('le client journalier n’a pas d’historique', async () => {
-  ok(await ger.post('/api/shop/sales', { account: 'cigares', buyer: { kind: 'journalier' }, lines: [{ product_id: CIG, quantity: 1 }], method: 'Espèces' }));
+  ok(await postSale(ger, { account: 'cigares', buyer: { kind: 'journalier' }, lines: [{ product_id: CIG, quantity: 1 }], method: 'Espèces' }));
   const id = server.club.get("SELECT id FROM members WHERE kind = 'journalier'").id;
   assert.equal((await ger.get(`/api/members/${id}/purchases`)).status, 404);
   assert.equal((await ger.get('/api/members/999999/purchases')).status, 404);

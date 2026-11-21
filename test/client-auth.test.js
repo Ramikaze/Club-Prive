@@ -4,7 +4,7 @@
 // session never opens a client route. The accesses made with the phone before must choose an identifier first.
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { Server, Site, Client, ok } from './harness.js';
+import { Server, Site, Client, ok, postSale } from './harness.js';
 import { ALWAYS_REAL } from '../worker/space.js';
 import { sha256Hex, hashPassword } from '../worker/auth.js';
 
@@ -353,7 +353,7 @@ test('séparation', async () => {
     const r = await client.get(url);
     assert.equal(r.status, 401, url);
   }
-  assert.equal((await client.post('/api/shop/sales', { account: 'cigares', lines: [] })).status, 401);
+  assert.equal((await postSale(client, { account: 'cigares', lines: [] })).status, 401);
   // The client's token is not a staff token under the staff cookie's name either.
   const asStaff = new Client(server);
   asStaff.cookie = `sid=${client.cookie.slice('csid='.length)}`;

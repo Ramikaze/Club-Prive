@@ -1080,7 +1080,65 @@ const V30 = [
    WHERE kind = 'produit' AND product_id IS NOT NULL`,
 ];
 
-export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30];
+// V31: the discount and the lot price of the Boutique (spec docs/superpowers/specs/2026-11-21-remise-prix-par-lot-design.md).
+// A product may carry a lot (« 3 pour 10 000, puis 3 000 l'unité »); a sale keeps the discount typed (kind and value);
+// a Boutique line keeps its catalogue unit price, its real quantity, what is really paid (`amount`) and its share of
+// the sale's discount (`discount`), so every total that reads `amount` stays right. A line may only cost less than
+// quantity × unit price in the Boutique, never more. SQLite cannot drop the V1 rule `amount = quantity * unit_price`:
+// the table is rebuilt as in V15 (dropped and created again, never renamed: see there), its rows waiting in a plain
+// copy while the payment allocations, refunds and stock movements that point at them wait for the deferred check.
+const V30_CHARGE_COLUMNS = `id, account, kind, member_id, reservation_id, subscription_id, product_id, label, quantity, unit_price,
+  amount, status, tariff_validated, created_at, created_by, cancelled_at, cancelled_by, cancel_reason, consumer_member_id, deposit,
+  shop_sale_id, settled, carryover, unit_cost`;
+const V31 = [
+  'ALTER TABLE products ADD COLUMN lot_qty INTEGER CHECK (lot_qty IS NULL OR lot_qty BETWEEN 2 AND 99)',
+  'ALTER TABLE products ADD COLUMN lot_price INTEGER CHECK (lot_price IS NULL OR lot_price > 0)',
+  'ALTER TABLE products ADD COLUMN extra_price INTEGER CHECK (extra_price IS NULL OR extra_price > 0)',
+  "ALTER TABLE shop_sales ADD COLUMN discount_kind TEXT CHECK (discount_kind IS NULL OR discount_kind IN ('pourcentage', 'montant'))",
+  'ALTER TABLE shop_sales ADD COLUMN discount_value INTEGER CHECK (discount_value IS NULL OR discount_value > 0)',
+  'PRAGMA defer_foreign_keys = ON',
+  'CREATE TABLE charges_v30 AS SELECT * FROM charges',
+  'DROP TABLE charges',
+  `CREATE TABLE charges (
+    id INTEGER PRIMARY KEY,
+    account TEXT NOT NULL CHECK (account IN ('reservations', 'alcool', 'cigares')),
+    kind TEXT NOT NULL CHECK (kind IN ('temps_supplementaire', 'produit', 'abonnement')),
+    member_id INTEGER NOT NULL REFERENCES members(id),
+    reservation_id INTEGER REFERENCES reservations(id),
+    subscription_id INTEGER REFERENCES subscriptions(id),
+    product_id INTEGER REFERENCES products(id),
+    label TEXT NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
+    unit_price INTEGER NOT NULL CHECK (unit_price >= 0),
+    amount INTEGER NOT NULL CHECK (amount > 0),
+    status TEXT NOT NULL CHECK (status IN ('due', 'payee', 'annulee', 'remboursee')),
+    tariff_validated INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    cancelled_at TEXT,
+    cancelled_by INTEGER REFERENCES users(id),
+    cancel_reason TEXT,
+    consumer_member_id INTEGER REFERENCES members(id),
+    deposit INTEGER NOT NULL DEFAULT 0 CHECK (deposit IN (0, 1)),
+    shop_sale_id INTEGER REFERENCES shop_sales(id),
+    settled INTEGER NOT NULL DEFAULT 0 CHECK (settled >= 0),
+    carryover INTEGER NOT NULL DEFAULT 0 CHECK (carryover IN (0, 1)),
+    unit_cost INTEGER CHECK (unit_cost IS NULL OR unit_cost >= 0),
+    discount INTEGER NOT NULL DEFAULT 0 CHECK (discount >= 0),
+    CHECK (shop_sale_id IS NOT NULL OR (discount = 0 AND amount = quantity * unit_price)),
+    CHECK (amount + discount <= quantity * unit_price)
+  )`,
+  `INSERT INTO charges (${V30_CHARGE_COLUMNS}) SELECT ${V30_CHARGE_COLUMNS} FROM charges_v30`,
+  'DROP TABLE charges_v30',
+  'CREATE INDEX charges_reservation ON charges(reservation_id)',
+  'CREATE INDEX charges_member ON charges(member_id)',
+  'CREATE INDEX charges_created ON charges(created_at)',
+  'CREATE INDEX charges_consumer ON charges(consumer_member_id)',
+  'CREATE INDEX charges_shop_sale ON charges(shop_sale_id)',
+  'CREATE INDEX charges_product ON charges(product_id)',
+];
+
+export const MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31];
 
 export function migrate(db) {
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');

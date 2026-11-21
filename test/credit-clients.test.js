@@ -3,7 +3,7 @@
 // cancellation of a credit sale, the client's account and the caisses, which only see money actually received.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { Server, Client, ok, UM } from './harness.js';
+import { Server, Client, ok, UM, postSale } from './harness.js';
 
 const server = new Server({});
 let admin;
@@ -21,7 +21,7 @@ const refused = (r, status, code) => {
 const stockOf = (id) => server.club.get('SELECT stock_qty FROM products WHERE id = ?', id).stock_qty;
 let n = 0;
 const newClient = async () => ok(await ger.post('/api/clients', { first_name: 'awa', last_name: `credit${++n}`, phone: `00 00 07 ${String(n).padStart(2, '0')}` }));
-const creditSale = (who, client, account, product_id, quantity) => who.post('/api/shop/sales', {
+const creditSale = (who, client, account, product_id, quantity) => postSale(who, {
   account, buyer: { kind: 'client', member_id: client.id }, lines: [{ product_id, quantity }], credit: true,
 });
 const account = async (client) => ok(await ger.get(`/api/clients/${client.id}/account`));
@@ -62,8 +62,8 @@ test('plafond : sans plafond pas de crédit ; seuls l’administrateur et les as
   assert.ok(server.club.get("SELECT 1 AS x FROM audit_log WHERE action = 'client.plafond'"));
   // Members and walk-ins never buy on credit.
   const m = ok(await ger.post('/api/members', { first_name: 'jean', last_name: 'credit', phone: '00 00 07 99' }));
-  refused(await ger.post('/api/shop/sales', { account: 'alcool', buyer: { kind: 'membre', member_id: m.id }, lines: [{ product_id: CHP, quantity: 1 }], credit: true }), 400);
-  refused(await ger.post('/api/shop/sales', { account: 'alcool', buyer: { kind: 'journalier' }, lines: [{ product_id: CHP, quantity: 1 }], credit: true }), 400);
+  refused(await postSale(ger, { account: 'alcool', buyer: { kind: 'membre', member_id: m.id }, lines: [{ product_id: CHP, quantity: 1 }], credit: true }), 400);
+  refused(await postSale(ger, { account: 'alcool', buyer: { kind: 'journalier' }, lines: [{ product_id: CHP, quantity: 1 }], credit: true }), 400);
 });
 
 test('vente à crédit, règlement partiel du plus ancien au plus récent, caisses, annulations', async () => {
@@ -215,7 +215,7 @@ test('mois clôturé : vente, vente à crédit, règlement et annulations refus�
   const month = today.slice(0, 7);
   server.club.run("INSERT INTO closed_periods (month, closed_at, summary) VALUES (?, ?, '{}')", month, new Date().toISOString());
   try {
-    refused(await ger.post('/api/shop/sales', {
+    refused(await postSale(ger, {
       account: 'alcool', buyer: { kind: 'journalier' }, lines: [{ product_id: CHP, quantity: 1 }], method: 'Espèces',
     }), 409, 'PERIODE_CLOTUREE');
     refused(await creditSale(ger, c, 'alcool', CHP, 1), 409, 'PERIODE_CLOTUREE');

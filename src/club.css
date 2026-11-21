@@ -1410,6 +1410,7 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .shop-card-body { display: grid; gap: 4px; flex: 1; align-content: start; }
 .shop-card-name { font-size: 0.95rem; line-height: 1.3; margin: 0; overflow-wrap: anywhere; }
 .shop-card-price { font-weight: 650; color: var(--bronze-text); margin: 0; }
+.shop-card-lot { margin: 0; font-size: 0.82rem; color: var(--text-2); }
 .shop-card .chip + .chip { margin-left: 4px; }
 .shop-card .btn { width: 100%; justify-content: center; }
 .shop-cart-jump { position: fixed; right: 16px; bottom: 16px; z-index: 20; box-shadow: var(--shadow); }
@@ -1426,6 +1427,12 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .sale-lines li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px 10px; }
 .sale-line-name { overflow-wrap: anywhere; }
 .sale-line-amount { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; min-width: 5.5em; }
+.sale-line-lot { grid-column: 1 / -1; margin-top: -6px; font-size: 0.8rem; color: var(--text-3); }
+.sale-discount { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.sale-discount-label { font-weight: 600; }
+.sale-discount-input { width: 7.5rem; }
+.sale-discount-amount { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 600; }
+.sale-discount-add { justify-self: start; }
 .stepper { display: inline-flex; align-items: center; gap: 4px; }
 .stepper .btn { min-width: 36px; padding: 0 8px; justify-content: center; }
 .stepper output { min-width: 2ch; text-align: center; font-variant-numeric: tabular-nums; font-weight: 600; }

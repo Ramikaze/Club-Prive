@@ -39,6 +39,7 @@ export default function ShopProductCard({ product, inCart, canSell, canEditPhoto
       <div className="shop-card-body">
         <h3 className="shop-card-name">{product.name}</h3>
         <p className="shop-card-price">{money(product.price)}</p>
+        {product.lot_qty && <p className="shop-card-lot">{product.lot_qty} pour {money(product.lot_price)}</p>}
         <p>
           {out ? <span className="chip chip-danger">rupture</span>
             : product.low ? <span className="chip chip-warn">stock {product.stock_qty} · faible</span>

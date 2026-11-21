@@ -4,7 +4,7 @@
 // never writes over an account that already moved. Every name and amount here is made up.
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { Server, Client, ok, UM } from './harness.js';
+import { Server, Client, ok, UM, postSale } from './harness.js';
 
 const IMPORT_TOKEN = 'code-import-fictif';
 const servers = [];
@@ -105,7 +105,7 @@ test('conflits : un client qui doit déjà, un membre du même nom, un fournisse
   const prod = ok(await admin.post('/api/products', { category: 'cigare', name: 'Cigare import', reference: 'CIM', price: 5000 * UM, initial_stock: 5 }));
   const kevin = ok(await admin.post('/api/clients', { last_name: 'kevin', phone: '06 000 00 01' }));
   ok(await admin.put(`/api/clients/${kevin.id}/credit-limit`, { credit_limit: 50000 * UM }));
-  ok(await admin.post('/api/shop/sales', {
+  ok(await postSale(admin, {
     account: 'cigares', buyer: { kind: 'client', member_id: kevin.id }, lines: [{ product_id: prod.id, quantity: 1 }], credit: true,
   }));
   ok(await admin.post('/api/members', { first_name: 'ali', last_name: 'fictif', phone: '06 000 00 09' }));

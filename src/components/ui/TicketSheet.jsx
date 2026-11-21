@@ -9,7 +9,8 @@ import BrandLogo from './BrandLogo.jsx';
 import { money, dateTime, fmtDuration } from '../../lib/format.js';
 import { encodeQrMatrix, qrSvgPath } from '../../lib/qrcode.js';
 import { SHOP } from '../../../shared/roles.js';
-import { formatTicketCode, paymentLines, ticketVerifyUrl } from '../../../shared/ticket.js';
+import { formatTicketCode, paymentDiscount, paymentLines, ticketVerifyUrl } from '../../../shared/ticket.js';
+import { discountLabel } from '../../../shared/pricing.js';
 
 export const copyLabel = (copyNo) => (copyNo <= 1 ? 'Original' : `Duplicata n°${copyNo}`);
 
@@ -30,6 +31,8 @@ export default function TicketSheet({ ticket, copyNo, copyText = copyLabel(copyN
   const header = String(ticket.header ?? '').trim();
   const footer = String(ticket.footer ?? '').trim();
   const lines = paymentLines({ kind: ticket.kind, label: ticket.label, amount: ticket.amount, allocations: ticket.allocations });
+  // A Boutique sale's discount: its lines show their price before it, then « Sous-total » and the discount itself.
+  const discount = paymentDiscount(ticket.allocations);
   const paidBy = `${ticket.method}${ticket.reference ? ` (${ticket.reference})` : ''}`;
   const rest = ticket.amount - ticket.card_amount;
 
@@ -64,6 +67,13 @@ export default function TicketSheet({ ticket, copyNo, copyText = copyLabel(copyN
           </li>
         ))}
       </ul>
+
+      {discount > 0 && (
+        <dl className="ts-facts">
+          <div><dt>Sous-total</dt><dd>{money(ticket.amount + discount)}</dd></div>
+          <div><dt>{ticket.shop_discount_kind ? discountLabel(ticket.shop_discount_kind, ticket.shop_discount_value) : 'Remise'}</dt><dd>−{money(discount)}</dd></div>
+        </dl>
+      )}
 
       <div className="ts-total"><span>TOTAL</span><strong>{money(ticket.amount)}</strong></div>
 

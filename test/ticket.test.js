@@ -148,7 +148,8 @@ test('vérification publique : sans session, aucune donnée personnelle', async 
   assert.equal(r.status, 200, JSON.stringify(r.data));
   const t = r.data.ticket;
   for (const key of PUBLIC_LEAKS) assert.equal(key in t, false, key);
-  assert.deepEqual(Object.keys(t).sort(), ['club_name', 'currency', 'initials', 'lines', 'method', 'number', 'paid_at', 'refunded_amount', 'status', 'timezone', 'total']);
+  // `discount` and `discount_label`: a Boutique sale's discount (V31), no personal data.
+  assert.deepEqual(Object.keys(t).sort(), ['club_name', 'currency', 'discount', 'discount_label', 'initials', 'lines', 'method', 'number', 'paid_at', 'refunded_amount', 'status', 'timezone', 'total']);
   assert.deepEqual(t.currency, { label: 'FCFA', decimals: 0 });
   assert.equal(t.timezone, 'Africa/Brazzaville');
   assert.equal(t.initials, 'P. S.');

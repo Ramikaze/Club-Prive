@@ -16,6 +16,7 @@ import { importStockMethods } from './importStock.js';
 import { giftMethods } from './gifts.js';
 import { profitMethods } from './profit.js';
 import { ERASE_GROUPS, ERASE_UNLINKS, eraseClosure } from '../shared/erase.js';
+import { FRANC, discountLabel } from '../shared/pricing.js';
 import { clientAccessMethods } from './clientAccess.js';
 import { clientViewMethods } from './clientView.js';
 import { clientOrderMethods } from './clientOrders.js';
@@ -23,7 +24,7 @@ import { clientRequestMethods } from './clientRequests.js';
 import { billedMethods, DRINK_PART_SQL } from './billed.js';
 import { pushMethods } from './push.js';
 import {
-  newTicketCode, formatTicketNumber, normalizeTicketCode, memberInitials, paymentLines, TICKET_CODE_LENGTH,
+  newTicketCode, formatTicketNumber, normalizeTicketCode, memberInitials, paymentLines, paymentDiscount, TICKET_CODE_LENGTH,
 } from '../shared/ticket.js';
 import { timingSafeEqual } from './auth.js';
 import { decodePhoto } from './photos.js';
@@ -108,6 +109,9 @@ export function defaultSettings() {
     opening_balances: { date: null, amounts: {} },
     low_stock_default: 3,
     expiry_warning_days: 7,
+    // The most the manager may take off a Boutique sale, in % of its total (spec 2026-11-21-remise-prix-par-lot);
+    // 0: no discount at all. The administrator and the associés have no cap.
+    gerant_discount_cap_pct: 10,
   };
 }
 
@@ -502,6 +506,8 @@ export class Club {
         return int(v, "Seuil d'alerte de stock", { min: 0, max: 10000 });
       case 'expiry_warning_days':
         return int(v, "Délai d'alerte d'expiration", { min: 1, max: 90 });
+      case 'gerant_discount_cap_pct':
+        return int(v, 'Remise maximale du gérant', { min: 0, max: 99 });
       default:
         throw invalid(`Paramètre inconnu : ${key}`);
     }
@@ -2702,16 +2708,19 @@ export class Club {
 
   // ---------------------------------------------------------------- consumptions, charges, payments
 
+  // `amount` and `discount` are a Boutique line's own (V31): what is really paid after the lot price and the sale's
+  // discount, and its share of that discount. Every other line costs quantity × unit price, with no discount.
   insertCharge(actor, c) {
     return this.insert(
       `INSERT INTO charges (account, kind, member_id, reservation_id, subscription_id, product_id, label, quantity,
-         unit_price, amount, status, tariff_validated, created_at, created_by, deposit, shop_sale_id, unit_cost)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'due', ?, ?, ?, ?, ?, (SELECT cost_price FROM products WHERE id = ?))`,
+         unit_price, amount, status, tariff_validated, created_at, created_by, deposit, shop_sale_id, unit_cost, discount)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'due', ?, ?, ?, ?, ?, (SELECT cost_price FROM products WHERE id = ?), ?)`,
       c.account, c.kind, c.member_id, c.reservation_id ?? null, c.subscription_id ?? null, c.product_id ?? null,
-      c.label, c.quantity, c.unit_price, c.quantity * c.unit_price, c.tariff_validated ?? 1, this.nowIso(), actor.id,
+      c.label, c.quantity, c.unit_price, c.amount ?? c.quantity * c.unit_price, c.tariff_validated ?? 1, this.nowIso(), actor.id,
       c.deposit ? 1 : 0, c.shop_sale_id ?? null,
       // The cost price of the day, kept with the line (V30): only a product line has one.
       c.kind === 'produit' ? c.product_id ?? null : null,
+      c.discount ?? 0,
     );
   }
 
@@ -2844,14 +2853,16 @@ export class Club {
   }
 
   paymentDTO(p) {
+    // A Boutique line's discount share belongs on its sale's own receipt only: a settlement paying part of a discounted
+    // credit sale shows what it pays, never that sale's discount again.
     const allocations = this.all(
-      `SELECT pa.charge_id, pa.account, pa.amount, c.label, c.quantity, c.reservation_id
+      `SELECT pa.charge_id, pa.account, pa.amount, c.label, c.quantity, c.reservation_id, c.discount
        FROM payment_allocations pa JOIN charges c ON c.id = pa.charge_id WHERE pa.payment_id = ? ORDER BY pa.id`, p.id,
-    );
+    ).map((a) => (p.shop_sale_id ? a : { ...a, discount: 0 }));
     const byAccount = Object.fromEntries(ACCOUNTS.map((k) => [k, 0]));
     for (const a of allocations) byAccount[a.account] += a.amount;
     const shop = p.shop_sale_id
-      ? this.get('SELECT account, buyer_kind, cancelled_at, cancel_reason FROM shop_sales WHERE id = ?', p.shop_sale_id) : null;
+      ? this.get('SELECT account, buyer_kind, cancelled_at, cancel_reason, discount_kind, discount_value FROM shop_sales WHERE id = ?', p.shop_sale_id) : null;
     const walkIn = shop?.buyer_kind === 'journalier';
     const buyer = p.first_name ? buyerShown(shop?.buyer_kind, p) : null;
     return {
@@ -2863,6 +2874,8 @@ export class Club {
       cancelled_at: p.cancelled_at ?? null, cancel_reason: p.cancel_reason ?? null, cancelled_by_name: p.cancelled_by_name ?? null,
       shop_sale_id: p.shop_sale_id ?? null,
       shop_cancelled_at: shop?.cancelled_at ?? null, shop_cancel_reason: shop?.cancel_reason ?? null,
+      // The discount typed for a Boutique sale (V31), to name it on the receipt (« Remise 10 % »).
+      shop_discount_kind: shop?.discount_kind ?? null, shop_discount_value: shop?.discount_value ?? null,
       settlement: !!p.settlement,
     };
   }
@@ -3093,16 +3106,20 @@ export class Club {
     const valid = Boolean(p) && given.length === TICKET_CODE_LENGTH && p.ticket_code?.length === TICKET_CODE_LENGTH;
     const stored = encoder.encode(valid ? p.ticket_code : '0'.repeat(given.length));
     if (!timingSafeEqual(given, stored) || !valid) return null;
+    // The discount on its sale's own receipt only, as in paymentDTO.
+    const allocations = this.all(
+      `SELECT c.label, c.quantity, pa.amount, c.discount FROM payment_allocations pa JOIN charges c ON c.id = pa.charge_id
+       WHERE pa.payment_id = ? ORDER BY pa.id`, p.id,
+    ).map((a) => (p.shop_sale_id ? a : { ...a, discount: 0 }));
     const lines = paymentLines({
       kind: p.kind,
       // A meal's label is free text typed by the staff (a restaurant, a dish): the public page names neither.
       label: p.kind === 'repas' ? 'Repas commandé à l’extérieur' : p.label,
       amount: p.amount,
-      allocations: this.all(
-        `SELECT c.label, c.quantity, pa.amount FROM payment_allocations pa JOIN charges c ON c.id = pa.charge_id
-         WHERE pa.payment_id = ? ORDER BY pa.id`, p.id,
-      ),
+      allocations,
     });
+    const discount = paymentDiscount(allocations);
+    const sale = discount > 0 ? this.get('SELECT discount_kind, discount_value FROM shop_sales WHERE id = ?', p.shop_sale_id) : null;
     const refunded = this.get('SELECT COALESCE(SUM(amount), 0) AS n FROM refunds WHERE payment_id = ?', p.id).n;
     const s = this.settings();
     return {
@@ -3112,8 +3129,10 @@ export class Club {
       timezone: s.timezone,
       number: formatTicketNumber(p.id),
       paid_at: p.paid_at,
-      lines,
+      lines: lines.map(({ label, quantity, amount }) => ({ label, quantity, amount })),
       total: p.amount,
+      // A Boutique sale's discount, shown below the lines as on the paper receipt.
+      discount, discount_label: sale ? discountLabel(sale.discount_kind, sale.discount_value) : null,
       method: p.method,
       initials: p.member_kind === 'journalier' ? '' : memberInitials(p.first_name, p.last_name),
       status: this.ticketStatus(p),
@@ -3187,6 +3206,8 @@ export class Club {
       // The cost price is a margin figure: only the administrator and the associés read it (this.viewer is the
       // account of the request, set by worker/api.js just before each handler).
       ...(isBoss(this.viewer) ? { cost_price: p.cost_price ?? null } : {}),
+      // The lot price (V31), read by every seller: the sale screen prices with it (shared/pricing.js).
+      lot_qty: p.lot_qty ?? null, lot_price: p.lot_price ?? null, extra_price: p.extra_price ?? null,
     };
   }
 
@@ -3217,7 +3238,24 @@ export class Club {
     // Empty is « not known yet »; a cost price left out of the form keeps the current one.
     const rawCost = input.cost_price !== undefined ? input.cost_price : current.cost_price;
     const cost = rawCost === null || rawCost === undefined || rawCost === '' ? null : int(rawCost, 'Prix de revient', { min: 0 });
-    return { category, name, reference, description, price, threshold, active, cost };
+    return { category, name, reference, description, price, threshold, active, cost, lot: this.lotFields(pick, price) };
+  }
+
+  // The lot price (V31, « lot de 3 pour 10 000, puis 3 000 par unité en plus »): the three fields together or none, a
+  // lot cheaper than its pieces at the normal price, a piece beyond it never dearer than the price. Fields left out of
+  // the input keep the product's current ones; all three empty clear the lot.
+  lotFields(pick, price) {
+    const raw = [pick('lot_qty'), pick('lot_price'), pick('extra_price')];
+    const empty = (v) => v === null || v === undefined || v === '';
+    if (raw.every(empty)) return null;
+    if (raw.some(empty)) throw invalid('Prix par lot : remplissez les trois champs (quantité, prix du lot, prix par unité en plus), ou aucun.');
+    const qty = int(raw[0], 'Quantité du lot', { min: 2, max: 99 });
+    const lotPrice = int(raw[1], 'Prix du lot', { min: 0 });
+    const extra = int(raw[2], 'Prix par unité en plus', { min: 0 });
+    if (lotPrice < FRANC || extra < FRANC) throw invalid('Prix par lot : le prix du lot et le prix par unité en plus valent au moins 1 FCFA.');
+    if (lotPrice >= qty * price) throw invalid('Prix par lot : le lot doit coûter moins cher que ses pièces au prix normal.');
+    if (extra > price) throw invalid('Prix par lot : une unité en plus ne peut pas coûter plus que le prix de vente.');
+    return { qty, price: lotPrice, extra };
   }
 
   // Product files, photos and stock belong to the rayon of an associé; the administrator owns both, and the
@@ -3232,9 +3270,11 @@ export class Club {
     if (this.get('SELECT 1 AS x FROM products WHERE reference = ?', f.reference)) throw conflict('REFERENCE_PRISE', 'Cette référence existe déjà.');
     const initial = input.initial_stock === undefined || input.initial_stock === '' ? 0 : int(input.initial_stock, 'Stock initial', { min: 0, max: 100000 });
     const id = this.insert(
-      `INSERT INTO products (category, name, reference, description, price, cost_price, stock_qty, low_stock_threshold, active, is_demo, created_at, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+      `INSERT INTO products (category, name, reference, description, price, cost_price, stock_qty, low_stock_threshold, active, is_demo, created_at, created_by,
+         lot_qty, lot_price, extra_price)
+       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)`,
       f.category, f.name, f.reference, f.description, f.price, f.cost, f.threshold, f.active ? 1 : 0, demo ? 1 : 0, this.nowIso(), actor.id,
+      f.lot?.qty ?? null, f.lot?.price ?? null, f.lot?.extra ?? null,
     );
     if (initial > 0) this.moveStock(actor, id, initial, 'stock_initial', { reason: 'Création du produit' });
     this.audit(actor, 'produit.creer', 'product', id, { ...f, stock_initial: initial });
@@ -3257,8 +3297,9 @@ export class Club {
     }
     this.run(
       `UPDATE products SET category = ?, name = ?, reference = ?, description = ?, price = ?, cost_price = ?, low_stock_threshold = ?, active = ?,
-         updated_at = ?, updated_by = ? WHERE id = ?`,
-      f.category, f.name, f.reference, f.description, f.price, f.cost, f.threshold, f.active ? 1 : 0, this.nowIso(), actor.id, p.id,
+         lot_qty = ?, lot_price = ?, extra_price = ?, updated_at = ?, updated_by = ? WHERE id = ?`,
+      f.category, f.name, f.reference, f.description, f.price, f.cost, f.threshold, f.active ? 1 : 0,
+      f.lot?.qty ?? null, f.lot?.price ?? null, f.lot?.extra ?? null, this.nowIso(), actor.id, p.id,
     );
     // A cost entered (or changed) fills the sales and gifts of this product that had none; one that had a cost keeps
     // it (spec 2026-11-18 « bénéfice réel », §2).
@@ -3268,8 +3309,14 @@ export class Club {
     };
     this.audit(actor, 'produit.modifier', 'product', p.id, {
       ...(filled && (filled.ventes || filled.offerts) ? { prix_de_revient_rempli: filled } : {}),
-      avant: { category: p.category, name: p.name, reference: p.reference, price: p.price, cost_price: p.cost_price ?? null, low_stock_threshold: p.low_stock_threshold, active: !!p.active },
-      apres: { category: f.category, name: f.name, reference: f.reference, price: f.price, cost_price: f.cost, low_stock_threshold: f.threshold, active: f.active },
+      avant: {
+        category: p.category, name: p.name, reference: p.reference, price: p.price, cost_price: p.cost_price ?? null, low_stock_threshold: p.low_stock_threshold, active: !!p.active,
+        lot_qty: p.lot_qty ?? null, lot_price: p.lot_price ?? null, extra_price: p.extra_price ?? null,
+      },
+      apres: {
+        category: f.category, name: f.name, reference: f.reference, price: f.price, cost_price: f.cost, low_stock_threshold: f.threshold, active: f.active,
+        lot_qty: f.lot?.qty ?? null, lot_price: f.lot?.price ?? null, extra_price: f.lot?.extra ?? null,
+      },
     });
     return this.productById(p.id);
   }

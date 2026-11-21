@@ -2,7 +2,7 @@
 // credit and the members' open notes, each with its total and how many owe.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { Server, Client, ok, UM } from './harness.js';
+import { Server, Client, ok, UM, postSale } from './harness.js';
 
 const server = new Server({}, { lenientTariffs: true });
 let admin;
@@ -33,7 +33,7 @@ test('créances : clients réguliers et membres, chacun avec son total et le nom
   // A regular client buys on credit, then settles part of it.
   const client = ok(await ger.post('/api/clients', { first_name: 'awa', last_name: 'creance', phone: '00 00 10 01' }));
   ok(await cha.put(`/api/clients/${client.id}/credit-limit`, { credit_limit: 100000 * UM }));
-  ok(await ger.post('/api/shop/sales', {
+  ok(await postSale(ger, {
     account: 'alcool', buyer: { kind: 'client', member_id: client.id }, lines: [{ product_id: CHP, quantity: 1 }], credit: true,
   }));
   ok(await ger.post(`/api/clients/${client.id}/settlements`, { amount: 20000 * UM, method: 'Espèces' }));

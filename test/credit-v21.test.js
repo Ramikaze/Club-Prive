@@ -3,7 +3,7 @@
 // them (the card movements of a refund) intact; a paid or refunded line counts as settled in full.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Server, Client, ok, UM } from './harness.js';
+import { Server, Client, ok, UM, postSale } from './harness.js';
 import { nodeDb } from '../worker/db-node.js';
 import { MIGRATIONS } from '../worker/schema.js';
 
@@ -41,11 +41,11 @@ test('migration V21 sans perte : encaissements, remboursements et mouvements de 
     const m = ok(await a.post('/api/members', { first_name: 'jean', last_name: 'migration', phone: '00 00 08 21' }));
     ok(await a.post(`/api/members/${m.id}/wallet/recharge`, { amount: 30000 * UM, method: 'Espèces' }));
     // A card sale, then its cancellation: a refund whose card part is a card movement pointing at it.
-    const sale = ok(await a.post('/api/shop/sales', {
+    const sale = ok(await postSale(a, {
       account: 'alcool', buyer: { kind: 'membre', member_id: m.id }, lines: [{ product_id: bottle.id, quantity: 1 }], card: true,
     }));
     ok(await a.post(`/api/shop/sales/${sale.sale.id}/cancel`, { reason: 'Test de migration' }));
-    ok(await a.post('/api/shop/sales', {
+    ok(await postSale(a, {
       account: 'alcool', buyer: { kind: 'journalier' }, lines: [{ product_id: bottle.id, quantity: 1 }], method: 'Espèces',
     }));
     const read = (db) => ({
@@ -74,7 +74,7 @@ test('migration V21 sans perte : encaissements, remboursements et mouvements de 
     await b.login('admin', 'v21-src-password');
     const c = ok(await b.post('/api/clients', { first_name: 'awa', last_name: 'migration', phone: '00 00 08 22' }));
     ok(await b.put(`/api/clients/${c.id}/credit-limit`, { credit_limit: 50000 * UM }));
-    ok(await b.post('/api/shop/sales', { account: 'alcool', buyer: { kind: 'client', member_id: c.id }, lines: [{ product_id: bottle.id, quantity: 1 }], credit: true }));
+    ok(await postSale(b, { account: 'alcool', buyer: { kind: 'client', member_id: c.id }, lines: [{ product_id: bottle.id, quantity: 1 }], credit: true }));
     ok(await b.post(`/api/clients/${c.id}/settlements`, { amount: 5000 * UM, method: 'Espèces' }));
     const last = ok(await b.post(`/api/clients/${c.id}/settlements`, { amount: 15000 * UM, method: 'Espèces' }));
     assert.equal(last.account.owed, 0);

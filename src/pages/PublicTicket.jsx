@@ -73,6 +73,12 @@ function TicketView({ ticket }) {
             </li>
           ))}
         </ul>
+        {ticket.discount > 0 && (
+          <dl className="ticket-public-facts">
+            <div><dt>Sous-total</dt><dd>{moneyText(ticket.total + ticket.discount, ticket.currency)}</dd></div>
+            <div><dt>{ticket.discount_label ?? 'Remise'}</dt><dd>−{moneyText(ticket.discount, ticket.currency)}</dd></div>
+          </dl>
+        )}
         <div className="ticket-public-total"><span>Total</span><strong>{moneyText(ticket.total, ticket.currency)}</strong></div>
         <dl className="ticket-public-facts">
           <div><dt>Payé par</dt><dd>{ticket.method}</dd></div>

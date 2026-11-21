@@ -109,9 +109,16 @@ function ProductDialog({ close, product, onDone }) {
       const costText = (v.cost_price ?? '').trim();
       const cost = costText === '' ? null : parseMoney(costText);
       if (costText !== '' && cost == null) throw new Error('Prix de revient invalide (exemple : 25000 ou 25000,50), ou laissez-le vide.');
+      // The lot price: three fields together, or none (the server says which one is missing).
+      const [lotQty, lotPrice, extraPrice] = [v.lot_qty, v.lot_price, v.extra_price].map((x) => String(x ?? '').trim());
+      const lotMoney = (t) => (t === '' ? null : parseMoney(t));
+      if ((lotPrice !== '' && lotMoney(lotPrice) == null) || (extraPrice !== '' && lotMoney(extraPrice) == null)) {
+        throw new Error('Prix par lot invalide (exemple : 10000).');
+      }
       const body = {
         category: locked ? product.category : v.category, reference: v.reference, name: v.name, description: v.description, price, cost_price: cost,
         low_stock_threshold: Number(v.low_stock_threshold),
+        lot_qty: lotQty === '' ? null : Number(lotQty), lot_price: lotMoney(lotPrice), extra_price: lotMoney(extraPrice),
       };
       if (editing) {
         body.active = Boolean(v.active);
@@ -144,6 +151,12 @@ function ProductDialog({ close, product, onDone }) {
         </div>
         <label className="field"><span>Prix de revient ({settings.currency.label}, facultatif)</span><input name="cost_price" inputMode="decimal" defaultValue={toMajor(product?.cost_price)} />
           <span className="help">Ce que le produit coûte au club (prix d’achat). Nécessaire pour calculer le bénéfice réel et compter les produits offerts ; laissez vide s’il n’est pas encore connu. Le gérant ne le voit pas.</span></label>
+        <div className="form-row">
+          <label className="field"><span>Prix par lot : pièces du lot</span><input type="number" name="lot_qty" min="2" max="99" step="1" inputMode="numeric" defaultValue={product?.lot_qty ?? ''} /></label>
+          <label className="field"><span>Prix du lot ({settings.currency.label})</span><input name="lot_price" inputMode="decimal" defaultValue={toMajor(product?.lot_price)} /></label>
+          <label className="field"><span>Puis par pièce en plus ({settings.currency.label})</span><input name="extra_price" inputMode="decimal" defaultValue={toMajor(product?.extra_price)} /></label>
+        </div>
+        <p className="subtle">Prix par lot, facultatif. Exemple : 3 pour 10 000, puis 3 000 par pièce en plus. Laissez vide s’il n’y a pas de lot. Il s’applique à l’écran Vente de la Boutique.</p>
         {editing && (
           <>
             <label className="check"><input type="checkbox" name="active" value="1" defaultChecked={product.active} /><span>Produit actif (proposé à la vente)</span></label>
@@ -368,6 +381,7 @@ function ProductSheet({ close, product, onDone }) {
             {p.description && <p>{p.description}</p>}
             <dl className="kv">
               <dt>Prix de vente</dt><dd>{money(p.price)}</dd>
+              {p.lot_qty && <><dt>Prix par lot</dt><dd>{p.lot_qty} pour {money(p.lot_price)}, puis {money(p.extra_price)} l’unité</dd></>}
               {'cost_price' in p && <><dt>Prix de revient</dt><dd>{p.cost_price === null ? <span className="subtle">à renseigner</span> : money(p.cost_price)}</dd></>}
               <dt>Stock</dt><dd><StockChip p={p} /></dd>
             </dl>

@@ -59,21 +59,28 @@ export function ticketVerifyUrl(origin, id, code) {
 export const RECHARGE_LINE_LABEL = 'Approvisionnement carte membre';
 
 // The lines a receipt shows. A recharge or an outside meal is a payment with no line (nothing is sold through
-// a charge), so it shows one line of its own: « Recharge carte membre », or the meal's label.
+// a charge), so it shows one line of its own: « Recharge carte membre », or the meal's label. A Boutique line shows
+// its price before the sale's discount (what it was paid plus its share of the discount); the discount shows once,
+// below the lines (paymentDiscount).
 export function paymentLines({ kind, label, amount, allocations }) {
   if (kind === 'recharge') return [{ label: RECHARGE_LINE_LABEL, quantity: 1, amount }];
   if (kind === 'repas') return [{ label: clean(label), quantity: 1, amount }];
-  return allocations || [];
+  return (allocations || []).map((a) => (a.discount ? { ...a, amount: a.amount + a.discount } : a));
 }
+
+// The discount of a Boutique sale on its receipt: the shares its lines carry (0 for any other payment).
+export const paymentDiscount = (allocations) => (allocations || []).reduce((sum, a) => sum + (Number(a.discount) || 0), 0);
 
 // The receipt as text, for WhatsApp. `money(hundredths)` and `dateTime(iso)` are the caller's formatters.
 // Without `verifyUrl` (the demo) there is no « Vérifiez » line; a positive `refunded` adds a « Remboursé » line.
 // `clientLine` (a Boutique sale: « Client journalier », « Prénom NOM (C-0003) ») replaces the name and number on the « Client » line.
 // A positive `cardAmount` replaces « Payé » by the card's share and the rest with its method; `balance` (the
 // card's balance after the payment) and `timeAvailable` (minutes) add the member's balances when not null.
+// A positive `discount` (a Boutique sale's) adds « Sous-total » and the discount (`discountLabel`) before the total.
 export function ticketWhatsAppText({
   clubName, number, copyLabel, paidAt, memberName, memberNo, lines, total, method, reference, cashier,
   refunded, verifyUrl, footer, money, dateTime, cardAmount = 0, balance = null, timeAvailable = null, cancelledAt = null, clientLine = null,
+  discount = 0, discountLabel = null,
 }) {
   const client = clean(clientLine) || [clean(memberName), clean(memberNo) && `(${clean(memberNo)})`].filter(Boolean).join(' ');
   const paid = [clean(method), clean(reference) && `(${clean(reference)})`].filter(Boolean).join(' ');
@@ -91,6 +98,8 @@ export function ticketWhatsAppText({
       const quantity = Number(line.quantity) > 1 ? `${line.quantity} × ` : '';
       return `- ${quantity}${line.label}  ${money(line.amount)}`;
     }),
+    Number(discount) > 0 && `Sous-total : ${money(total + discount)}`,
+    Number(discount) > 0 && `${clean(discountLabel) || 'Remise'} : −${money(discount)}`,
     `TOTAL : ${money(total)}`,
     ...payment,
     balance !== null && balance !== undefined && `Solde carte : ${money(balance)}`,

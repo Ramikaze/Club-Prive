@@ -2,7 +2,7 @@
 // an « Autre boisson ».
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { Server, Client, ok, UM } from './harness.js';
+import { Server, Client, ok, UM, postSale } from './harness.js';
 
 const server = new Server({}, { lenientTariffs: true });
 let admin;
@@ -68,7 +68,7 @@ test('vendu en séance : la catégorie ne change plus', async () => {
 });
 
 test('vendu en Boutique : la catégorie ne change plus', async () => {
-  ok(await admin.post('/api/shop/sales', { account: 'alcool', buyer: { kind: 'journalier' }, lines: [{ product_id: CHP, quantity: 1 }], method: 'Espèces' }));
+  ok(await postSale(admin, { account: 'alcool', buyer: { kind: 'journalier' }, lines: [{ product_id: CHP, quantity: 1 }], method: 'Espèces' }));
   assert.equal(await soldOf(CHP), true);
   const r = await admin.put(`/api/products/${CHP}`, { category: 'boisson' });
   assert.equal(r.status, 409, JSON.stringify(r.data));
@@ -103,7 +103,7 @@ test('la Boutique ne vend jamais une autre boisson', async () => {
   // Each seller tries the rayons they may sell in (another rayon is refused earlier, on rights).
   const tries = [[cha, 'alcool'], [cig, 'cigares'], [ger, 'alcool'], [ger, 'cigares'], [admin, 'alcool'], [admin, 'cigares']];
   for (const [who, account] of tries) {
-    const r = await who.post('/api/shop/sales', { account, buyer: { kind: 'journalier' }, lines: [{ product_id: id, quantity: 1 }], method: 'Espèces' });
+    const r = await postSale(who, { account, buyer: { kind: 'journalier' }, lines: [{ product_id: id, quantity: 1 }], method: 'Espèces' });
     assert.equal(r.status, 400, JSON.stringify(r.data));
     assert.equal(r.data.error.code, 'RAYON');
   }

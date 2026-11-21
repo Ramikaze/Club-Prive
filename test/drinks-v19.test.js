@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { nodeDb } from '../worker/db-node.js';
 import { MIGRATIONS } from '../worker/schema.js';
 import { CATEGORIES, CATEGORY_LABEL, CATEGORY_PLURAL, accountOfCategory } from '../shared/roles.js';
-import { Server, Client, ok, UM } from './harness.js';
+import { Server, Client, ok, UM, postSale } from './harness.js';
 
 const server = new Server({}, { lenientTariffs: true });
 let admin;
@@ -94,7 +94,7 @@ test('migration sans perte : V19 garde produits, stocks, photos et ventes', asyn
     ok(await a.put(`/api/products/${cigar.id}/photo`, picture(5000)));
     ok(await a.post(`/api/products/${bottle.id}/stock`, { kind: 'entree', quantity: 2, reason: 'Livraison' }));
     const day = ok(await a.post('/api/clients', { first_name: 'awa', last_name: 'migration', phone: '00 00 08 01' }));
-    ok(await a.post('/api/shop/sales', {
+    ok(await postSale(a, {
       account: 'alcool', buyer: { kind: 'client', member_id: day.id }, lines: [{ product_id: bottle.id, quantity: 1 }], method: 'Espèces',
     }));
     const read = (db) => ({

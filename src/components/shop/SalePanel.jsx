@@ -1,16 +1,19 @@
 // The sale panel of one tab: title and account, buyer, lines, total, payment, « Encaisser » and the ticket line.
 // The card of a member pays first and what it cannot pay is asked for by another method, as in the payment dialog.
 // A regular client with a credit limit may buy « À crédit »: nothing is paid, the sale waits on his account.
+// Lines are priced with their lot and the cart's discount (saleTotals.js, as the server prices them); the total shown
+// goes with the sale, and the server refuses it if its own differs (spec 2026-11-21-remise-prix-par-lot).
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from '../ui/Icon.jsx';
-import { FormError, Notice } from '../ui/ui.jsx';
+import { FormError, Notice, Segmented } from '../ui/ui.jsx';
 import { toast } from '../ui/toast.jsx';
 import BuyerPicker from './BuyerPicker.jsx';
+import { cartTotals, discountOf } from './saleTotals.js';
 import { api } from '../../lib/api.js';
 import { money } from '../../lib/format.js';
 import { useLoad, useSubmit } from '../../lib/hooks.js';
-import { useSettings } from '../../store/useStore.js';
+import { useMe, useSettings } from '../../store/useStore.js';
 import { CARD_METHOD, CREDIT_LABEL } from '../../../shared/rules.js';
 import { SHOP } from '../../../shared/roles.js';
 
@@ -18,7 +21,9 @@ const methodIcon = (m) => (/esp[eè]ce/i.test(m) ? 'cash' : /virement|banque/i.t
 
 export default function SalePanel({ account, products, cart, setCart, onSold, onRefused }) {
   const shop = SHOP[account];
-  const methods = useSettings().payment_methods.filter((m) => m !== CARD_METHOD);
+  const settings = useSettings();
+  const me = useMe();
+  const methods = settings.payment_methods.filter((m) => m !== CARD_METHOD);
   const navigate = useNavigate();
   const { busy, error, submit } = useSubmit();
   const { lines, buyer } = cart;
@@ -26,7 +31,15 @@ export default function SalePanel({ account, products, cart, setCart, onSold, on
   const [restMethod, setRestMethod] = useState(methods[0] ?? '');
 
   const rows = products.filter((p) => lines[p.id] > 0).map((p) => ({ p, qty: lines[p.id] }));
-  const total = rows.reduce((s, r) => s + r.p.price * r.qty, 0);
+  // The manager is held to his cap (the server checks it again); the administrator and the associés are not.
+  const capPct = me?.role === 'gerant' ? settings.gerant_discount_cap_pct : null;
+  const totals = cartTotals(products, cart, capPct);
+  const total = totals.total;
+  const priced = new Map(totals.lines.map((l) => [l.product_id, l]));
+  const discountOpen = Boolean(cart.discount);
+  // A discount that cannot be taken (too strong, above the cap, mistyped) blocks the sale with its reason.
+  const discountBlocked = discountOpen && totals.problem !== null;
+  const setDiscount = (discount) => setCart((c) => ({ ...c, discount }));
 
   const isMember = buyer.kind === 'membre' && buyer.person !== null;
   const memberId = isMember ? buyer.person.id : null;
@@ -69,6 +82,8 @@ export default function SalePanel({ account, products, cart, setCart, onSold, on
         buyer: buyer.kind === 'journalier' ? { kind: 'journalier' } : { kind: buyer.kind, member_id: buyer.person.id },
         lines: rows.map((r) => ({ product_id: r.p.id, quantity: r.qty })),
         ...(cart.order_id ? { order_id: cart.order_id } : {}),
+        ...(discountOf(cart.discount) ? { discount: discountOf(cart.discount) } : {}),
+        expected_total: total,
         ...(onCredit ? { credit: true } : byCard ? { card: true, method: rest > 0 ? restMethod : undefined } : { method }),
       };
       // The cart's own key, kept across edits and failed attempts: the server stores it only after a successful sale.
@@ -121,13 +136,42 @@ export default function SalePanel({ account, products, cart, setCart, onSold, on
                 <output aria-label={`Quantité de ${p.name}`}>{qty}</output>
                 <button type="button" className="btn btn-sm" disabled={qty >= Math.min(99, p.stock_qty)} onClick={() => setQty(p.id, qty + 1)} aria-label={`Ajouter un ${p.name}`}>+</button>
               </span>
-              <span className="sale-line-amount">{money(p.price * qty)}</span>
+              <span className="sale-line-amount">{money(priced.get(p.id)?.price ?? p.price * qty)}</span>
+              {/* Under the whole line: on a phone the name's column is too narrow for it. */}
+              {priced.get(p.id)?.lot && <span className="sale-line-lot">prix par lot ({p.lot_qty} pour {money(p.lot_price)})</span>}
             </li>
           ))}
         </ul>
       ) : <p className="subtle sale-empty">Le panier est vide. Touchez « Ajouter » sur un produit.</p>}
 
-      <dl className="calc"><div className="total"><dt>Total</dt><dd>{money(total)}</dd></div></dl>
+      {discountOpen ? (
+        <>
+          <dl className="calc"><div><dt>Sous-total</dt><dd>{money(totals.subtotal)}</dd></div></dl>
+          <div className="sale-discount">
+            <span className="sale-discount-label">Remise</span>
+            <Segmented label="Type de remise" value={cart.discount.kind}
+              options={[['pourcentage', '%'], ['montant', settings.currency.label]]} onChange={(kind) => setDiscount({ kind, input: '' })} />
+            <input className="sale-discount-input" name="discount" value={cart.discount.input}
+              inputMode={cart.discount.kind === 'pourcentage' ? 'numeric' : 'decimal'}
+              aria-label={cart.discount.kind === 'pourcentage' ? 'Remise en pourcentage' : `Remise en ${settings.currency.label}`}
+              onChange={(e) => setDiscount({ ...cart.discount, input: e.target.value })} />
+            <span className="sale-discount-amount">{totals.discount ? `−${money(totals.discount)}` : ''}</span>
+            <button type="button" className="btn btn-sm btn-ghost" onClick={() => setDiscount(null)}>Retirer</button>
+          </div>
+          {capPct !== null && <p className="subtle">{capPct} % au maximum</p>}
+          {discountBlocked && <Notice kind="warn">{totals.problem.message}</Notice>}
+          <dl className="calc"><div className="total"><dt>Total</dt><dd>{money(total)}</dd></div></dl>
+        </>
+      ) : (
+        <>
+          <dl className="calc"><div className="total"><dt>Total</dt><dd>{money(total)}</dd></div></dl>
+          {capPct !== 0 && rows.length > 0 && (
+            <button type="button" className="btn btn-sm btn-ghost sale-discount-add" onClick={() => setDiscount({ kind: 'pourcentage', input: '' })}>
+              + Remise
+            </button>
+          )}
+        </>
+      )}
 
       <fieldset className="field pay-methods">
         <legend>Moyen de paiement</legend>
@@ -181,7 +225,7 @@ export default function SalePanel({ account, products, cart, setCart, onSold, on
         <Notice kind="warn">Crédit insuffisant pour ce panier : retirez un produit ou choisissez un autre moyen de paiement.</Notice>
       )}
       <FormError error={error} />
-      <button type="submit" className="btn btn-primary btn-block" disabled={busy || loadingBalance || loadingCredit || balanceUnread || creditUnread || creditBlocked || !rows.length || needsBuyer} aria-busy={busy}>
+      <button type="submit" className="btn btn-primary btn-block" disabled={busy || loadingBalance || loadingCredit || balanceUnread || creditUnread || creditBlocked || discountBlocked || !rows.length || needsBuyer} aria-busy={busy}>
         {!rows.length ? 'Encaisser' : onCredit ? `Vendre à crédit ${money(total)}` : `Encaisser ${money(total)}`}
       </button>
       {needsBuyer && <p className="subtle">Choisissez l’acheteur pour encaisser.</p>}

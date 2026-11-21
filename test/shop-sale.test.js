@@ -1,7 +1,7 @@
 // Boutique counter sale: stock, card, rights per rayon, idempotency, refusals that leave nothing behind, exports.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { Server, Client, ok, UM } from './harness.js';
+import { Server, Client, ok, UM, postSale } from './harness.js';
 
 const server = new Server({});
 let admin;
@@ -19,7 +19,7 @@ const refused = (r, status, code) => {
   assert.equal(r.status, status, JSON.stringify(r.data));
   if (code) assert.equal(r.data.error.code, code);
 };
-const sale = (who, body, headers) => who.post('/api/shop/sales', body, headers);
+const sale = (who, body, headers) => postSale(who, body, headers);
 let n = 0;
 const newMember = async () => ok(await ger.post('/api/members', { first_name: 'jean', last_name: `membre${++n}`, phone: `00 00 02 ${String(n).padStart(2, '0')}` }));
 const newClient = async () => ok(await ger.post('/api/clients', { first_name: 'awa', last_name: `client${++n}`, phone: `00 00 03 ${String(n).padStart(2, '0')}` }));
