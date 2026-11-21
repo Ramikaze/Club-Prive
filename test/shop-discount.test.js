@@ -5,6 +5,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { Server, Client, ok, UM, postSale } from './harness.js';
 import { paymentLines } from '../shared/ticket.js';
+import { addDays } from '../shared/time.js';
 
 const server = new Server({});
 let admin;
@@ -208,4 +209,28 @@ test('règlement d’une vente à crédit remisée : le reçu ne répète pas la
   assert.equal(pub.discount, 0);
   assert.equal(pub.discount_label, null);
   assert.equal(pub.lines.reduce((n, l) => n + l.amount, 0), 6000 * UM);
+});
+
+test('Remises accordées : une journée passée ne change pas après une annulation plus tard', async () => {
+  const yesterday = addDays(today, -1);
+  const r = ok(await postSale(admin, { ...walkIn, lines: [{ product_id: BARREDA, quantity: 1 }], discount: { kind: 'montant', value: 500 * UM } }));
+  // The sale as made yesterday: its cancellation comes today.
+  server.club.run('UPDATE shop_sales SET created_at = ? WHERE id = ?', `${yesterday}T12:00:00.000Z`, r.sale.id);
+  const day = async () => ok(await admin.get(`/api/shop/summary?from=${yesterday}`)).accounts.cigares.discounts;
+  assert.equal(await day(), 500 * UM);
+  ok(await admin.post(`/api/shop/sales/${r.sale.id}/cancel`, { reason: 'Test de remise' }));
+  assert.equal(await day(), 500 * UM);
+});
+
+test('export « lignes » : la colonne Remise explique quantité × prix unitaire − montant', async () => {
+  const r = ok(await postSale(admin, { ...walkIn, lines: [{ product_id: COUPE, quantity: 4 }], discount: { kind: 'pourcentage', value: 10 } }));
+  const sheet = ok(await admin.get(`/api/export/lignes?from=${today}&to=${today}&format=json`));
+  const at = (name) => sheet.header.indexOf(name);
+  const value = (v) => (v && typeof v === 'object' ? v.money : v);
+  assert.ok(at('Remise (FCFA)') > at('Prix unitaire (FCFA)'), JSON.stringify(sheet.header));
+  const row = sheet.rows.find((x) => x[at('N° ligne')] === r.sale.lines[0].charge_id);
+  // 4 × 5 000 = 20 000; 13 000 with the lot, 10 % off: 11 700 paid, 8 300 taken off in all (the sheet is in francs).
+  assert.equal(value(row[at('Remise (FCFA)')]), 8300);
+  assert.equal(value(row[at('Montant (FCFA)')]), 11700);
+  assert.equal(row[at('Quantité')] * value(row[at('Prix unitaire (FCFA)')]) - value(row[at('Remise (FCFA)')]), value(row[at('Montant (FCFA)')]));
 });

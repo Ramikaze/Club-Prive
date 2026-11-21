@@ -93,7 +93,8 @@ export function priceSale(lines, discount, { capPct = null } = {}) {
   }));
   const prices = priced.map((l) => l.price);
   const subtotal = prices.reduce((s, p) => s + p, 0);
-  const result = discount == null ? { amount: 0 } : discountOf(subtotal, prices, discount, capPct);
+  // An empty cart has nothing to take a discount off: no amount, nothing to refuse.
+  const result = discount == null || !priced.length ? { amount: 0 } : discountOf(subtotal, prices, discount, capPct);
   const shares = result.amount ? spreadDiscount(prices, result.amount) : prices.map(() => 0);
   const out = priced.map((l, i) => ({ ...l, discount: shares[i], amount: l.price - shares[i] }));
   const total = subtotal - (result.amount ?? 0);

@@ -280,13 +280,16 @@ export const shopMethods = {
         'SELECT id FROM shop_sales WHERE account = ? AND created_at >= ? AND created_at < ? ORDER BY created_at DESC, id DESC', account, a, b,
       ).map((x) => this.shopSaleDTO(x.id));
       let total = 0;
-      // The discounts given on the period's sales (V31), a sale cancelled since left out: what the bosses read.
+      // The discounts given on the period's sales (V31), counted as the sales are: a sale cancelled within the period
+      // is left out, one cancelled later keeps its place, so a past period never changes afterwards.
       let discounts = 0;
       for (const s of sales) {
         addSplit(s.buyer_kind, s.amount, s.card_amount, s.method, 1);
         total += s.amount;
-        if (!(s.cancelled_at && s.cancelled_at >= a && s.cancelled_at < b)) count += 1;
-        if (!s.cancelled_at) discounts += s.discount;
+        if (!(s.cancelled_at && s.cancelled_at >= a && s.cancelled_at < b)) {
+          count += 1;
+          discounts += s.discount;
+        }
       }
       // One line per cancelled sale, with what went back in this period (the refunds of a sale share one moment).
       const sold = new Map();

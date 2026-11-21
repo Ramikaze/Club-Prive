@@ -50,7 +50,8 @@ test('migration V31 sans perte : lignes, paiements, remboursements et stock gard
     await source.addUser('admin', 'Propriétaire', 'admin', 'v31-src-password');
     await source.addUser('cig', 'Associé cigares', 'associe', 'v31-cig-password', 'cigares');
     const a = new Client(source);
-    await a.login('admin', 'v31-src-password');
+    const bundle = await a.login('admin', 'v31-src-password');
+    const today = bundle.biz_today;
     const cig = new Client(source);
     await cig.login('cig', 'v31-cig-password');
     const cigar = ok(await a.post('/api/products', { category: 'cigare', name: 'Cigare v31', reference: 'C31', price: 5000 * UM, initial_stock: 10 }));
@@ -71,8 +72,18 @@ test('migration V31 sans perte : lignes, paiements, remboursements et stock gard
     ok(await a.post(`/api/clients/${c.id}/settlements`, { amount: 2000 * UM, method: 'Espèces' }));
     // A gift by the associé of the rayon.
     ok(await cig.post(`/api/products/${cigar.id}/offer`, { quantity: 1, reason: 'Test de migration' }));
+    // A session: a member's plan, his booking and a cigar served in it; and a regular client's « Dette reprise ».
+    const s = ok(await a.post('/api/members', { first_name: 'lea', last_name: 'seance', phone: '00 00 09 33' }));
+    ok(await a.post(`/api/members/${s.id}/subscriptions`, { plan_id: bundle.plans.find((x) => x.code === 'MENSUELLE').id, start_date: today }));
+    const booking = ok(await a.post('/api/reservations', { member_id: s.id, room_id: bundle.rooms[0].id, date: today, start_time: '06:00', duration_min: 60 }));
+    ok(await a.post(`/api/reservations/${booking.reservation.id}/items`, { product_id: cigar.id, quantity: 1 }));
+    ok(await a.post(`/api/clients/${c.id}/carryovers`, { amount: 10000 * UM, account: 'cigares', note: 'Reprise de migration' }));
     const expected = read(source.db);
-    assert.equal(expected.charges.length, 3); // card sale (cancelled), walk-in sale, credit sale
+    // Boutique lines (card sale cancelled, walk-in, credit), a plan, a session's cigar, a « Dette reprise ».
+    assert.ok(expected.charges.filter((c) => c.shop_sale_id !== null).length === 3);
+    assert.ok(expected.charges.some((c) => c.kind === 'abonnement' && c.subscription_id !== null));
+    assert.ok(expected.charges.some((c) => c.reservation_id !== null && c.kind === 'produit'));
+    assert.ok(expected.charges.some((c) => c.carryover === 1));
     assert.ok(expected.refunds.length >= 1);
     assert.ok(expected.stock.some((s) => s.gift_id !== null));
 

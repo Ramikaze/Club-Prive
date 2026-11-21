@@ -104,3 +104,8 @@ test('priceSale : sans remise', () => {
   assert.equal(r.total, r.subtotal);
   assert.deepEqual(r.lines.map((l) => [l.discount, l.amount]), [[0, 16000 * UM]]);
 });
+
+test('priceSale : panier vide, aucune remise à refuser', () => {
+  const r = priceSale([], { kind: 'pourcentage', value: 10 });
+  assert.deepEqual({ problem: r.problem, discount: r.discount, total: r.total, lines: r.lines }, { problem: null, discount: 0, total: 0, lines: [] });
+});

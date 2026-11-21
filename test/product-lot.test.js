@@ -60,3 +60,11 @@ test('prix par lot : noté au journal', async () => {
   assert.deepEqual(lotOf(avant), { lot_qty: null, lot_price: null, extra_price: null });
   assert.deepEqual(lotOf(apres), LOT);
 });
+
+test('prix par lot : à la création, le journal nomme les champs comme à la modification', async () => {
+  const p = ok(await newCutter(LOT));
+  const row = server.club.get("SELECT details FROM audit_log WHERE action = 'produit.creer' AND entity_id = ?", p.id);
+  const details = JSON.parse(row.details);
+  assert.deepEqual(lotOf(details), LOT);
+  assert.equal('lot' in details, false);
+});
