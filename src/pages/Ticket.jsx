@@ -17,7 +17,8 @@ import { useLoad } from '../lib/hooks.js';
 import { isoTime } from '../lib/sort.js';
 import { SortTh, useSort } from '../components/ui/Sortable.jsx';
 import { useStore } from '../store/useStore.js';
-import { paymentLines, ticketVerifyUrl, ticketWhatsAppText } from '../../shared/ticket.js';
+import { paymentDiscount, paymentLines, ticketVerifyUrl, ticketWhatsAppText } from '../../shared/ticket.js';
+import { discountLabel } from '../../shared/pricing.js';
 import { mealWhatsAppText, paymentWhatsAppText, rechargeWhatsAppText } from '../../shared/wallet.js';
 import { SHOP } from '../../shared/roles.js';
 import { waDigits } from '../../shared/whatsapp.js';
@@ -60,6 +61,8 @@ function whatsAppText(ticket, copyNo) {
     clientLine: ticket.client_line,
     lines: paymentLines({ kind: ticket.kind, label: ticket.label, amount: ticket.amount, allocations: ticket.allocations }),
     total: ticket.amount,
+    discount: paymentDiscount(ticket.allocations),
+    discountLabel: ticket.shop_discount_kind ? discountLabel(ticket.shop_discount_kind, ticket.shop_discount_value) : null,
     method: ticket.method,
     reference: ticket.reference,
     cashier: ticket.created_by_name,

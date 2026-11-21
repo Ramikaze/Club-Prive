@@ -16,7 +16,7 @@ import { importStockMethods } from './importStock.js';
 import { giftMethods } from './gifts.js';
 import { profitMethods } from './profit.js';
 import { ERASE_GROUPS, ERASE_UNLINKS, eraseClosure } from '../shared/erase.js';
-import { FRANC } from '../shared/pricing.js';
+import { FRANC, discountLabel } from '../shared/pricing.js';
 import { clientAccessMethods } from './clientAccess.js';
 import { clientViewMethods } from './clientView.js';
 import { clientOrderMethods } from './clientOrders.js';
@@ -24,7 +24,7 @@ import { clientRequestMethods } from './clientRequests.js';
 import { billedMethods, DRINK_PART_SQL } from './billed.js';
 import { pushMethods } from './push.js';
 import {
-  newTicketCode, formatTicketNumber, normalizeTicketCode, memberInitials, paymentLines, TICKET_CODE_LENGTH,
+  newTicketCode, formatTicketNumber, normalizeTicketCode, memberInitials, paymentLines, paymentDiscount, TICKET_CODE_LENGTH,
 } from '../shared/ticket.js';
 import { timingSafeEqual } from './auth.js';
 import { decodePhoto } from './photos.js';
@@ -2854,13 +2854,13 @@ export class Club {
 
   paymentDTO(p) {
     const allocations = this.all(
-      `SELECT pa.charge_id, pa.account, pa.amount, c.label, c.quantity, c.reservation_id
+      `SELECT pa.charge_id, pa.account, pa.amount, c.label, c.quantity, c.reservation_id, c.discount
        FROM payment_allocations pa JOIN charges c ON c.id = pa.charge_id WHERE pa.payment_id = ? ORDER BY pa.id`, p.id,
     );
     const byAccount = Object.fromEntries(ACCOUNTS.map((k) => [k, 0]));
     for (const a of allocations) byAccount[a.account] += a.amount;
     const shop = p.shop_sale_id
-      ? this.get('SELECT account, buyer_kind, cancelled_at, cancel_reason FROM shop_sales WHERE id = ?', p.shop_sale_id) : null;
+      ? this.get('SELECT account, buyer_kind, cancelled_at, cancel_reason, discount_kind, discount_value FROM shop_sales WHERE id = ?', p.shop_sale_id) : null;
     const walkIn = shop?.buyer_kind === 'journalier';
     const buyer = p.first_name ? buyerShown(shop?.buyer_kind, p) : null;
     return {
@@ -2872,6 +2872,8 @@ export class Club {
       cancelled_at: p.cancelled_at ?? null, cancel_reason: p.cancel_reason ?? null, cancelled_by_name: p.cancelled_by_name ?? null,
       shop_sale_id: p.shop_sale_id ?? null,
       shop_cancelled_at: shop?.cancelled_at ?? null, shop_cancel_reason: shop?.cancel_reason ?? null,
+      // The discount typed for a Boutique sale (V31), to name it on the receipt (« Remise 10 % »).
+      shop_discount_kind: shop?.discount_kind ?? null, shop_discount_value: shop?.discount_value ?? null,
       settlement: !!p.settlement,
     };
   }
@@ -3102,16 +3104,19 @@ export class Club {
     const valid = Boolean(p) && given.length === TICKET_CODE_LENGTH && p.ticket_code?.length === TICKET_CODE_LENGTH;
     const stored = encoder.encode(valid ? p.ticket_code : '0'.repeat(given.length));
     if (!timingSafeEqual(given, stored) || !valid) return null;
+    const allocations = this.all(
+      `SELECT c.label, c.quantity, pa.amount, c.discount FROM payment_allocations pa JOIN charges c ON c.id = pa.charge_id
+       WHERE pa.payment_id = ? ORDER BY pa.id`, p.id,
+    );
     const lines = paymentLines({
       kind: p.kind,
       // A meal's label is free text typed by the staff (a restaurant, a dish): the public page names neither.
       label: p.kind === 'repas' ? 'Repas commandé à l’extérieur' : p.label,
       amount: p.amount,
-      allocations: this.all(
-        `SELECT c.label, c.quantity, pa.amount FROM payment_allocations pa JOIN charges c ON c.id = pa.charge_id
-         WHERE pa.payment_id = ? ORDER BY pa.id`, p.id,
-      ),
+      allocations,
     });
+    const discount = paymentDiscount(allocations);
+    const sale = discount > 0 ? this.get('SELECT discount_kind, discount_value FROM shop_sales WHERE id = ?', p.shop_sale_id) : null;
     const refunded = this.get('SELECT COALESCE(SUM(amount), 0) AS n FROM refunds WHERE payment_id = ?', p.id).n;
     const s = this.settings();
     return {
@@ -3121,8 +3126,10 @@ export class Club {
       timezone: s.timezone,
       number: formatTicketNumber(p.id),
       paid_at: p.paid_at,
-      lines,
+      lines: lines.map(({ label, quantity, amount }) => ({ label, quantity, amount })),
       total: p.amount,
+      // A Boutique sale's discount, shown below the lines as on the paper receipt.
+      discount, discount_label: sale ? discountLabel(sale.discount_kind, sale.discount_value) : null,
       method: p.method,
       initials: p.member_kind === 'journalier' ? '' : memberInitials(p.first_name, p.last_name),
       status: this.ticketStatus(p),

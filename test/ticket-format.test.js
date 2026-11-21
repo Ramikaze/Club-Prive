@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   TICKET_ALPHABET, TICKET_CODE_LENGTH, newTicketCode, formatTicketNumber, formatTicketCode,
-  normalizeTicketCode, memberInitials, ticketVerifyUrl, ticketWhatsAppText, paymentLines, RECHARGE_LINE_LABEL,
+  normalizeTicketCode, memberInitials, ticketVerifyUrl, ticketWhatsAppText, paymentLines, paymentDiscount, RECHARGE_LINE_LABEL,
 } from '../shared/ticket.js';
 import {
   bookingWhatsAppText, mealWhatsAppText, paymentWhatsAppText, rechargeWhatsAppText, renewalWhatsAppText, statementWhatsAppText,
@@ -286,4 +286,28 @@ test('paymentWhatsAppText : une vente Boutique dit « boutique cigares »', () =
   assert.match(text[1], /\(boutique cigares\) a bien été reçu \(Espèces\)\.$/);
   const card = paymentWhatsAppText({ ...base, amount: 50000 * 100, cardAmount: 20000 * 100, balance: 0, method: 'MTN MoMo', for: 'boutique champagne' });
   assert.ok(card.includes('(boutique champagne)'));
+});
+
+test('paymentLines : une ligne Boutique montre son prix avant remise', () => {
+  const allocations = [
+    { label: 'Coupe-cigare', quantity: 4, amount: 1170000, discount: 130000 },
+    { label: 'Cigare', quantity: 1, amount: 500000 },
+  ];
+  const lines = paymentLines({ kind: 'encaissement', amount: 1670000, allocations });
+  assert.deepEqual(lines.map((l) => l.amount), [1300000, 500000]);
+  assert.equal(paymentDiscount(allocations), 130000);
+  assert.equal(paymentDiscount([]), 0);
+  assert.equal(paymentDiscount(undefined), 0);
+});
+
+test('ticketWhatsAppText : sous-total et remise', () => {
+  const text = ticketWhatsAppText({
+    ...base,
+    lines: [{ label: 'Coupe-cigare', quantity: 4, amount: 1300000 }, { label: 'Barreda O21', quantity: 1, amount: 1250000 }],
+    total: 2295000, discount: 255000, discountLabel: 'Remise 10\u00a0%',
+  }).split('\n');
+  const i = text.indexOf('TOTAL : 22950 FCFA');
+  assert.ok(i > 1, text.join('\n'));
+  assert.equal(text[i - 2], 'Sous-total : 25500 FCFA');
+  assert.equal(text[i - 1], 'Remise 10\u00a0% : −2550 FCFA');
 });

@@ -154,3 +154,25 @@ test('total contrôlé : manquant ou différent', async () => {
   assert.deepEqual(counts(), before);
   ok(await ger.post('/api/shop/sales', { ...body, expected_total: 13000 * UM }));
 });
+
+test('ticket : remise sur le ticket et la page publique', async () => {
+  const r = ok(await postSale(ger, {
+    ...walkIn, lines: [{ product_id: COUPE, quantity: 4 }, { product_id: BARREDA, quantity: 1 }], discount: { kind: 'pourcentage', value: 10 },
+  }));
+  const { ticket } = ok(await ger.get(`/api/payments/${r.payment.id}/ticket`));
+  assert.equal(ticket.shop_discount_kind, 'pourcentage');
+  assert.equal(ticket.shop_discount_value, 10);
+  assert.equal(ticket.allocations.reduce((n, a) => n + a.discount, 0), 2550 * UM);
+  const code = server.club.get('SELECT ticket_code FROM payments WHERE id = ?', r.payment.id).ticket_code;
+  const pub = ok(await new Client(server).get(`/api/tickets/${r.payment.id}/${code}`)).ticket;
+  assert.equal(pub.discount, 2550 * UM);
+  assert.equal(pub.discount_label, 'Remise 10\u00a0%');
+  assert.equal(pub.lines.reduce((n, l) => n + l.amount, 0), 25500 * UM);
+  assert.equal(pub.total, 22950 * UM);
+  // A ticket with no discount says nothing of one.
+  const plain = ok(await postSale(ger, { ...walkIn, lines: [{ product_id: BARREDA, quantity: 1 }] }));
+  const code2 = server.club.get('SELECT ticket_code FROM payments WHERE id = ?', plain.payment.id).ticket_code;
+  const pub2 = ok(await new Client(server).get(`/api/tickets/${plain.payment.id}/${code2}`)).ticket;
+  assert.equal(pub2.discount, 0);
+  assert.equal(pub2.discount_label, null);
+});
