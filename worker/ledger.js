@@ -56,8 +56,13 @@ export const ledgerMethods = {
         `${what} tombe en ${monthLabel(day.slice(0, 7))}, une période clôturée. Un administrateur ou un associé doit d'abord la rouvrir.`,
       );
     }
-    if (this.get('SELECT 1 AS x FROM day_closings WHERE biz_day = ?', day)) {
-      throw conflict('JOURNEE_FERMEE', `${what} tombe le ${day.split('-').reverse().join('/')}, une journée dont la caisse est fermée. Un administrateur ou un associé doit d'abord la rouvrir.`);
+    const closing = this.get('SELECT verified_at FROM day_closings WHERE biz_day = ?', day);
+    if (closing) {
+      // The current day not yet verified, the manager may reopen it himself (reopenDay).
+      const who = day === this.bizToday() && !closing.verified_at
+        ? 'Rouvrez-la d’abord depuis la page Caisse.'
+        : "Un administrateur ou un associé doit d'abord la rouvrir.";
+      throw conflict('JOURNEE_FERMEE', `${what} tombe le ${day.split('-').reverse().join('/')}, une journée dont la caisse est fermée. ${who}`);
     }
   },
 
@@ -526,7 +531,7 @@ export const ledgerMethods = {
 
   // Closes the till of a day (today or a past day left open): every ticket checked, or a reason for those left; every
   // account to count counted, the gaps recorded as when counting the till, with a reason when there is one. Then the
-  // day is locked: no money movement dated on it until an administrator reopens it.
+  // day is locked: no money movement dated on it until it is reopened (reopenDay).
   // The manager closes only the current day. A past day left open is closed by the administrator or an associé: its
   // gap is recorded above the manager's own limits, and a day before the verification start never goes through an
   // associé's check.
@@ -585,10 +590,17 @@ export const ledgerMethods = {
     return done;
   },
 
+  // The administrator and the associés reopen any day. The manager reopens only the current day, while no boss has
+  // verified it: he closed it, he reopens it for a forgotten sale (owner's request, 2026-11-21). A past day (which he
+  // could not close again) or a verified one stays with the bosses.
   reopenDay(actor, day, input) {
     if (!isValidDate(day)) throw invalid('Date invalide.');
     const row = this.get('SELECT * FROM day_closings WHERE biz_day = ?', day);
     if (!row) throw conflict('NON_FERMEE', "La caisse de cette journée n'est pas fermée.");
+    if (!isBoss(actor)) {
+      if (day !== this.bizToday()) throw forbidden("Seuls l'administrateur et les associés rouvrent la caisse d'une journée passée.");
+      if (row.verified_at) throw forbidden("Cette caisse est déjà vérifiée : seuls l'administrateur et les associés peuvent la rouvrir.");
+    }
     const reason = text(input.reason, 'Motif de réouverture', { required: true, min: 3, max: 300 });
     if (this.get('SELECT 1 AS x FROM closed_periods WHERE month = ?', day.slice(0, 7))) {
       throw conflict('PERIODE_CLOTUREE', `Cette journée tombe en ${monthLabel(day.slice(0, 7))}, une période clôturée : rouvrez d’abord le mois.`);

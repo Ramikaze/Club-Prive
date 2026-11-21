@@ -1,6 +1,6 @@
 // The evening closing of the till: every ticket of the day checked (or a reason for those left), every till and
-// account counted, the gaps recorded as « Écart de caisse » with a reason, then the day locked until an
-// administrator reopens it. The manager closes too; only an administrator reopens.
+// account counted, the gaps recorded as « Écart de caisse » with a reason, then the day locked until it is reopened.
+// The manager closes the current day and reopens it while no boss has verified it; the bosses reopen any day.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { Server, Client, ok, UM, fundCaisse } from './harness.js';
@@ -72,11 +72,14 @@ test('le gérant ferme la journée : l’écart est enregistré, la journée ver
   refused(await manager.post('/api/day-closing', { day: today, counts: {} }), 409, 'DEJA_FERMEE');
 });
 
-test('seul un administrateur rouvre la journée, avec un motif', async () => {
-  refused(await manager.post(`/api/day-closing/${today}/reopen`, { reason: 'Oubli' }), 403);
-  refused(await admin.post(`/api/day-closing/${today}/reopen`, {}), 400);
-  const res = ok(await admin.post(`/api/day-closing/${today}/reopen`, { reason: 'Ticket oublié' }));
+// The manager reopens the till of the day he closed (a forgotten sale), with a reason kept in the log.
+test('le gérant rouvre la caisse du jour, avec un motif', async () => {
+  refused(await manager.post(`/api/day-closing/${today}/reopen`, {}), 400);
+  const res = ok(await manager.post(`/api/day-closing/${today}/reopen`, { reason: 'Ticket oublié' }));
   assert.equal(res.closed, null);
+  const log = server.club.get("SELECT user_id, details FROM audit_log WHERE action = 'caisse.rouvrir' ORDER BY id DESC");
+  assert.equal(log.user_id, server.club.userByLogin('gerant').id);
+  assert.equal(JSON.parse(log.details).motif, 'Ticket oublié');
   const cat = await expenseCategory();
   ok(await manager.post('/api/ledger/entries', { kind: 'depense', category_id: cat.id, amount: 1000 * UM, method: 'Espèces' }));
 });

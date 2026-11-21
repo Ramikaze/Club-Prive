@@ -501,10 +501,11 @@ export function createApi({ db, env = {}, demo = false, sendPush: pushSender = n
   // The cash page's « Compter la caisse »: the first cash fund (the settings change, so the bundle comes back), then counts.
   add('POST', '/api/treasury/fund', ADMIN, (ctx) => ({ treasury: club.setCashFund(ctx.user, ctx.body), bundle: club.bundle(ctx.user) }));
   add('POST', '/api/treasury/count', CLUB, (ctx) => club.countCash(ctx.user, ctx.body));
-  // The evening closing of the till: the manager or an administrator closes the day; only an administrator reopens it.
+  // The evening closing of the till: the manager or a boss closes the day. The bosses reopen any day, the manager only
+  // the current one while no boss has verified it (checked by ledger.js reopenDay).
   add('GET', '/api/day-closing', {}, (ctx) => club.dayClosing(ctx.query.day, ctx.user));
   add('POST', '/api/day-closing', {}, (ctx) => club.closeDay(ctx.user, ctx.body));
-  add('POST', '/api/day-closing/:day/reopen', CLUB, (ctx) => club.reopenDay(ctx.user, ctx.params.day, ctx.body));
+  add('POST', '/api/day-closing/:day/reopen', {}, (ctx) => club.reopenDay(ctx.user, ctx.params.day, ctx.body));
   add('POST', '/api/day-closing/:day/verify', CLUB, (ctx) => club.verifyDay(ctx.user, ctx.params.day));
   add('GET', '/api/closings', CLUB, () => club.closings());
   add('POST', '/api/closings', CLUB, (ctx) => club.closeMonth(ctx.user, ctx.body));

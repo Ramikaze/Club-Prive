@@ -206,7 +206,8 @@ test('journée fermée : l’annulation est refusée et rien ne bouge', async ()
   const refundsBefore = server.club.get('SELECT COUNT(*) AS n FROM refunds').n;
   const out = await cig.post(`/api/shop/sales/${r.sale.id}/cancel`, { reason: 'Trop tard' });
   refused(out, 409, 'JOURNEE_FERMEE');
-  assert.match(out.data.error.message, /administrateur ou un associé/);
+  // Today's till, closed and not verified: whoever is refused may reopen it from the cash page.
+  assert.match(out.data.error.message, /Rouvrez-la d’abord depuis la page Caisse\./);
   assert.equal(server.club.get('SELECT cancelled_at FROM shop_sales WHERE id = ?', r.sale.id).cancelled_at, null);
   assert.equal(stockOf(CIG), stock);
   assert.equal(server.club.get('SELECT COUNT(*) AS n FROM refunds').n, refundsBefore);
