@@ -2853,10 +2853,12 @@ export class Club {
   }
 
   paymentDTO(p) {
+    // A Boutique line's discount share belongs on its sale's own receipt only: a settlement paying part of a discounted
+    // credit sale shows what it pays, never that sale's discount again.
     const allocations = this.all(
       `SELECT pa.charge_id, pa.account, pa.amount, c.label, c.quantity, c.reservation_id, c.discount
        FROM payment_allocations pa JOIN charges c ON c.id = pa.charge_id WHERE pa.payment_id = ? ORDER BY pa.id`, p.id,
-    );
+    ).map((a) => (p.shop_sale_id ? a : { ...a, discount: 0 }));
     const byAccount = Object.fromEntries(ACCOUNTS.map((k) => [k, 0]));
     for (const a of allocations) byAccount[a.account] += a.amount;
     const shop = p.shop_sale_id
@@ -3104,10 +3106,11 @@ export class Club {
     const valid = Boolean(p) && given.length === TICKET_CODE_LENGTH && p.ticket_code?.length === TICKET_CODE_LENGTH;
     const stored = encoder.encode(valid ? p.ticket_code : '0'.repeat(given.length));
     if (!timingSafeEqual(given, stored) || !valid) return null;
+    // The discount on its sale's own receipt only, as in paymentDTO.
     const allocations = this.all(
       `SELECT c.label, c.quantity, pa.amount, c.discount FROM payment_allocations pa JOIN charges c ON c.id = pa.charge_id
        WHERE pa.payment_id = ? ORDER BY pa.id`, p.id,
-    );
+    ).map((a) => (p.shop_sale_id ? a : { ...a, discount: 0 }));
     const lines = paymentLines({
       kind: p.kind,
       // A meal's label is free text typed by the staff (a restaurant, a dish): the public page names neither.

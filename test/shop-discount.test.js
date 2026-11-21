@@ -4,6 +4,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { Server, Client, ok, UM, postSale } from './harness.js';
+import { paymentLines } from '../shared/ticket.js';
 
 const server = new Server({});
 let admin;
@@ -187,4 +188,24 @@ test('Caisse › Boutique : remises accordées, vente annulée exclue', async ()
   assert.equal(after.cigares.discounts - before.cigares.discounts, 1250 * UM);
   assert.equal(after.alcool.discounts, 0);
   assert.equal(after.cigares.sales.find((s) => s.id === kept.sale.id).discount, 1250 * UM);
+});
+
+test('règlement d’une vente à crédit remisée : le reçu ne répète pas la remise', async () => {
+  const c = ok(await admin.post('/api/clients', { first_name: 'awa', last_name: 'reglement', phone: '00 00 04 03' }));
+  ok(await admin.put(`/api/clients/${c.id}/credit-limit`, { credit_limit: 50000 * UM }));
+  // 13 000 with the lot, 10 % off: 11 700 owed.
+  ok(await postSale(ger, {
+    account: 'cigares', buyer: { kind: 'client', member_id: c.id }, lines: [{ product_id: COUPE, quantity: 4 }], credit: true,
+    discount: { kind: 'pourcentage', value: 10 },
+  }));
+  const { payment } = ok(await admin.post(`/api/clients/${c.id}/settlements`, { amount: 6000 * UM, method: 'Espèces' }));
+  const { ticket } = ok(await admin.get(`/api/payments/${payment.id}/ticket`));
+  assert.deepEqual(ticket.allocations.map((a) => a.discount), ticket.allocations.map(() => 0));
+  const lines = paymentLines({ kind: ticket.kind, label: ticket.label, amount: ticket.amount, allocations: ticket.allocations });
+  assert.equal(lines.reduce((n, l) => n + l.amount, 0), 6000 * UM);
+  const code = server.club.get('SELECT ticket_code FROM payments WHERE id = ?', payment.id).ticket_code;
+  const pub = ok(await new Client(server).get(`/api/tickets/${payment.id}/${code}`)).ticket;
+  assert.equal(pub.discount, 0);
+  assert.equal(pub.discount_label, null);
+  assert.equal(pub.lines.reduce((n, l) => n + l.amount, 0), 6000 * UM);
 });
