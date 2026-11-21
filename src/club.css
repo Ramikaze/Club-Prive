@@ -708,6 +708,32 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 .toast-action svg { margin-top: 0; }
 @media (max-width: 899px) { .toasts { bottom: calc(var(--tabbar-h) + 12px + env(safe-area-inset-bottom)); left: 16px; right: 16px; max-width: none; } }
 
+/* The notice of a new version put online (UpdateNotice.jsx). Drawn over the page, never in its flow, so nothing moves
+   under a field being typed in. At the top, above the dialogs (50) and the toasts (60), under the guided tour (70): on a
+   phone it covers the top bar, away from the buttons of a dialog, at the bottom of the screen there. Charcoal like the
+   bars and the toasts, in both themes. */
+.update-notice {
+  position: fixed; z-index: 65; top: calc(10px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+  width: min(640px, calc(100vw - 24px));
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 12px 14px;
+  border: 1px solid var(--charcoal-3); border-left: 4px solid var(--bronze-on-charcoal); border-radius: 12px;
+  color-scheme: dark; background: var(--charcoal); color: var(--on-charcoal); accent-color: var(--bronze);
+  box-shadow: var(--shadow-lg); font-size: 0.92rem;
+  --focus-ring: 0 0 0 2px var(--charcoal), 0 0 0 4px var(--bronze-on-charcoal);
+}
+.update-notice > svg { width: 20px; height: 20px; flex: none; color: var(--bronze-on-charcoal); }
+.update-notice-text { flex: 1 1 15rem; min-width: 0; display: grid; gap: 2px; }
+.update-notice-text span { color: var(--on-charcoal-2); }
+.update-notice-actions { display: flex; gap: 8px; margin-left: auto; }
+.update-notice .update-later {
+  background: transparent; color: var(--on-charcoal); border-color: color-mix(in srgb, var(--on-charcoal) 55%, transparent);
+}
+.update-notice .update-later:hover { background: color-mix(in srgb, var(--on-charcoal) 14%, transparent); }
+@media (max-width: 599px) {
+  .update-notice-actions { flex: 1 1 100%; }
+  .update-notice-actions .btn { flex: 1; min-height: 44px; }
+}
+
 /* The confirmation message the demo shows instead of opening WhatsApp. */
 .wa-message {
   margin: 0; padding: 12px 14px; border-left: 3px solid var(--bronze); border-radius: var(--radius-sm);
@@ -1180,7 +1206,7 @@ legend { padding: 0 6px; font-weight: 600; font-size: 0.88rem; }
 
 @media print {
   body { background: #fff; }
-  .sidebar, .topbar, .tabbar, .banner, .no-print, .toasts, #modal-root { display: none !important; }
+  .sidebar, .topbar, .tabbar, .banner, .no-print, .toasts, .update-notice, #modal-root { display: none !important; }
   .shell { display: block; }
   main { padding: 0; }
   /* The card page (body class set by the page): front and back side by side at the real card size, flat, no
