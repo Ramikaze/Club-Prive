@@ -9,15 +9,17 @@ import SalePanel from '../components/shop/SalePanel.jsx';
 import { api, newKey } from '../lib/api.js';
 import { money } from '../lib/format.js';
 import { useLoad } from '../lib/hooks.js';
-import { useMe, useStore } from '../store/useStore.js';
+import { useMe, useSettings, useStore } from '../store/useStore.js';
+import { cartTotals } from '../components/shop/saleTotals.js';
 import { searchable, smartFilter } from '../../shared/search.js';
 import { SHOP, RAYONS, canSellIn, ownsAccount } from '../../shared/roles.js';
 
 // The key is created with the cart and kept for its whole life: a retry after a lost answer never records the sale twice.
-const emptyCart = () => ({ key: newKey(), lines: {}, buyer: { kind: 'journalier', person: null } });
+const emptyCart = () => ({ key: newKey(), lines: {}, buyer: { kind: 'journalier', person: null }, discount: null });
 
 export default function Shop() {
   const me = useMe();
+  const settings = useSettings();
   const demo = useStore((s) => s.demo);
   const [fresh] = useState(() => ({ cigares: emptyCart(), alcool: emptyCart() }));
   const carts = useStore((s) => s.shopCarts) ?? fresh;
@@ -44,7 +46,8 @@ export default function Shop() {
       const list = searchable(search) ? smartFilter(products, search, (p) => [p.name, p.reference, p.description]) : products;
       const inCart = (p) => cart.lines[p.id] ?? 0;
       const count = Object.values(cart.lines).reduce((s, n) => s + n, 0);
-      const amount = products.reduce((s, p) => s + p.price * inCart(p), 0);
+      // The cart's total as the sale panel shows it: lot prices, discount, the manager's cap.
+      const amount = cartTotals(products, cart, me?.role === 'gerant' ? settings.gerant_discount_cap_pct : null).total;
       const add = (p) => setCart((c) => ({ ...c, lines: { ...c.lines, [p.id]: Math.min(99, p.stock_qty, (c.lines[p.id] ?? 0) + 1) } }));
 
       return (

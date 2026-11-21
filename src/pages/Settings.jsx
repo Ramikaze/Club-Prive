@@ -450,7 +450,7 @@ function RulesSection({ save }) {
   const { busy, error, onSubmit } = useFormAction((v) => save({
     annual_allocation_mode: v.annual_allocation_mode, subscription_revenue_account: v.subscription_revenue_account,
     expiry_warning_days: Number(v.expiry_warning_days), low_stock_default: Number(v.low_stock_default),
-    refunds_admin_only: Boolean(v.refunds_admin_only),
+    refunds_admin_only: Boolean(v.refunds_admin_only), gerant_discount_cap_pct: Number(v.gerant_discount_cap_pct),
   }));
   return (
     <section className="card settings-section" id="sec-rules">
@@ -469,6 +469,11 @@ function RulesSection({ save }) {
         <div className="form-row">
           <label className="field"><span>Alerte d’expiration (jours)</span><input type="number" name="expiry_warning_days" min="1" max="90" defaultValue={s.expiry_warning_days} /></label>
           <label className="field"><span>Seuil d’alerte de stock par défaut</span><input type="number" name="low_stock_default" min="0" defaultValue={s.low_stock_default} /></label>
+        </div>
+        <div className="form-row">
+          <label className="field"><span>Remise maximale du gérant (% du total)</span>
+            <input type="number" name="gerant_discount_cap_pct" min="0" max="99" step="1" defaultValue={s.gerant_discount_cap_pct} />
+            <span className="help">0 : le gérant ne fait pas de remise. L’administrateur et les associés n’ont pas de plafond.</span></label>
         </div>
         <label className="check"><input type="checkbox" name="refunds_admin_only" value="1" defaultChecked={s.refunds_admin_only} />
           <span>Remboursements réservés aux administrateurs</span></label>
