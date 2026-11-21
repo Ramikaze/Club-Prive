@@ -1,7 +1,7 @@
 // The evening closing of the till (POST /api/day-closing), for the manager and the administrators, in three steps:
 // 1. check every ticket of the day (a reason for those left unchecked), 2. count each till and account (the cash
 // note by note, the others as their app or bank shows them), 3. validate (a reason for any gap). The day is then
-// locked: no money movement dated on it until an administrator reopens it (POST /api/day-closing/:day/reopen).
+// locked: no money movement dated on it until it is reopened (POST /api/day-closing/:day/reopen).
 import { useState } from 'react';
 import Icon from '../ui/Icon.jsx';
 import { Modal, actionDialog, openDialog } from '../ui/Modal.jsx';
@@ -185,7 +185,7 @@ function Wizard({ close, day, data, onDone }) {
               <input maxLength={300} placeholder="Monnaie rendue en trop, erreur de saisie…" value={v.gap_reason ?? ''} onChange={set('gap_reason')} />
               <span className="help">L’écart est enregistré dans « Écart de caisse » : en recette s’il y a plus, en dépense s’il manque.</span></label>
           )}
-          <p className="subtle">Une fois fermée, plus aucun encaissement ni dépense ne peut être daté de ce jour. Seule la direction (administrateur ou associé) peut rouvrir la journée.</p>
+          <p className="subtle">Une fois fermée, plus aucun encaissement ni dépense ne peut être daté de ce jour. Le jour même, le gérant peut la rouvrir tant qu’elle n’est pas vérifiée ; sinon, seule la direction (administrateur ou associé) peut la rouvrir.</p>
         </>
       )}
       <FormError error={error} />
@@ -199,8 +199,8 @@ function Wizard({ close, day, data, onDone }) {
   );
 }
 
-// The day's closing on the cash page: a button to close it, or who closed it and the gap, and for an administrator a
-// way to reopen it.
+// The day's closing on the cash page: a button to close it, or who closed it and the gap, and a way to reopen it: for
+// the bosses any day, for the manager the current day while no boss has verified it (as the server, reopenDay).
 // `inline`: drawn inside another card (the « Recette du jour par catégorie » tile of the bosses), not as a card of its own.
 // `day`: the day the cash page shows (today by default; a day of « Journées à vérifier » opens the page on it). A day
 // not yet begun has nothing to close. Closed and not yet verified, the administrator and the associés verify it here.
@@ -229,6 +229,7 @@ export function DayClosingBar({ isAdmin, onChange, refresh = 0, inline = false, 
     );
   }
   const gap = c.summary.accounts.reduce((s, a) => s + a.gap, 0);
+  const canReopen = isAdmin || (day === bizToday() && !c.verified);
   const reopen = () => actionDialog({
     title: `Rouvrir la caisse du ${dayLabel(day, 'medium')}`,
     message: `Les encaissements et dépenses pourront de nouveau être datés de ce jour. La réouverture est tracée avec son motif.${c.verified ? ' La vérification de la caisse sera effacée : l’argent de cette journée repasse « en attente ».' : ''}`,
@@ -244,7 +245,7 @@ export function DayClosingBar({ isAdmin, onChange, refresh = 0, inline = false, 
       {isAdmin && !c.verified && (
         <button type="button" className="btn btn-sm btn-primary" onClick={() => verifyDayDialog(day, reload)}><Icon name="check" /> Vérifier</button>
       )}
-      {isAdmin && <button type="button" className="btn btn-sm" onClick={reopen}><Icon name="unlock" /> Rouvrir</button>}
+      {canReopen && <button type="button" className="btn btn-sm" onClick={reopen}><Icon name="unlock" /> Rouvrir</button>}
     </div>
   );
 }

@@ -242,6 +242,47 @@ test('rouvrir une journée vérifiée remet son argent en attente', async () => 
   assert.equal(b.caisses.cigares.pending, 50000 * UM);
 });
 
+// The manager reopens the till of the current day while no boss has verified it (owner's request, 2026-11-21); a past
+// day, or a day an associé has verified, stays with the administrator and the associés. The refusal of a sale on the
+// closed day says who may reopen it.
+test('le gérant rouvre la caisse du jour tant qu’aucun associé ne l’a vérifiée', async () => {
+  const c = await club();
+  try {
+    await fundAndSell(c, 100000, noon(c.srv, c.yesterday));
+    ok(await c.admin.post('/api/day-closing', { day: c.yesterday, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 100000 * UM } }));
+    let r = await c.ger.post(`/api/day-closing/${c.yesterday}/reopen`, { reason: 'Oubli' });
+    refused(r, 403, 'INTERDIT');
+    assert.match(r.data.error.message, /journée passée/);
+    ok(await c.cig.post(`/api/day-closing/${c.yesterday}/verify`, {}));
+
+    await sell(c, 1, noon(c.srv, c.today));
+    const state = ok(await c.ger.get(`/api/day-closing?day=${c.today}`));
+    const counts = Object.fromEntries(state.accounts.filter((a) => a.to_count).map((a) => [a.method, a.expected]));
+    const close = () => c.ger.post('/api/day-closing', { day: c.today, checked: [], unchecked_reason: 'Essai', counts });
+    const saleToday = () => postSale(c.ger, { account: 'cigares', buyer: { kind: 'journalier' }, lines: [{ product_id: c.cigar, quantity: 1 }], method: 'Espèces' });
+    ok(await close());
+    r = await saleToday();
+    refused(r, 409, 'JOURNEE_FERMEE');
+    assert.match(r.data.error.message, /Rouvrez-la d’abord depuis la page Caisse\.$/);
+
+    // Verified by an associé: the manager's reopening is refused, the sale says to ask the bosses.
+    ok(await c.cig.post(`/api/day-closing/${c.today}/verify`, {}));
+    r = await c.ger.post(`/api/day-closing/${c.today}/reopen`, { reason: 'Oubli' });
+    refused(r, 403, 'INTERDIT');
+    assert.match(r.data.error.message, /déjà vérifiée/);
+    assert.ok(c.srv.club.get('SELECT 1 AS x FROM day_closings WHERE biz_day = ?', c.today));
+    r = await saleToday();
+    refused(r, 409, 'JOURNEE_FERMEE');
+    assert.match(r.data.error.message, /Un administrateur ou un associé doit d'abord la rouvrir\.$/);
+
+    // Reopened by the associé, closed again by the manager: not verified, the manager reopens it himself.
+    ok(await c.cig.post(`/api/day-closing/${c.today}/reopen`, { reason: 'Correction' }));
+    ok(await close());
+    assert.equal(ok(await c.ger.post(`/api/day-closing/${c.today}/reopen`, { reason: 'Vente oubliée' })).closed, null);
+    ok(await saleToday());
+  } finally { c.srv.destroy(); }
+});
+
 test('l’Accueil signale les caisses à vérifier aux administrateurs seulement', async () => {
   const c = await club();
   try {
