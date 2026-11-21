@@ -12,6 +12,7 @@ import { CATEGORY_CODES, CAISSE_LABEL, CAISSES, purchaseAccount } from '../share
 import { buyerShown } from './shop.js';
 
 // The largest expense a manager may record alone, in hundredths (5 000 FCFA); above it, an administrator records it.
+// A tracked supplier's payment is not held to it (spec gérant autonome): what the club owes bounds it.
 export const MANAGER_EXPENSE_MAX = 5000 * 100;
 // The expense category of the meals the club advances to a courier; it is no cost of the club (the member repays it).
 export const OUTSIDE_MEAL_CATEGORY = 'Avance repas client';
@@ -235,9 +236,6 @@ export const ledgerMethods = {
     }
     this.assertOpen(date, 'Cette opération');
     const amount = int(input.amount, 'Montant', { min: 1, max: 1e13 });
-    if (!isAdmin && amount > MANAGER_EXPENSE_MAX) {
-      throw forbidden("Le gérant enregistre des dépenses de 5 000 FCFA au plus. Au-delà, adressez-vous à un administrateur ou à un associé.");
-    }
     const method = this.treasuryAccount(input.method, kind === 'transfert' ? 'Compte de départ' : kind === 'depense' ? 'Mode de paiement' : 'Reçu sur');
     let toMethod = null;
     let category = null;
@@ -267,6 +265,11 @@ export const ledgerMethods = {
     }
     // A tracked supplier's payment (spec comptes fournisseurs): only from its caisse, never more than the club owes it.
     const paid = this.supplierPayment(actor, input, { kind, category, amount });
+    // The manager's cap holds for his expenses; a tracked supplier's payment goes above it, bounded by what the club
+    // owes and what the caisse holds (spec gérant autonome).
+    if (!isAdmin && !paid && amount > MANAGER_EXPENSE_MAX) {
+      throw forbidden("Le gérant enregistre des dépenses de 5 000 FCFA au plus. Au-delà, adressez-vous à un administrateur ou à un associé.");
+    }
     const label = text(input.label, 'Libellé', { max: 120 })
       ?? (paid ? `Paiement — ${paid.supplier.name}` : kind === 'transfert' ? `Transfert ${method} → ${toMethod}` : category.name);
     const reference = text(input.reference, 'Référence', { max: 80 });

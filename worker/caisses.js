@@ -157,9 +157,10 @@ export const caisseMethods = {
   // « Prendre des bénéfices »: an associé takes his money out of the till and out of a caisse. It is no expense and no
   // cut in the club's result (owner's rule, 2026-11-07), but the till holds less. An associé takes from his own caisse
   // or from the common one, whose amount is shared in two halves, one per associé; the administrator takes from any.
-  // Never more than the caisse holds. Cancelled like any entry (POST /api/ledger/entries/:id/cancel).
+  // So does the manager, for the associé who is away (owner, 2026-11-21: « autonome lorsqu'ils ne sont pas
+  // présents »), on the current day only. Never more than the caisse holds. Cancelled like any entry
+  // (POST /api/ledger/entries/:id/cancel, the bosses').
   takeProfits(actor, input) {
-    if (!isBoss(actor)) throw forbidden('Seuls l’administrateur et les associés prennent des bénéfices.');
     const account = input?.account;
     if (!CAISSES.includes(account)) throw invalid('Caisse invalide.');
     if (actor.role === 'associe' && account !== 'reservations' && account !== actor.rayon) {
@@ -169,6 +170,9 @@ export const caisseMethods = {
     const date = input.biz_date === undefined || input.biz_date === null || input.biz_date === '' ? today : input.biz_date;
     if (!isValidDate(date)) throw invalid('Date invalide.');
     if (date > today) throw invalid('La date ne peut pas être dans le futur.');
+    if (!isBoss(actor) && date !== today) {
+      throw forbidden("Le gérant prend les bénéfices du jour. Pour une autre date, adressez-vous à un administrateur ou à un associé.");
+    }
     this.assertOpen(date, 'Cette prise de bénéfices');
     const amount = int(input.amount, 'Montant', { min: 1, max: 1e13 });
     const method = this.treasuryAccount(input.method, 'Payé depuis');
@@ -189,7 +193,7 @@ export const caisseMethods = {
   // Refuses an operation that would take a caisse below zero (owner's rule: a caisse never goes negative). The
   // balance is the caisse's today, every movement recorded so far included, pending money too; with `available`
   // (profits, expenses) the money of unverified days is not spendable, except that a negative pending still counts.
-  // The manager, who neither sees the caisses nor makes an apport, is told whom to ask, without the balance.
+  // The manager, who makes no apport, is told whom to ask, without the balance.
   assertCaisseCovers(account, amount, what, actor = null, { available = false } = {}) {
     if (!CAISSES.includes(account)) throw invalid('Caisse invalide.');
     const c = this.caisseBalances(this.bizToday()).caisses[account];

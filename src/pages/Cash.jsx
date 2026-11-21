@@ -2,8 +2,8 @@
 // side, each with its summary, its detailed list and its total, and under them what is left to collect, the
 // transfers and the folded details. « Par catégorie » (three columns, their sum the recette, with the line from it
 // to the money received) sits between the balances and the receipts. The manager sees the same blocks for the
-// current day only (owner's request, 2026-11-18), without their buttons, and records the day's expenses within his
-// cap.
+// current day only (owner's request, 2026-11-18), and records the day's expenses within his cap; on the caisse tiles
+// he pays a supplier and takes profits for the associés away (spec gérant autonome), with no other button.
 import { useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
@@ -96,6 +96,25 @@ function MoreDialog({ close }) {
 
 const periodLabel = (from, to) => (from === to ? dayLabel(from, 'title') : `Du ${dayLabel(from, 'medium')} au ${dayLabel(to, 'medium')}`);
 
+// The buttons of the caisse tiles: a supplier paid from the caisse (the Champagne one asks which purchase), profits
+// taken, money put in (the bosses' only: caisses.js gives each person his buttons). `state`: the page's load.
+const caisseActions = (state) => (action, account) => {
+  const d = state.data;
+  if (!d) return;
+  const pay = (code) => openDialog(EntryDialog, { kind: 'depense', categoryCode: code, title: 'Payer un fournisseur', categories: d.categories, onDone: state.reload });
+  if (action === 'fournisseur') {
+    if (account === 'cigares') pay('achat_cigares');
+    else openDialog(SupplierChoice, { onChoose: pay });
+  } else if (action === 'benefices') {
+    openDialog(ProfitDialog, { account, balance: d.caisses.caisses[account].balance + Math.min(0, d.caisses.caisses[account].pending), onDone: state.reload });
+  } else {
+    openDialog(EntryDialog, {
+      kind: 'recette', categoryCode: 'apport', account: account === 'reservations' ? '' : account, title: 'Faire un apport',
+      categories: d.categories, onDone: state.reload,
+    });
+  }
+};
+
 function AdminCash() {
   const settings = useSettings();
   const period = useCashPeriod();
@@ -126,24 +145,7 @@ function AdminCash() {
 
   const add = (kind) => openDialog(EntryDialog, { kind, categories: state.data?.categories ?? [], onDone: state.reload });
   const count = () => openDialog(CountDialog, { method, onDone: state.reload });
-  // The buttons of the caisse tiles: a supplier paid from the caisse (the Champagne one asks which purchase), profits
-  // taken, money put in.
-  const onCaisse = (action, account) => {
-    const d = state.data;
-    if (!d) return;
-    const pay = (code) => openDialog(EntryDialog, { kind: 'depense', categoryCode: code, title: 'Payer un fournisseur', categories: d.categories, onDone: state.reload });
-    if (action === 'fournisseur') {
-      if (account === 'cigares') pay('achat_cigares');
-      else openDialog(SupplierChoice, { onChoose: pay });
-    } else if (action === 'benefices') {
-      openDialog(ProfitDialog, { account, balance: d.caisses.caisses[account].balance + Math.min(0, d.caisses.caisses[account].pending), onDone: state.reload });
-    } else {
-      openDialog(EntryDialog, {
-        kind: 'recette', categoryCode: 'apport', account: account === 'reservations' ? '' : account, title: 'Faire un apport',
-        categories: d.categories, onDone: state.reload,
-      });
-    }
-  };
+  const onCaisse = caisseActions(state);
   const oneDay = from === to;
 
   return (
@@ -241,12 +243,17 @@ function ManagerCash() {
         actions={<button type="button" className="btn btn-primary" disabled={!state.data} onClick={add}><Icon name="plus" /> Nouvelle dépense</button>}
       />
       <div className="toolbar">
-        <Notice>Vous voyez la caisse du jour et saisissez les dépenses du jour. {MANAGER_CAP_TEXT} L’historique et les annulations sont réservés aux administrateurs.</Notice>
+        <Notice>
+          Vous voyez la caisse du jour et saisissez les dépenses du jour. {MANAGER_CAP_TEXT} Depuis les soldes, vous payez
+          aussi les fournisseurs et prenez les bénéfices pour les associés, dans la limite de ce que contient chaque caisse.
+          L’historique et les annulations sont réservés aux administrateurs.
+        </Notice>
       </div>
       <Loaded state={state}>{(d) => (
         <div className="cash-page">
-          {/* The bosses' blocks, today only and without their buttons (owner's request, 2026-11-18). */}
-          <CaissesBalance b={d.caisses} />
+          {/* The bosses' blocks, today only (owner's request, 2026-11-18); on the tiles, a supplier's payment and the
+              profits only (spec gérant autonome). */}
+          <CaissesBalance b={d.caisses} onAction={caisseActions(state)} />
           <CategoryColumns
             sum={d.sum} billed={d.billed} method="" oneDay
             journal={d.journal} entries={d.entries} t={d.treasury} openingBalances={settings.opening_balances}
@@ -262,6 +269,7 @@ function ManagerCash() {
             </div>
           </div>
           <OpenNotes groups={d.open} onDone={state.reload} />
+          <ProfitsBlock entries={d.entries} oneDay isAdmin={false} onChange={state.reload} />
         </div>
       )}</Loaded>
     </>

@@ -488,10 +488,11 @@ export function createApi({ db, env = {}, demo = false, sendPush: pushSender = n
   // The associés' caisses: the six tiles of « Soldes » at the end of a business day (today by default; the manager
   // reads today only).
   add('GET', '/api/caisses', {}, (ctx) => club.caisseBalances(isBoss(ctx.user) ? ctx.query.to || undefined : undefined));
-  add('POST', '/api/caisses/retrait', CLUB, (ctx) => club.takeProfits(ctx.user, ctx.body));
+  // Profits are taken by the bosses, and by the manager for the associés away (spec gérant autonome): takeProfits.
+  add('POST', '/api/caisses/retrait', {}, (ctx) => club.takeProfits(ctx.user, ctx.body));
   // Supplier accounts: what the club owes each supplier, its credit purchases and the balances carried over (a payment
-  // is an expense: POST /api/ledger/entries with supplier_id).
-  add('GET', '/api/suppliers', CLUB, () => club.listSuppliers());
+  // is an expense: POST /api/ledger/entries with supplier_id). The manager reads the list to pay one, nothing more.
+  add('GET', '/api/suppliers', {}, () => club.listSuppliers());
   add('POST', '/api/suppliers', CLUB, (ctx) => club.createSupplier(ctx.user, ctx.body));
   add('GET', '/api/suppliers/:id', CLUB, (ctx) => club.supplierSheet(ctx.params.id));
   add('PUT', '/api/suppliers/:id', CLUB, (ctx) => club.updateSupplier(ctx.user, ctx.params.id, ctx.body));

@@ -3,8 +3,9 @@
 // caisses the money leaves or enters: a purchase pays from the caisse of its category, another expense from the
 // caisse chosen; an apport goes into the caisse chosen. `categoryCode` and `account` open it already filled in
 // (the buttons of the caisse tiles), `title` names it. A purchase may pay a tracked supplier of its caisse (spec
-// comptes fournisseurs): never more than the club owes it, with an amount in euros or dollars for information;
-// `supplier` opens it on that supplier, with the purchase categories of its caisse only.
+// comptes fournisseurs): never more than the club owes it, with an amount in euros or dollars for information; the
+// manager too, above his cap (spec gérant autonome). `supplier` opens it on that supplier, with the purchase
+// categories of its caisse only.
 import { useEffect, useState } from 'react';
 import { Modal } from '../ui/Modal.jsx';
 import { FormError, Notice } from '../ui/ui.jsx';
@@ -37,28 +38,29 @@ export default function EntryDialog({ close, kind, categories, onDone, categoryC
     to_method: methods.find((m) => m !== methods[0]) ?? '', account: presetAccount ?? '', label: '', reference: '',
     supplier_id: presetSupplier ? String(presetSupplier.id) : '', foreign_amount: '', foreign_currency: presetSupplier?.currency ?? 'EUR',
   });
-  // The tracked suppliers, for a purchase recorded by the administrator or an associé (the manager pays none).
+  // The tracked suppliers, for a purchase: the bosses pay them, and the manager too (spec gérant autonome).
   const [suppliers, setSuppliers] = useState(presetSupplier ? [presetSupplier] : []);
   const [suppliersUnread, setSuppliersUnread] = useState(false);
   const [suppliersTry, setSuppliersTry] = useState(0);
   useEffect(() => {
-    if (!isAdmin || kind !== 'depense') return undefined;
+    if (kind !== 'depense') return undefined;
     let live = true;
     setSuppliersUnread(false);
     api.get('/api/suppliers').then((r) => { if (live) setSuppliers(r.suppliers); }).catch(() => { if (live) setSuppliersUnread(true); });
     return () => { live = false; };
-  }, [isAdmin, kind, suppliersTry]);
+  }, [kind, suppliersTry]);
   const { busy, error, submit } = useSubmit();
   const set = (k) => (e) => setV({ ...v, [k]: e.target.value });
   const category = options.find((c) => String(c.id) === String(v.category_id));
-  const managerCapped = !isAdmin && kind === 'depense';
   const purchase = kind === 'depense' ? purchaseAccount(category?.code) : null;
   const apport = kind === 'recette' && category?.code === 'apport';
   // The suppliers this purchase may pay: those of its caisse (an inactive one only if already chosen).
-  const payable = purchase && isAdmin ? suppliers.filter((x) => x.account === purchase && (x.active || String(x.id) === v.supplier_id)) : [];
+  const payable = purchase ? suppliers.filter((x) => x.account === purchase && (x.active || String(x.id) === v.supplier_id)) : [];
   const supplier = payable.find((x) => String(x.id) === v.supplier_id) ?? null;
+  // The manager's cap holds for his expenses, not for a tracked supplier's payment (what the club owes bounds it).
+  const managerCapped = !isAdmin && kind === 'depense' && !supplier;
   // Unread suppliers are not « no supplier »: a purchase saved now could not lower what the club owes one of them.
-  const suppliersMissing = suppliersUnread && Boolean(purchase) && isAdmin && !presetSupplier;
+  const suppliersMissing = suppliersUnread && Boolean(purchase) && !presetSupplier;
   const pickSupplier = (e) => {
     const next = payable.find((x) => String(x.id) === e.target.value);
     setV({ ...v, supplier_id: e.target.value, foreign_currency: next?.currency ?? v.foreign_currency });
@@ -136,7 +138,13 @@ export default function EntryDialog({ close, kind, categories, onDone, categoryC
         )}
         <label className="field"><span>Montant ({currency})</span>
           <input inputMode="decimal" autoComplete="off" placeholder={managerCapped ? '5 000' : '25 000'} required value={v.amount} onChange={set('amount')} />
-          {managerCapped && <span className="help">5 000 {currency} au plus par dépense. Au-delà, la direction (administrateur ou associé) l’enregistre.</span>}
+          {managerCapped && (
+            <span className="help">
+              {payable.length > 0
+                ? `5 000 ${currency} au plus sans fournisseur suivi. Pour payer un fournisseur, choisissez-le ci-dessus.`
+                : `5 000 ${currency} au plus par dépense. Au-delà, la direction (administrateur ou associé) l’enregistre.`}
+            </span>
+          )}
           {supplier && <span className="help">Au plus {money(supplier.due)} (ce que le club doit à ce fournisseur).</span>}</label>
         {supplier && (
           <ForeignFields

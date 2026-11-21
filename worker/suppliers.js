@@ -268,9 +268,10 @@ export const supplierMethods = {
     return { supplier, lines, totals };
   },
 
-  // The supplier a ledger entry pays (createEntry), checked: only the administrator and the associés pay a tracked
-  // supplier; only by an expense of a purchase category of the supplier's caisse; never more than the club owes. The
-  // amount in euros or dollars goes only with a supplier's payment. Returns null for an entry that pays no supplier.
+  // The supplier a ledger entry pays (createEntry), checked: the administrator, the associés and the manager (for the
+  // associés away, spec gérant autonome) pay a tracked supplier; only by an expense of a purchase category of the
+  // supplier's caisse; never more than the club owes. The amount in euros or dollars goes only with a supplier's
+  // payment. Returns null for an entry that pays no supplier.
   supplierPayment(actor, input, { kind, category, amount }) {
     if (empty(input.supplier_id)) {
       if (!empty(input.foreign_amount) || !empty(input.foreign_currency)) {
@@ -278,7 +279,6 @@ export const supplierMethods = {
       }
       return null;
     }
-    if (!isBoss(actor)) throw forbidden('Seuls l’administrateur et les associés paient un fournisseur suivi.');
     if (kind !== 'depense') throw invalid('Seule une dépense paie un fournisseur.');
     const supplier = this.get('SELECT * FROM suppliers WHERE id = ?', toId(input.supplier_id, 'Fournisseur'));
     if (!supplier) throw notFound('Fournisseur');

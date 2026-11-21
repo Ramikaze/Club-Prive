@@ -166,7 +166,8 @@ test('liste : ce que le club doit, par caisse', async () => {
   assert.equal(c.due, 500000 * UM);
   assert.equal(c.has_operations, true);
   assert.equal(c.last_date, today);
-  refused(await ger.get('/api/suppliers'), 403);
+  // The manager reads the list to choose whom he pays (spec gérant autonome), not the supplier's sheet.
+  assert.equal(ok(await ger.get('/api/suppliers')).suppliers.find((s) => s.id === casa.id).due, 500000 * UM);
   refused(await ger.get(`/api/suppliers/${casa.id}`), 403);
   refused(await admin.get('/api/suppliers/99999'), 404);
 });
@@ -227,8 +228,19 @@ test('seulement depuis la caisse du fournisseur', async () => {
   refused(await pay(admin, { category_id: categoryId('achat_cigares'), supplier_id: 99999, amount: 1000 * UM }), 404);
 });
 
-test('le gérant ne paie pas un fournisseur suivi', async () => {
-  refused(await pay(ger, { category_id: categoryId('achat_cigares'), supplier_id: casa.id, amount: 4000 * UM }), 403);
+// The manager pays a tracked supplier when the associés are away (owner, 2026-11-21): above his 5 000 FCFA cap, never
+// more than the club owes, today only; with no tracked supplier, a purchase stays within the cap.
+test('le gérant paie un fournisseur suivi au-delà de 5 000 FCFA, jamais plus que la dette', async () => {
+  const sup = ok(await admin.post('/api/suppliers', { name: 'Livré au gérant SARL', account: 'cigares' }));
+  ok(await purchase(admin, sup.id, { kind: 'achat', amount: 100000 * UM }));
+  const entry = ok(await pay(ger, { category_id: categoryId('achat_cigares'), supplier_id: sup.id, amount: 60000 * UM }));
+  assert.equal(entry.supplier_id, sup.id);
+  assert.equal(entry.account, 'cigares');
+  assert.equal(entry.created_by_name, 'Gérant');
+  assert.equal((await sheet(sup.id)).totals.due, 40000 * UM);
+  refused(await pay(ger, { category_id: categoryId('achat_cigares'), supplier_id: sup.id, amount: 40001 * UM }), 409, 'DEPASSE_DU');
+  refused(await pay(ger, { category_id: categoryId('achat_cigares'), supplier_id: sup.id, amount: 1000 * UM, biz_date: addDays(today, -1) }), 403);
+  refused(await pay(ger, { category_id: categoryId('achat_cigares'), amount: 6000 * UM }), 403);
 });
 
 test('devise sans fournisseur refusée', async () => {
