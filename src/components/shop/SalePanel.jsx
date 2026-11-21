@@ -130,14 +130,15 @@ export default function SalePanel({ account, products, cart, setCart, onSold, on
         <ul className="sale-lines">
           {rows.map(({ p, qty }) => (
             <li key={p.id}>
-              <span className="sale-line-name">{p.name}
-                {priced.get(p.id)?.lot && <span className="sale-line-lot">prix par lot ({p.lot_qty} pour {money(p.lot_price)})</span>}</span>
+              <span className="sale-line-name">{p.name}</span>
               <span className="stepper">
                 <button type="button" className="btn btn-sm" onClick={() => setQty(p.id, qty - 1)} aria-label={`Retirer un ${p.name}`}>−</button>
                 <output aria-label={`Quantité de ${p.name}`}>{qty}</output>
                 <button type="button" className="btn btn-sm" disabled={qty >= Math.min(99, p.stock_qty)} onClick={() => setQty(p.id, qty + 1)} aria-label={`Ajouter un ${p.name}`}>+</button>
               </span>
               <span className="sale-line-amount">{money(priced.get(p.id)?.price ?? p.price * qty)}</span>
+              {/* Under the whole line: on a phone the name's column is too narrow for it. */}
+              {priced.get(p.id)?.lot && <span className="sale-line-lot">prix par lot ({p.lot_qty} pour {money(p.lot_price)})</span>}
             </li>
           ))}
         </ul>

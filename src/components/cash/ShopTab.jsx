@@ -111,7 +111,10 @@ function Column({ col, canCancel, onDone }) {
       )}
       {!methods.length && !card && <p className="subtle">Aucune vente sur la période.</p>}
       {col.discounts > 0 && (
-        <dl className="calc"><div><dt>Remises accordées</dt><dd>−{money(col.discounts)}</dd></div></dl>
+        <>
+          <h3 className="sub-section-title cash-list-title">Remises</h3>
+          <dl className="calc"><div><dt>Remises accordées</dt><dd>−{money(col.discounts)}</dd></div></dl>
+        </>
       )}
       <h3 className="sub-section-title cash-list-title">Ventes <span className="subtle">({col.sales.length})</span></h3>
       {col.sales.length ? (
