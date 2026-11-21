@@ -13,7 +13,7 @@ import { cartTotals, discountOf } from './saleTotals.js';
 import { api } from '../../lib/api.js';
 import { money } from '../../lib/format.js';
 import { useLoad, useSubmit } from '../../lib/hooks.js';
-import { useMe, useSettings } from '../../store/useStore.js';
+import { useMe, useSettings, useStore } from '../../store/useStore.js';
 import { CARD_METHOD, CREDIT_LABEL } from '../../../shared/rules.js';
 import { SHOP } from '../../../shared/roles.js';
 
@@ -95,6 +95,8 @@ export default function SalePanel({ account, products, cart, setCart, onSold, on
         onRefused?.();
         if (memberId) wallet.reload();
         if (clientId) credit.reload();
+        // The manager's cap read at sign-in may be old (the administrator changed it since): the settings are read again.
+        if (err?.code === 'PLAFOND_REMISE') api.get('/api/me').then((b) => useStore.getState().setBundle(b)).catch(() => {});
         throw err;
       }
       if (!res.payment) {
@@ -224,7 +226,8 @@ export default function SalePanel({ account, products, cart, setCart, onSold, on
       {creditBlocked && rows.length > 0 && (
         <Notice kind="warn">Crédit insuffisant pour ce panier : retirez un produit ou choisissez un autre moyen de paiement.</Notice>
       )}
-      <FormError error={error} />
+      {/* Not twice: once the settings are read again, the warning above says the server's refusal word for word. */}
+      <FormError error={discountBlocked && error === totals.problem?.message ? null : error} />
       <button type="submit" className="btn btn-primary btn-block" disabled={busy || loadingBalance || loadingCredit || balanceUnread || creditUnread || creditBlocked || discountBlocked || !rows.length || needsBuyer} aria-busy={busy}>
         {!rows.length ? 'Encaisser' : onCredit ? `Vendre à crédit ${money(total)}` : `Encaisser ${money(total)}`}
       </button>

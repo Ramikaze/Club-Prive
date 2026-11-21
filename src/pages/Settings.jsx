@@ -13,6 +13,7 @@ import { SortTh, useSort } from '../components/ui/Sortable.jsx';
 import { ROLES, RAYONS, RAYON_LABEL } from '../../shared/roles.js';
 import { ERASE_GROUPS, ERASE_LABEL, eraseClosure } from '../../shared/erase.js';
 import { useIsAdmin, useSettings, useStore } from '../store/useStore.js';
+import { typedNumber } from '../lib/formNumbers.js';
 
 const TIME_ZONES = ['Africa/Brazzaville', 'Africa/Kinshasa', 'Africa/Douala', 'Africa/Lagos', 'Africa/Abidjan', 'Africa/Casablanca',
   'Europe/Paris', 'Europe/Brussels', 'Europe/London', 'America/Montreal', 'America/New_York', 'Asia/Dubai', 'UTC'];
@@ -449,8 +450,9 @@ function RulesSection({ save }) {
   const s = useSettings();
   const { busy, error, onSubmit } = useFormAction((v) => save({
     annual_allocation_mode: v.annual_allocation_mode, subscription_revenue_account: v.subscription_revenue_account,
-    expiry_warning_days: Number(v.expiry_warning_days), low_stock_default: Number(v.low_stock_default),
-    refunds_admin_only: Boolean(v.refunds_admin_only), gerant_discount_cap_pct: Number(v.gerant_discount_cap_pct),
+    // A number left empty keeps its setting (src/lib/formNumbers.js): an emptied cap never becomes 0 by mistake.
+    expiry_warning_days: typedNumber(v.expiry_warning_days), low_stock_default: typedNumber(v.low_stock_default),
+    refunds_admin_only: Boolean(v.refunds_admin_only), gerant_discount_cap_pct: typedNumber(v.gerant_discount_cap_pct),
   }));
   return (
     <section className="card settings-section" id="sec-rules">

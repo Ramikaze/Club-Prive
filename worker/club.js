@@ -3277,7 +3277,11 @@ export class Club {
       f.lot?.qty ?? null, f.lot?.price ?? null, f.lot?.extra ?? null,
     );
     if (initial > 0) this.moveStock(actor, id, initial, 'stock_initial', { reason: 'Création du produit' });
-    this.audit(actor, 'produit.creer', 'product', id, { ...f, stock_initial: initial });
+    // The lot under the same names as in « produit.modifier ».
+    const { lot, ...fields } = f;
+    this.audit(actor, 'produit.creer', 'product', id, {
+      ...fields, lot_qty: lot?.qty ?? null, lot_price: lot?.price ?? null, extra_price: lot?.extra ?? null, stock_initial: initial,
+    });
     return this.productById(id);
   }
 
@@ -3757,12 +3761,15 @@ export class Club {
     let rows;
     switch (kind) {
       case 'lignes': {
+        // « Remise »: what a Boutique line was taken off, its lot price and its share of the sale's discount together
+        // (V31), so that Quantité × Prix unitaire − Remise = Montant; 0 on every other line.
         header = ['Date', 'N° ligne', 'Sous-compte', 'Type', 'N° membre', 'Membre', 'Réservation', 'Libellé', 'Quantité',
-          `Prix unitaire ${cur}`, `Montant ${cur}`, 'Statut', 'Tarif validé', 'Saisi par'];
+          `Prix unitaire ${cur}`, `Remise ${cur}`, `Montant ${cur}`, 'Statut', 'Tarif validé', 'Saisi par'];
         rows = this.all(`${CHARGE_SELECT} WHERE c.created_at >= ? AND c.created_at < ? AND c.carryover = 0 ${account ? 'AND c.account = ?' : ''} ORDER BY c.created_at`,
           ...(account ? [a, b, account] : [a, b]))
           .map((c) => [when(c.created_at), c.id, ACCOUNT_LABELS[c.account], CHARGE_KIND[c.kind], buyerShown(c.buyer_kind, c).no ?? '',
-            buyerShown(c.buyer_kind, c).name, c.reservation_id ?? '', c.label, c.quantity, money(c.unit_price), money(c.amount), CHARGE_STATUS[c.status],
+            buyerShown(c.buyer_kind, c).name, c.reservation_id ?? '', c.label, c.quantity, money(c.unit_price),
+            money(c.quantity * c.unit_price - c.amount), money(c.amount), CHARGE_STATUS[c.status],
             c.tariff_validated ? 'oui' : 'non', c.created_by_name ?? '']);
         break;
       }
