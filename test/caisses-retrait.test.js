@@ -2,7 +2,7 @@
 // cut in the club's result. An associé takes only from his own caisse or the common one; never more than the caisse.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { addMonths } from '../shared/time.js';
+import { addDays, addMonths } from '../shared/time.js';
 import { Server, Client, ok, UM, postSale } from './harness.js';
 
 const server = new Server({}, { lenientTariffs: true });
@@ -73,8 +73,35 @@ test('un associé ne prend pas dans la caisse de l’autre ; la caisse commune, 
   assert.equal((await caisses()).caisses.reservations.taken, 10000 * UM);
 });
 
-test('le gérant ne prend pas de bénéfices', async () => {
-  refused(await take(ger, { account: 'reservations', amount: 1 }), 403);
+// The manager takes the profits for an absent associé (owner, 2026-11-21: « autonome lorsqu'ils ne sont pas
+// présents »), from any caisse, the common one shared in two halves; today only; never more than the caisse.
+test('le gérant prend des bénéfices pour un associé absent, dans les trois caisses', async () => {
+  const apport = ok(await admin.get('/api/ledger/categories')).find((c) => c.code === 'apport');
+  for (const account of ['alcool', 'reservations']) {
+    ok(await admin.post('/api/ledger/entries', { kind: 'recette', category_id: apport.id, account, amount: 30000 * UM, method: 'Espèces' }));
+  }
+  const before = (await caisses()).caisses;
+  // Above the 5 000 FCFA of his other expenses: the caisse is the limit.
+  for (const [account, amount] of [['cigares', 20000 * UM], ['alcool', 15000 * UM], ['reservations', 12000 * UM]]) {
+    const out = ok(await take(ger, { account, amount }));
+    assert.equal(out.entry.kind, 'retrait');
+    assert.equal(out.entry.created_by_name, 'Gérant');
+  }
+  const after = (await caisses()).caisses;
+  assert.equal(after.cigares.taken, before.cigares.taken + 20000 * UM);
+  assert.equal(after.alcool.taken, before.alcool.taken + 15000 * UM);
+  assert.equal(after.reservations.taken, before.reservations.taken + 12000 * UM);
+});
+
+test('le gérant : le jour même seulement, jamais plus que la caisse, et il n’annule pas', async () => {
+  const n = entries();
+  refused(await take(ger, { account: 'cigares', amount: 1000 * UM, biz_date: addDays(today, -1) }), 403);
+  const balance = (await caisses()).caisses.cigares.balance;
+  refused(await take(ger, { account: 'cigares', amount: balance + 1 }), 409, 'CAISSE_INSUFFISANTE');
+  assert.equal(entries(), n);
+  const out = ok(await take(ger, { account: 'cigares', amount: 1000 * UM }));
+  refused(await ger.post(`/api/ledger/entries/${out.entry.id}/cancel`, { reason: 'Erreur de montant' }), 403);
+  ok(await admin.post(`/api/ledger/entries/${out.entry.id}/cancel`, { reason: 'Erreur de montant' }));
 });
 
 test('annulée avec un motif, la caisse remonte ; un mois clôturé refuse', async () => {

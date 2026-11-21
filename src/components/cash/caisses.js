@@ -2,18 +2,22 @@
 // (2026-11-07). Fund, card credit, the three caisses, the till; the five on the left add up to the last. Each caisse
 // shows how it got there and the buttons the person may use: the administrator every one; an associé pays a
 // supplier and makes an apport on either caisse (the other associé may be away, decision 8) and takes profits from
-// his own caisse or the common one only; « Payer un fournisseur » never on the common caisse. `fmt` formats money
-// and days ({ money, day, today }), so that the tiles are tested without the store.
+// his own caisse or the common one only; the manager, for the associés away, pays a supplier and takes profits on
+// every caisse, with no apport (spec gérant autonome); « Payer un fournisseur » never on the common caisse. `fmt`
+// formats money and days ({ money, day, today }), so that the tiles are tested without the store.
 import { CAISSE_LABEL } from '../../../shared/caisses.js';
 
 const line = (label, amount, out = false) => ({ label, amount: Math.abs(amount), sign: out || amount < 0 ? 'out' : 'in' });
 
 function actionsFor(me, key, past) {
-  const boss = me?.role === 'admin' || me?.role === 'associe';
   // On a past period the tiles show that day's balances, not today's: no button acts on them.
-  if (!boss || past) return [];
+  if (past) return [];
+  const supplier = key !== 'reservations' ? ['fournisseur'] : [];
+  // The manager acts for the associés away (spec gérant autonome): a supplier and the profits on every caisse, no apport.
+  if (me?.role === 'gerant') return [...supplier, 'benefices'];
+  if (me?.role !== 'admin' && me?.role !== 'associe') return [];
   const mayTake = me.role === 'admin' || key === 'reservations' || me.rayon === key;
-  return [...(key !== 'reservations' ? ['fournisseur'] : []), ...(mayTake ? ['benefices'] : []), 'apport'];
+  return [...supplier, ...(mayTake ? ['benefices'] : []), 'apport'];
 }
 
 export function caisseTiles(b, me, fmt) {

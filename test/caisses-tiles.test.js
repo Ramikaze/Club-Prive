@@ -48,7 +48,7 @@ test('la caisse commune dit la part de chacun', () => {
   assert.ok(tile.hints.some((h) => h === 'soit 62500 chacun'), tile.hints.join(' | '));
 });
 
-test('les boutons : l’administrateur partout, l’associé selon la caisse, jamais de fournisseur sur la caisse commune', () => {
+test('les boutons : l’administrateur partout, l’associé selon la caisse, le gérant sans apport, jamais de fournisseur sur la caisse commune', () => {
   const actions = (me) => Object.fromEntries(caisseTiles(balances(), me, fmt).map((t) => [t.key, t.actions]));
   assert.deepEqual(actions(admin), {
     fond: [], cartes: [], reservations: ['benefices', 'apport'], alcool: ['fournisseur', 'benefices', 'apport'],
@@ -58,7 +58,10 @@ test('les boutons : l’administrateur partout, l’associé selon la caisse, ja
   assert.deepEqual(a.alcool, ['fournisseur', 'apport']);
   assert.deepEqual(a.cigares, ['fournisseur', 'benefices', 'apport']);
   assert.deepEqual(a.reservations, ['benefices', 'apport']);
-  assert.deepEqual(actions({ role: 'gerant' }).cigares, []);
+  // The manager, for the associés away (spec gérant autonome): a supplier and the profits on every caisse, no apport.
+  assert.deepEqual(actions({ role: 'gerant' }), {
+    fond: [], cartes: [], reservations: ['benefices'], alcool: ['fournisseur', 'benefices'], cigares: ['fournisseur', 'benefices'], caisse: [],
+  });
 });
 
 test('une caisse en négatif le dit ; avant le fond, pas de tuiles', () => {
