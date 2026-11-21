@@ -2702,16 +2702,19 @@ export class Club {
 
   // ---------------------------------------------------------------- consumptions, charges, payments
 
+  // `amount` and `discount` are a Boutique line's own (V31): what is really paid after the lot price and the sale's
+  // discount, and its share of that discount. Every other line costs quantity × unit price, with no discount.
   insertCharge(actor, c) {
     return this.insert(
       `INSERT INTO charges (account, kind, member_id, reservation_id, subscription_id, product_id, label, quantity,
-         unit_price, amount, status, tariff_validated, created_at, created_by, deposit, shop_sale_id, unit_cost)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'due', ?, ?, ?, ?, ?, (SELECT cost_price FROM products WHERE id = ?))`,
+         unit_price, amount, status, tariff_validated, created_at, created_by, deposit, shop_sale_id, unit_cost, discount)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'due', ?, ?, ?, ?, ?, (SELECT cost_price FROM products WHERE id = ?), ?)`,
       c.account, c.kind, c.member_id, c.reservation_id ?? null, c.subscription_id ?? null, c.product_id ?? null,
-      c.label, c.quantity, c.unit_price, c.quantity * c.unit_price, c.tariff_validated ?? 1, this.nowIso(), actor.id,
+      c.label, c.quantity, c.unit_price, c.amount ?? c.quantity * c.unit_price, c.tariff_validated ?? 1, this.nowIso(), actor.id,
       c.deposit ? 1 : 0, c.shop_sale_id ?? null,
       // The cost price of the day, kept with the line (V30): only a product line has one.
       c.kind === 'produit' ? c.product_id ?? null : null,
+      c.discount ?? 0,
     );
   }
 
