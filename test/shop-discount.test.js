@@ -176,3 +176,15 @@ test('ticket : remise sur le ticket et la page publique', async () => {
   assert.equal(pub2.discount, 0);
   assert.equal(pub2.discount_label, null);
 });
+
+test('Caisse › Boutique : remises accordées, vente annulée exclue', async () => {
+  const before = ok(await admin.get(`/api/shop/summary?from=${today}`)).accounts;
+  const kept = ok(await postSale(admin, { ...walkIn, lines: [{ product_id: BARREDA, quantity: 1 }], discount: { kind: 'pourcentage', value: 10 } }));
+  const gone = ok(await postSale(admin, { ...walkIn, lines: [{ product_id: BARREDA, quantity: 1 }], discount: { kind: 'montant', value: 1000 * UM } }));
+  ok(await admin.post(`/api/shop/sales/${gone.sale.id}/cancel`, { reason: 'Test de remise' }));
+  const after = ok(await admin.get(`/api/shop/summary?from=${today}`)).accounts;
+  assert.equal(kept.sale.discount, 1250 * UM);
+  assert.equal(after.cigares.discounts - before.cigares.discounts, 1250 * UM);
+  assert.equal(after.alcool.discounts, 0);
+  assert.equal(after.cigares.sales.find((s) => s.id === kept.sale.id).discount, 1250 * UM);
+});

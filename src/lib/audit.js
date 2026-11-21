@@ -3,6 +3,7 @@ import { RAYON_LABEL } from '../../shared/roles.js';
 import { money, fmtDuration, dayLabel, ACCOUNT_LABEL } from './format.js';
 import { CAISSE_LABEL } from '../../shared/caisses.js';
 import { formatForeign } from '../../shared/suppliers.js';
+import { discountLabel } from '../../shared/pricing.js';
 
 export const ACTION_LABELS = {
   'cave.creer': 'Cave créée',
@@ -192,7 +193,9 @@ export function auditSummary(a) {
     case 'caisse.verifier':
       return dayLabel(d.jour, 'short');
     case 'boutique.vente':
-      return `${RAYON_LABEL[d.rayon] ?? d.rayon} · ${BUYER_LABEL[d.acheteur] ?? d.acheteur} · ${money(d.montant)}${d.carte > 0 ? ` (dont ${money(d.carte)} par carte)` : ''}`;
+      return `${RAYON_LABEL[d.rayon] ?? d.rayon} · ${BUYER_LABEL[d.acheteur] ?? d.acheteur} · ${money(d.montant)}${d.carte > 0 ? ` (dont ${money(d.carte)} par carte)` : ''}`
+        + (d.remise ? ` · ${discountLabel(d.remise.type, d.remise.valeur)} : −${money(d.remise.montant)}` : '')
+        + (d.prix_par_lot?.length ? ` · prix par lot : ${d.prix_par_lot.join(', ')}` : '');
     case 'boutique.vente.annuler':
       return `${RAYON_LABEL[d.rayon] ?? d.rayon} · ${money(d.montant)} — ${d.motif}`;
     case 'paiement.enregistrer':

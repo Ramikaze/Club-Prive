@@ -56,7 +56,8 @@ function SaleRow({ sale, canCancel, onDone }) {
     <CashRow
       title={<>{productsOf(sale)}{cancelled && <> <CancelledChip label="annulée" /></>}</>}
       meta={metaLine(dateTime(sale.created_at), ticketLink(sale.payment_id, sale.ticket_number), <Buyer sale={sale} />,
-        sale.method && paymentMethodText(sale), sale.created_by_name && `par ${sale.created_by_name}`)}
+        sale.method && paymentMethodText(sale), sale.discount > 0 && `remise −${money(sale.discount)}`,
+        sale.created_by_name && `par ${sale.created_by_name}`)}
       note={cancelled ? `Annulée le ${dateTime(sale.cancelled_at)}${sale.cancelled_by_name ? ` par ${sale.cancelled_by_name}` : ''} : ${sale.cancel_reason ?? ''}` : null}
       amount={sale.amount} cancelled={cancelled}
       action={canCancel && !cancelled && (
@@ -109,6 +110,9 @@ function Column({ col, canCancel, onDone }) {
         </dl>
       )}
       {!methods.length && !card && <p className="subtle">Aucune vente sur la période.</p>}
+      {col.discounts > 0 && (
+        <dl className="calc"><div><dt>Remises accordées</dt><dd>−{money(col.discounts)}</dd></div></dl>
+      )}
       <h3 className="sub-section-title cash-list-title">Ventes <span className="subtle">({col.sales.length})</span></h3>
       {col.sales.length ? (
         <div className="list">{col.sales.map((s) => <SaleRow key={s.id} sale={s} canCancel={canCancel} onDone={onDone} />)}</div>
