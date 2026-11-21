@@ -8,6 +8,7 @@ import { Toasts } from './components/ui/toast.jsx';
 import { Empty, Skeleton } from './components/ui/ui.jsx';
 import Login, { prefetchSetup } from './pages/Login.jsx';
 import PublicTicket, { isPublicTicketHash } from './pages/PublicTicket.jsx';
+import UpdateNotice from './components/ui/UpdateNotice.jsx';
 import { api, setUnauthorizedHandler } from './lib/api.js';
 
 // Each page is downloaded the first time it is opened, so the sign-in screen and the client space do not wait for
@@ -229,8 +230,17 @@ function StaffApp() {
 
 // /client is the client space: a separate application, with its own sign-in and its own API. Nothing of the staff
 // application runs there (no session check, no staff store, no demo header): the choice is made before StaffApp's hooks.
+// Both show the notice of a new version put online, outside their crash screens: a page broken by an old version can
+// still be updated.
 export default function App() {
-  if (!/^\/client(\/|$)/.test(window.location.pathname)) return <StaffApp />;
-  // Its own crash screen is inside the part downloaded on demand: this one shows when that download fails.
-  return <CrashBoundary><Suspense fallback={<div className="card"><Skeleton /></div>}><ClientApp /></Suspense></CrashBoundary>;
+  const client = /^\/client(\/|$)/.test(window.location.pathname);
+  return (
+    <>
+      {client
+        // Its own crash screen is inside the part downloaded on demand: this one shows when that download fails.
+        ? <CrashBoundary><Suspense fallback={<div className="card"><Skeleton /></div>}><ClientApp /></Suspense></CrashBoundary>
+        : <StaffApp />}
+      <UpdateNotice />
+    </>
+  );
 }

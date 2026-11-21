@@ -14,5 +14,9 @@
 /sw.js
   Cache-Control: no-cache
 
+# The name of the version online, read every minute by the open pages (src/lib/update.js): always the current one.
+/version.json
+  Cache-Control: no-store
+
 /login-smoke.*
   Cache-Control: public, max-age=604800
