@@ -1,6 +1,8 @@
 // « Journées à vérifier » in the « Soldes » card, and the dialog where an associé checks one closed day: he reads
 // what the manager counted, then validates the day, or reopens it to correct (he closes it again, then validates).
-// Days are verified oldest first: only the first row has a button (the server refuses otherwise, JOURNEE_PRECEDENTE).
+// Each day of the list opens the cash page on that day, whose closing bar closes and verifies it (owner's request,
+// 2026-11-21). Days are verified oldest first (the server refuses otherwise, JOURNEE_PRECEDENTE).
+import { Link } from 'react-router-dom';
 import Icon from '../ui/Icon.jsx';
 import { Modal, actionDialog, openDialog } from '../ui/Modal.jsx';
 import { FormError, Loaded } from '../ui/ui.jsx';
@@ -9,33 +11,28 @@ import { gapText } from './CountDialog.jsx';
 import { api, qs } from '../../lib/api.js';
 import { dateTime, dayLabel, money } from '../../lib/format.js';
 import { useLoad, useSubmit } from '../../lib/hooks.js';
-import { useIsBoss } from '../../store/useStore.js';
 import { CAISSE_LABEL } from '../../../shared/caisses.js';
+import { dayLink } from './dayLinks.js';
 
 export const verifyDayDialog = (day, onDone) => openDialog(VerifyDayDialog, { day, onDone });
 
-export function PendingDaysBand({ days, onChange }) {
-  const boss = useIsBoss();
+export function PendingDaysBand({ days }) {
   if (!days?.length) return null;
   return (
     <div className="pending-days">
       <h3>{days.length} journée{days.length > 1 ? 's' : ''} à vérifier</h3>
       <div className="list">
         {days.map((d, i) => (
-          <div key={d.day} className="list-item">
+          <Link key={d.day} className="list-item" to={dayLink(d.day)}>
             <div className="grow">
               <div className="title">{dayLabel(d.day, 'medium')}</div>
               <div className="meta">{d.closed ? `Fermée${d.closed_by_name ? ` par ${d.closed_by_name}` : ''} le ${dateTime(d.closed_at)}` : 'Pas encore fermée'}</div>
             </div>
             <span className="num">{money(d.total)}</span>
-            {i > 0 && <span className="subtle">après le {dayLabel(days[i - 1].day, 'medium')}</span>}
-            {/* The day is closed from the « Recette du jour par catégorie » tile below (owner's request, 2026-11-10). */}
-            {i === 0 && !d.closed && <span className="subtle">à fermer dans « Recette du jour par catégorie »</span>}
-            {i === 0 && d.closed && boss && (
-              <button type="button" className="btn btn-sm btn-primary" onClick={() => verifyDayDialog(d.day, onChange)}>Vérifier</button>
-            )}
-            {i === 0 && d.closed && !boss && <span className="subtle">en attente de vérification</span>}
-          </div>
+            {/* A day is closed in any order; it is verified after the days before it. */}
+            <span className="subtle">{d.closed ? `à vérifier${i > 0 ? ` après le ${dayLabel(days[i - 1].day, 'medium')}` : ''}` : 'à fermer'}</span>
+            <Icon name="right" className="list-go" aria-hidden="true" />
+          </Link>
         ))}
       </div>
     </div>

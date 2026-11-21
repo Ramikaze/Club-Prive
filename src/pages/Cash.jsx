@@ -4,7 +4,7 @@
 // to the money received) sits between the balances and the receipts. The manager sees the same blocks for the
 // current day only (owner's request, 2026-11-18), without their buttons, and records the day's expenses within his
 // cap.
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import Icon from '../components/ui/Icon.jsx';
 import { Modal, openDialog } from '../components/ui/Modal.jsx';
@@ -21,6 +21,7 @@ import ExpensesBlock, { ProfitsBlock, TransfersBlock } from '../components/cash/
 import CategoryColumns from '../components/cash/CategoryColumns.jsx';
 import { Details, OpenNotes } from '../components/cash/CashDetails.jsx';
 import { DayClosingBar } from '../components/cash/CloseDay.jsx';
+import { closingDayOf } from '../components/cash/dayLinks.js';
 import { ProfitBand } from '../components/cash/ProfitBlock.jsx';
 import { api, qs } from '../lib/api.js';
 import { ACCOUNT_LABEL, bizToday, dayLabel } from '../lib/format.js';
@@ -64,7 +65,8 @@ function useCashPeriod() {
 // A link to a block (the former expenses page, /depenses?type=depense, now redirected here) scrolls to it once
 // the page is loaded.
 // « reste »: the members' open notes, from the « Membres » tile of « Membres / Clients ».
-const BLOCKS = { recette: 'caisse-recettes', depense: 'caisse-depenses', transfert: 'caisse-transferts', reste: 'caisse-reste' };
+// « jour »: a day of « Journées à vérifier », opened on « Recette du jour par catégorie » and its closing bar.
+const BLOCKS = { recette: 'caisse-recettes', depense: 'caisse-depenses', transfert: 'caisse-transferts', reste: 'caisse-reste', jour: 'caisse-categories' };
 function useScrollToBlock(type, loaded) {
   useEffect(() => {
     if (loaded && BLOCKS[type]) document.getElementById(BLOCKS[type])?.scrollIntoView({ block: 'start' });
@@ -95,8 +97,6 @@ function MoreDialog({ close }) {
 const periodLabel = (from, to) => (from === to ? dayLabel(from, 'title') : `Du ${dayLabel(from, 'medium')} au ${dayLabel(to, 'medium')}`);
 
 function AdminCash() {
-  // Bumped by the « journées à vérifier » band so the closing bar above reloads its own day too.
-  const [barTick, setBarTick] = useState(0);
   const settings = useSettings();
   const period = useCashPeriod();
   const { from, to } = period;
@@ -187,11 +187,11 @@ function AdminCash() {
           {/* On all accounts, the associés' caisses (six tiles); on one account, its four figures. */}
           {method
             ? <CashBalance t={d.treasury} method={method} entries={d.entries} journal={d.journal} openingBalances={settings.opening_balances} onCount={count} />
-            : <CaissesBalance b={d.caisses} onCount={count} onAction={onCaisse} onChange={() => { setBarTick((n) => n + 1); state.reload(); }} />}
+            : <CaissesBalance b={d.caisses} onCount={count} onAction={onCaisse} />}
           <CategoryColumns
             sum={d.sum} billed={d.billed} method={method} oneDay={oneDay}
             journal={d.journal} entries={d.entries} t={d.treasury} openingBalances={settings.opening_balances}
-            closing={<DayClosingBar isAdmin inline onChange={state.reload} refresh={barTick} />}
+            closing={<DayClosingBar isAdmin inline onChange={state.reload} day={closingDayOf(from, to, bizToday())} />}
             footer={d.profit && <ProfitBand report={d.profit} oneDay={oneDay} />}
           />
           <div className="cash-columns">
