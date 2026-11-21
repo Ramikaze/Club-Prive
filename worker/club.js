@@ -16,6 +16,7 @@ import { importStockMethods } from './importStock.js';
 import { giftMethods } from './gifts.js';
 import { profitMethods } from './profit.js';
 import { ERASE_GROUPS, ERASE_UNLINKS, eraseClosure } from '../shared/erase.js';
+import { FRANC } from '../shared/pricing.js';
 import { clientAccessMethods } from './clientAccess.js';
 import { clientViewMethods } from './clientView.js';
 import { clientOrderMethods } from './clientOrders.js';
@@ -3190,6 +3191,8 @@ export class Club {
       // The cost price is a margin figure: only the administrator and the associés read it (this.viewer is the
       // account of the request, set by worker/api.js just before each handler).
       ...(isBoss(this.viewer) ? { cost_price: p.cost_price ?? null } : {}),
+      // The lot price (V31), read by every seller: the sale screen prices with it (shared/pricing.js).
+      lot_qty: p.lot_qty ?? null, lot_price: p.lot_price ?? null, extra_price: p.extra_price ?? null,
     };
   }
 
@@ -3220,7 +3223,24 @@ export class Club {
     // Empty is « not known yet »; a cost price left out of the form keeps the current one.
     const rawCost = input.cost_price !== undefined ? input.cost_price : current.cost_price;
     const cost = rawCost === null || rawCost === undefined || rawCost === '' ? null : int(rawCost, 'Prix de revient', { min: 0 });
-    return { category, name, reference, description, price, threshold, active, cost };
+    return { category, name, reference, description, price, threshold, active, cost, lot: this.lotFields(pick, price) };
+  }
+
+  // The lot price (V31, « lot de 3 pour 10 000, puis 3 000 par unité en plus »): the three fields together or none, a
+  // lot cheaper than its pieces at the normal price, a piece beyond it never dearer than the price. Fields left out of
+  // the input keep the product's current ones; all three empty clear the lot.
+  lotFields(pick, price) {
+    const raw = [pick('lot_qty'), pick('lot_price'), pick('extra_price')];
+    const empty = (v) => v === null || v === undefined || v === '';
+    if (raw.every(empty)) return null;
+    if (raw.some(empty)) throw invalid('Prix par lot : remplissez les trois champs (quantité, prix du lot, prix par unité en plus), ou aucun.');
+    const qty = int(raw[0], 'Quantité du lot', { min: 2, max: 99 });
+    const lotPrice = int(raw[1], 'Prix du lot', { min: 0 });
+    const extra = int(raw[2], 'Prix par unité en plus', { min: 0 });
+    if (lotPrice < FRANC || extra < FRANC) throw invalid('Prix par lot : le prix du lot et le prix par unité en plus valent au moins 1 FCFA.');
+    if (lotPrice >= qty * price) throw invalid('Prix par lot : le lot doit coûter moins cher que ses pièces au prix normal.');
+    if (extra > price) throw invalid('Prix par lot : une unité en plus ne peut pas coûter plus que le prix de vente.');
+    return { qty, price: lotPrice, extra };
   }
 
   // Product files, photos and stock belong to the rayon of an associé; the administrator owns both, and the
@@ -3235,9 +3255,11 @@ export class Club {
     if (this.get('SELECT 1 AS x FROM products WHERE reference = ?', f.reference)) throw conflict('REFERENCE_PRISE', 'Cette référence existe déjà.');
     const initial = input.initial_stock === undefined || input.initial_stock === '' ? 0 : int(input.initial_stock, 'Stock initial', { min: 0, max: 100000 });
     const id = this.insert(
-      `INSERT INTO products (category, name, reference, description, price, cost_price, stock_qty, low_stock_threshold, active, is_demo, created_at, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+      `INSERT INTO products (category, name, reference, description, price, cost_price, stock_qty, low_stock_threshold, active, is_demo, created_at, created_by,
+         lot_qty, lot_price, extra_price)
+       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)`,
       f.category, f.name, f.reference, f.description, f.price, f.cost, f.threshold, f.active ? 1 : 0, demo ? 1 : 0, this.nowIso(), actor.id,
+      f.lot?.qty ?? null, f.lot?.price ?? null, f.lot?.extra ?? null,
     );
     if (initial > 0) this.moveStock(actor, id, initial, 'stock_initial', { reason: 'Création du produit' });
     this.audit(actor, 'produit.creer', 'product', id, { ...f, stock_initial: initial });
@@ -3260,8 +3282,9 @@ export class Club {
     }
     this.run(
       `UPDATE products SET category = ?, name = ?, reference = ?, description = ?, price = ?, cost_price = ?, low_stock_threshold = ?, active = ?,
-         updated_at = ?, updated_by = ? WHERE id = ?`,
-      f.category, f.name, f.reference, f.description, f.price, f.cost, f.threshold, f.active ? 1 : 0, this.nowIso(), actor.id, p.id,
+         lot_qty = ?, lot_price = ?, extra_price = ?, updated_at = ?, updated_by = ? WHERE id = ?`,
+      f.category, f.name, f.reference, f.description, f.price, f.cost, f.threshold, f.active ? 1 : 0,
+      f.lot?.qty ?? null, f.lot?.price ?? null, f.lot?.extra ?? null, this.nowIso(), actor.id, p.id,
     );
     // A cost entered (or changed) fills the sales and gifts of this product that had none; one that had a cost keeps
     // it (spec 2026-11-18 « bénéfice réel », §2).
@@ -3271,8 +3294,14 @@ export class Club {
     };
     this.audit(actor, 'produit.modifier', 'product', p.id, {
       ...(filled && (filled.ventes || filled.offerts) ? { prix_de_revient_rempli: filled } : {}),
-      avant: { category: p.category, name: p.name, reference: p.reference, price: p.price, cost_price: p.cost_price ?? null, low_stock_threshold: p.low_stock_threshold, active: !!p.active },
-      apres: { category: f.category, name: f.name, reference: f.reference, price: f.price, cost_price: f.cost, low_stock_threshold: f.threshold, active: f.active },
+      avant: {
+        category: p.category, name: p.name, reference: p.reference, price: p.price, cost_price: p.cost_price ?? null, low_stock_threshold: p.low_stock_threshold, active: !!p.active,
+        lot_qty: p.lot_qty ?? null, lot_price: p.lot_price ?? null, extra_price: p.extra_price ?? null,
+      },
+      apres: {
+        category: f.category, name: f.name, reference: f.reference, price: f.price, cost_price: f.cost, low_stock_threshold: f.threshold, active: f.active,
+        lot_qty: f.lot?.qty ?? null, lot_price: f.lot?.price ?? null, extra_price: f.lot?.extra ?? null,
+      },
     });
     return this.productById(p.id);
   }
