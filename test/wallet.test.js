@@ -950,7 +950,8 @@ const publicOf = (paymentId) => {
   const { ticket_code: code } = server.club.get('SELECT ticket_code FROM payments WHERE id = ?', paymentId);
   return server.club.publicTicket(paymentId, code);
 };
-const PUBLIC_KEYS = ['club_name', 'currency', 'initials', 'lines', 'method', 'number', 'paid_at', 'refunded_amount', 'status', 'timezone', 'total'];
+// `discount` and `discount_label`: a Boutique sale's discount (V31), no personal data.
+const PUBLIC_KEYS = ['club_name', 'currency', 'discount', 'discount_label', 'initials', 'lines', 'method', 'number', 'paid_at', 'refunded_amount', 'status', 'timezone', 'total'];
 
 test('ticket d’une recharge : une ligne, solde juste après elle, signature ; annulée, « annule » partout', async () => {
   const member = await newMember('Victor');
