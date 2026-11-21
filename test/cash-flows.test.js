@@ -8,7 +8,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { CARD_METHOD } from '../shared/rules.js';
 import { entryTicketRow, expenseTotal, receiptSummary, tillFigures, transferTotals } from '../src/components/cash/flows.js';
-import { Server, Client, ok, UM } from './harness.js';
+import { Server, Client, ok, UM, postSale } from './harness.js';
 
 const server = new Server({});
 let admin;
@@ -142,11 +142,11 @@ test('recettes : la Boutique est comptée et montrée à part', async () => {
   const btl = ok(await admin.post('/api/products', { category: 'bouteille', name: 'Bouteille Boutique', reference: 'BB-1', price: 20000 * UM, initial_stock: 20 })).id;
   const cash = 'Espèces';
   // A Boutique sale of 10 000 in cash, a séance of 7 000 in cash.
-  ok(await manager.post('/api/shop/sales', { account: 'cigares', buyer: { kind: 'journalier' }, lines: [{ product_id: cig, quantity: 2 }], method: cash }));
+  ok(await postSale(manager, { account: 'cigares', buyer: { kind: 'journalier' }, lines: [{ product_id: cig, quantity: 2 }], method: cash }));
   const gus = await newMember('Gus');
   await pay({ charge_ids: [line(gus.id, 'reservations', 7000, 'Séance')], method: cash });
   // A Boutique sale of 20 000 cancelled the same day: its money comes back out, so it counts 0.
-  const gone = ok(await manager.post('/api/shop/sales', { account: 'alcool', buyer: { kind: 'journalier' }, lines: [{ product_id: btl, quantity: 1 }], method: cash }));
+  const gone = ok(await postSale(manager, { account: 'alcool', buyer: { kind: 'journalier' }, lines: [{ product_id: btl, quantity: 1 }], method: cash }));
   ok(await admin.post(`/api/shop/sales/${gone.sale.id}/cancel`, { reason: 'Erreur de caisse' }));
 
   const data = await pageData();

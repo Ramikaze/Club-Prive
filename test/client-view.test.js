@@ -2,7 +2,7 @@
 // answer is built field by field: no staff name, no staff note, no reason typed by staff, nothing of another member.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { Server, Client, ok, UM } from './harness.js';
+import { Server, Client, ok, UM, postSale } from './harness.js';
 
 const server = new Server({}, { lenientTariffs: true });
 const PASSWORD = 'mon-mot-de-passe-client';
@@ -28,7 +28,7 @@ async function signedIn(member, login) {
   return client;
 }
 
-const sell = async (memberId, extra = {}) => ok(await manager.post('/api/shop/sales', {
+const sell = async (memberId, extra = {}) => ok(await postSale(manager, {
   account: 'alcool', buyer: { kind: 'membre', member_id: memberId }, lines: [{ product_id: bottle.id, quantity: 1 }], method: 'Espèces', ...extra,
 }));
 
@@ -90,7 +90,7 @@ test('compte d’un client régulier : ce qu’il doit, plafond, disponible', as
   const client = await signedIn(c, 'awa.credit');
   assert.equal(ok(await client.get('/api/client/account')).credit, null);
   ok(await admin.put(`/api/clients/${c.id}/credit-limit`, { credit_limit: 60000 * UM }));
-  ok(await manager.post('/api/shop/sales', {
+  ok(await postSale(manager, {
     account: 'alcool', buyer: { kind: 'client', member_id: c.id }, lines: [{ product_id: bottle.id, quantity: 2 }], credit: true,
   }));
   const view = ok(await client.get('/api/client/account'));
@@ -189,7 +189,7 @@ test('ticket : A ouvre le sien, pas celui de B (404), pas un numéro inconnu (40
     assert.equal(r.data.error.code, 'INTROUVABLE');
   }
   // A walk-in's ticket is nobody's.
-  const walkIn = ok(await manager.post('/api/shop/sales', {
+  const walkIn = ok(await postSale(manager, {
     account: 'alcool', buyer: { kind: 'journalier' }, lines: [{ product_id: bottle.id, quantity: 1 }], method: 'Espèces',
   }));
   assert.equal((await alice.client.get(`/api/client/tickets/${walkIn.payment.id}`)).status, 404);

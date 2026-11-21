@@ -3,7 +3,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { addDays, addMonths } from '../shared/time.js';
-import { Server, Client, ok, UM } from './harness.js';
+import { Server, Client, ok, UM, postSale } from './harness.js';
 
 const server = new Server({}, { lenientTariffs: true, dayVerification: true });
 let admin;
@@ -46,7 +46,7 @@ async function fundAndSell(c, amount, at) {
 }
 async function sell(c, quantity, at) {
   c.srv.club.at = at;
-  ok(await c.ger.post('/api/shop/sales', { account: 'cigares', buyer: { kind: 'journalier' }, lines: [{ product_id: c.cigar, quantity }], method: 'Espèces' }));
+  ok(await postSale(c.ger, { account: 'cigares', buyer: { kind: 'journalier' }, lines: [{ product_id: c.cigar, quantity }], method: 'Espèces' }));
   c.srv.club.at = null;
 }
 
@@ -323,7 +323,7 @@ test('l’argent en attente se dépense en négatif seulement : le disponible ti
     c.srv.club.run("UPDATE meta SET value = ? WHERE key = 'day_verification_since'", c.twoAgo);
     const sellB = async (qty, day) => {
       c.srv.club.at = noon(c.srv, day);
-      ok(await c.ger.post('/api/shop/sales', { account: 'cigares', buyer: { kind: 'journalier' }, lines: [{ product_id: cigar, quantity: qty }], method: 'Espèces' }));
+      ok(await postSale(c.ger, { account: 'cigares', buyer: { kind: 'journalier' }, lines: [{ product_id: cigar, quantity: qty }], method: 'Espèces' }));
     };
     await sellB(64, c.yesterday);
     ok(await c.admin.post('/api/day-closing', { day: c.yesterday, checked: [], unchecked_reason: 'Essai', counts: { 'Espèces': 640000 * UM } }));

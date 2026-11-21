@@ -4,7 +4,7 @@
 // Every name and amount here is made up.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { Server, Client, ok, UM } from './harness.js';
+import { Server, Client, ok, UM, postSale } from './harness.js';
 import { clientStatementWhatsAppText } from '../shared/wallet.js';
 
 const server = new Server({});
@@ -100,7 +100,7 @@ test('règlement : la dette reprise est payée en premier, chaque part dans sa c
   const c = await newClient();
   ok(await cha.put(`/api/clients/${c.id}/credit-limit`, { credit_limit: 200000 * UM }));
   // A credit sale of champagne first, then the old cigar debt: the old debt is still paid first.
-  const sale = ok(await cha.post('/api/shop/sales', {
+  const sale = ok(await postSale(cha, {
     account: 'alcool', buyer: { kind: 'client', member_id: c.id }, lines: [{ product_id: CHP, quantity: 1 }], credit: true,
   }));
   ok(await carryover(admin, c, { amount: 50000 * UM, account: 'cigares', note: 'Reprise Digibox' }));
@@ -148,7 +148,7 @@ test('plafond : la dette reprise compte', async () => {
   const c = await newClient();
   ok(await cha.put(`/api/clients/${c.id}/credit-limit`, { credit_limit: 60000 * UM }));
   ok(await carryover(admin, c, { amount: 50000 * UM, account: 'cigares', note: 'Reprise Digibox' }));
-  refused(await cha.post('/api/shop/sales', {
+  refused(await postSale(cha, {
     account: 'alcool', buyer: { kind: 'client', member_id: c.id }, lines: [{ product_id: CHP, quantity: 1 }], credit: true,
   }), 409, 'PLAFOND_CREDIT');
 });

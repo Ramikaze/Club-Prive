@@ -3,7 +3,7 @@
 // pointing at nothing); accounts and settings always stay; the erasure is written in the journal.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Server, Client, ok, UM } from './harness.js';
+import { Server, Client, ok, UM, postSale } from './harness.js';
 import { eraseClosure } from '../shared/erase.js';
 
 const refused = (r, status) => assert.equal(r.status, status, JSON.stringify(r.data));
@@ -29,7 +29,7 @@ async function seeded(name) {
   const line = ok(await ger.post(`/api/reservations/${r.reservation.id}/items`, { product_id: CIG, quantity: 1 }))
     .charges.find((c) => c.status === 'due' && c.kind === 'produit').id;
   ok(await ger.post('/api/payments', { charge_ids: [line], method: 'Espèces' }));
-  ok(await ger.post('/api/shop/sales', { account: 'cigares', buyer: { kind: 'journalier' }, lines: [{ product_id: CIG, quantity: 1 }], method: 'Espèces' }));
+  ok(await postSale(ger, { account: 'cigares', buyer: { kind: 'journalier' }, lines: [{ product_id: CIG, quantity: 1 }], method: 'Espèces' }));
   ok(await ger.post(`/api/members/${m.id}/wallet/recharge`, { amount: 10000 * UM, method: 'Espèces' }));
   ok(await cig.post(`/api/products/${CIG}/offer`, { quantity: 1, member_id: m.id }));
   const count = (table) => server.club.get(`SELECT COUNT(*) AS n FROM ${table}`).n;

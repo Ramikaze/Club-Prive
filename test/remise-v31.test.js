@@ -4,7 +4,7 @@
 // id and its references.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Server, Client, ok, UM } from './harness.js';
+import { Server, Client, ok, UM, postSale } from './harness.js';
 import { nodeDb } from '../worker/db-node.js';
 import { MIGRATIONS } from '../worker/schema.js';
 
@@ -57,17 +57,17 @@ test('migration V31 sans perte : lignes, paiements, remboursements et stock gard
     const m = ok(await a.post('/api/members', { first_name: 'jean', last_name: 'migration', phone: '00 00 09 31' }));
     ok(await a.post(`/api/members/${m.id}/wallet/recharge`, { amount: 30000 * UM, method: 'Espèces' }));
     // A card sale, then its cancellation: refunds, goods back, a card movement.
-    const sale = ok(await a.post('/api/shop/sales', {
+    const sale = ok(await postSale(a, {
       account: 'cigares', buyer: { kind: 'membre', member_id: m.id }, lines: [{ product_id: cigar.id, quantity: 2 }], card: true,
     }));
     ok(await a.post(`/api/shop/sales/${sale.sale.id}/cancel`, { reason: 'Test de migration' }));
-    ok(await a.post('/api/shop/sales', {
+    ok(await postSale(a, {
       account: 'cigares', buyer: { kind: 'journalier' }, lines: [{ product_id: cigar.id, quantity: 1 }], method: 'Espèces',
     }));
     // A regular client's credit sale, then a settlement.
     const c = ok(await a.post('/api/clients', { first_name: 'awa', last_name: 'migration', phone: '00 00 09 32' }));
     ok(await a.put(`/api/clients/${c.id}/credit-limit`, { credit_limit: 50000 * UM }));
-    ok(await a.post('/api/shop/sales', { account: 'cigares', buyer: { kind: 'client', member_id: c.id }, lines: [{ product_id: cigar.id, quantity: 1 }], credit: true }));
+    ok(await postSale(a, { account: 'cigares', buyer: { kind: 'client', member_id: c.id }, lines: [{ product_id: cigar.id, quantity: 1 }], credit: true }));
     ok(await a.post(`/api/clients/${c.id}/settlements`, { amount: 2000 * UM, method: 'Espèces' }));
     // A gift by the associé of the rayon.
     ok(await cig.post(`/api/products/${cigar.id}/offer`, { quantity: 1, reason: 'Test de migration' }));
@@ -112,7 +112,7 @@ test('insertCharge : une ligne Boutique garde le montant payé et sa remise', as
     const a = new Client(server);
     await a.login('admin', 'v31-ins-password');
     const cigar = ok(await a.post('/api/products', { category: 'cigare', name: 'Coupe v31', reference: 'K31', price: 5000 * UM, initial_stock: 5 }));
-    const sold = ok(await a.post('/api/shop/sales', { account: 'cigares', buyer: { kind: 'journalier' }, lines: [{ product_id: cigar.id, quantity: 1 }], method: 'Espèces' }));
+    const sold = ok(await postSale(a, { account: 'cigares', buyer: { kind: 'journalier' }, lines: [{ product_id: cigar.id, quantity: 1 }], method: 'Espèces' }));
     const actor = server.club.get("SELECT id FROM users WHERE login = 'admin'");
     const line = {
       account: 'cigares', kind: 'produit', member_id: server.club.walkInMemberId(), product_id: cigar.id, label: 'Coupe v31',

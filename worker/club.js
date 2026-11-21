@@ -109,6 +109,9 @@ export function defaultSettings() {
     opening_balances: { date: null, amounts: {} },
     low_stock_default: 3,
     expiry_warning_days: 7,
+    // The most the manager may take off a Boutique sale, in % of its total (spec 2026-11-21-remise-prix-par-lot);
+    // 0: no discount at all. The administrator and the associés have no cap.
+    gerant_discount_cap_pct: 10,
   };
 }
 
@@ -503,6 +506,8 @@ export class Club {
         return int(v, "Seuil d'alerte de stock", { min: 0, max: 10000 });
       case 'expiry_warning_days':
         return int(v, "Délai d'alerte d'expiration", { min: 1, max: 90 });
+      case 'gerant_discount_cap_pct':
+        return int(v, 'Remise maximale du gérant', { min: 0, max: 99 });
       default:
         throw invalid(`Paramètre inconnu : ${key}`);
     }

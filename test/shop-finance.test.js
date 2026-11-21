@@ -1,7 +1,7 @@
 // Caisse figures: the Séances / Boutique split of the Caisse tab and the Boutique tab's own figures.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { Server, Client, ok, UM } from './harness.js';
+import { Server, Client, ok, UM, postSale } from './harness.js';
 
 const server = new Server({});
 let admin;
@@ -14,7 +14,7 @@ let CIG;
 let BTL;
 
 const refused = (r, status) => assert.equal(r.status, status, JSON.stringify(r.data));
-const sale = (who, body) => who.post('/api/shop/sales', body);
+const sale = (who, body) => postSale(who, body);
 const summary = async (from = today, to = from) => ok(await admin.get(`/api/finance/summary?from=${from}&to=${to}`));
 const shop = async (from = today, to = from) => ok(await admin.get(`/api/shop/summary?from=${from}&to=${to}`));
 const FIELDS = ['billed', 'collected', 'refunded', 'net', 'outstanding', 'cancelled', 'lines'];

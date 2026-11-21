@@ -2,7 +2,7 @@
 // listed per column (Réservation séance, Champagne, Autres boissons, Cigare).
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { Server, Client, ok, UM } from './harness.js';
+import { Server, Client, ok, UM, postSale } from './harness.js';
 
 const server = new Server({}, { lenientTariffs: true });
 let admin;
@@ -77,7 +77,7 @@ test('Champagne + Autres boissons = Alcool', async () => {
   const d2 = await addItem(resId, DRK);
   const cg = await addItem(resId, CIG);
   await pay([chp.id, d1.id, d2.id, cg.id]);
-  ok(await ger.post('/api/shop/sales', { account: 'alcool', buyer: { kind: 'journalier' }, lines: [{ product_id: CHP, quantity: 1 }], method: 'Espèces' }));
+  ok(await postSale(ger, { account: 'alcool', buyer: { kind: 'journalier' }, lines: [{ product_id: CHP, quantity: 1 }], method: 'Espèces' }));
   const now = await summary();
   const a = alcool(now);
   const b = alcool(was);
@@ -134,7 +134,7 @@ test('liste des lignes facturées : chaque ligne dans sa colonne', async () => {
   const payer = await newMember();
   ok(await ger.post(`/api/members/${payer.id}/wallet/recharge`, { amount: 100000 * UM, method: 'Espèces' }));
   const booked = await bookSession(payer, { pay_with_card: true });
-  const sale = ok(await ger.post('/api/shop/sales', { account: 'alcool', buyer: { kind: 'journalier' }, lines: [{ product_id: CHP, quantity: 1 }], method: 'Espèces' }));
+  const sale = ok(await postSale(ger, { account: 'alcool', buyer: { kind: 'journalier' }, lines: [{ product_id: CHP, quantity: 1 }], method: 'Espèces' }));
   const cols = (await billed()).columns;
   const dr = cols.autres_boissons.lines.find((l) => l.charge_id === drk.id);
   assert.equal(dr.status, 'due');
@@ -156,7 +156,7 @@ test('liste des lignes facturées : chaque ligne dans sa colonne', async () => {
 });
 
 test('client journalier sans donnée personnelle dans les colonnes', async () => {
-  const sale = ok(await ger.post('/api/shop/sales', { account: 'alcool', buyer: { kind: 'journalier' }, lines: [{ product_id: CHP, quantity: 1 }], method: 'Espèces' }));
+  const sale = ok(await postSale(ger, { account: 'alcool', buyer: { kind: 'journalier' }, lines: [{ product_id: CHP, quantity: 1 }], method: 'Espèces' }));
   const l = (await billed()).columns.champagne.lines.find((x) => x.shop_sale_id === sale.sale.id);
   assert.equal(l.member_id, null);
   assert.equal(l.member_name, 'Client journalier');

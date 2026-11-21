@@ -1,10 +1,11 @@
 // The boutique: regular clients (registered buyers who are not members) and the hidden walk-in client. All
 // writes run inside the API transaction, including audit and idempotency.
 import { conflict, invalid, forbidden, notFound } from './errors.js';
-import { toId, flag, text } from './validate.js';
+import { toId, flag, text, int } from './validate.js';
 import { SHOP, canSellIn, isBoss } from '../shared/roles.js';
 import { formatTicketNumber } from '../shared/ticket.js';
 import { CARD_METHOD, CREDIT_LABEL } from '../shared/rules.js';
+import { priceSale } from '../shared/pricing.js';
 
 // How a buyer is shown anywhere in the app: a day client ('journalier') is only « Client journalier », with no
 // number and no personal data (the hidden row's own name is never printed); anyone else by name and number.
@@ -112,6 +113,18 @@ export const shopMethods = {
       if (p.category !== SHOP[account].category) throw invalid(`« ${p.name} » ne se vend pas dans ce rayon.`, 'RAYON');
       return { p, quantity };
     });
+    // The lot price and the discount (spec docs/superpowers/specs/2026-11-21-remise-prix-par-lot-design.md), priced by
+    // shared/pricing.js as on the sale screen: each line keeps its catalogue price and real quantity, and what is paid
+    // for it. The manager is held to his cap; the administrator and the associés are not.
+    const discount = input.discount ?? null;
+    if (discount !== null && (typeof discount !== 'object' || Array.isArray(discount))) throw invalid('Remise invalide.', 'REMISE_INVALIDE');
+    const priced = priceSale(products.map(({ p, quantity }) => ({ product: p, quantity })), discount, {
+      capPct: actor.role === 'gerant' ? this.settings().gerant_discount_cap_pct : null,
+    });
+    if (priced.problem) {
+      const { code, message } = priced.problem;
+      throw code === 'REMISE_INVALIDE' ? invalid(message, code) : conflict(code, message);
+    }
 
     const buyer = input.buyer;
     if (!buyer || typeof buyer !== 'object' || !['journalier', 'client', 'membre'].includes(buyer.kind)) {
@@ -138,31 +151,50 @@ export const shopMethods = {
       if (m.kind !== buyer.kind) throw invalid(buyer.kind === 'client' ? 'Cet acheteur n’est pas un client régulier.' : 'Cet acheteur n’est pas un membre.');
       this.assertMemberActive(m, 'une vente');
       memberId = m.id;
-      if (credit) this.assertCreditAllowed(m, products.reduce((n, { p, quantity }) => n + p.price * quantity, 0));
+      if (credit) this.assertCreditAllowed(m, priced.total);
+    }
+
+    // The total the screen showed, a check only: a page left open with older prices, or with the code of before the
+    // lot price, cannot cash one amount at the counter while the server records another.
+    if (input.expected_total === undefined || input.expected_total === null) {
+      throw conflict('PAGE_A_RECHARGER', 'Rechargez la page avant d’encaisser.');
+    }
+    if (int(input.expected_total, 'Total affiché', { min: 0 }) !== priced.total) {
+      throw conflict('TOTAL_CHANGE', 'Les prix ont changé : vérifiez le panier avant d’encaisser.');
     }
 
     const saleId = this.insert(
-      'INSERT INTO shop_sales (account, member_id, buyer_kind, created_at, created_by, on_credit) VALUES (?, ?, ?, ?, ?, ?)',
+      `INSERT INTO shop_sales (account, member_id, buyer_kind, created_at, created_by, on_credit, discount_kind, discount_value)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       account, memberId, buyer.kind, this.nowIso(), actor.id, credit ? 1 : 0,
+      priced.discount ? discount.kind : null, priced.discount ? discount.value : null,
     );
     if (orderId) this.linkSaleToOrder(actor, orderId, account, saleId);
     const chargeIds = [];
-    for (const { p, quantity } of products) {
+    for (const [i, { p, quantity }] of products.entries()) {
       const chargeId = this.insertCharge(actor, {
         account, kind: 'produit', member_id: memberId, product_id: p.id, label: p.name, quantity, unit_price: p.price,
-        shop_sale_id: saleId,
+        amount: priced.lines[i].amount, discount: priced.lines[i].discount, shop_sale_id: saleId,
       });
       this.moveStock(actor, p.id, -quantity, 'vente', { chargeId, reason: `Boutique n° ${saleId}` });
       chargeIds.push(chargeId);
     }
+    // For the journal: the total before the discount, the discount itself, the products sold at their lot price.
+    const lots = products.filter((_, i) => priced.lines[i].lot).map(({ p }) => p.name);
+    const pricing = {
+      sous_total: priced.subtotal,
+      ...(priced.discount ? { remise: { type: discount.kind, valeur: discount.value, montant: priced.discount } } : {}),
+      ...(lots.length ? { prix_par_lot: lots } : {}),
+    };
     if (credit) {
-      const amount = this.get('SELECT SUM(amount) AS n FROM charges WHERE shop_sale_id = ?', saleId).n;
-      this.audit(actor, 'boutique.vente', 'shop_sale', saleId, { rayon: account, acheteur: buyer.kind, montant: amount, credit: true, client: memberId });
+      this.audit(actor, 'boutique.vente', 'shop_sale', saleId, {
+        rayon: account, acheteur: buyer.kind, montant: priced.total, credit: true, client: memberId, ...pricing,
+      });
       return { sale: this.shopSaleDTO(saleId), payment: null };
     }
     const { payment } = this.recordPayment(actor, { charge_ids: chargeIds, card, method }, { shopSaleId: saleId });
     this.audit(actor, 'boutique.vente', 'shop_sale', saleId, {
-      rayon: account, acheteur: buyer.kind, montant: payment.amount, carte: payment.card_amount,
+      rayon: account, acheteur: buyer.kind, montant: payment.amount, carte: payment.card_amount, ...pricing,
     });
     return { sale: this.shopSaleDTO(saleId), payment };
   },
@@ -201,19 +233,24 @@ export const shopMethods = {
        LEFT JOIN users u ON u.id = s.created_by LEFT JOIN users cu ON cu.id = s.cancelled_by WHERE s.id = ?`, id,
     );
     if (!s) throw notFound('Vente');
+    // A line's price is after its lot (amount + its share of the discount); `lot` says the lot price applied.
     const lines = this.all(
-      'SELECT id, product_id, label, quantity, unit_price, amount, status, settled FROM charges WHERE shop_sale_id = ? ORDER BY id', id,
+      'SELECT id, product_id, label, quantity, unit_price, amount, discount, status, settled FROM charges WHERE shop_sale_id = ? ORDER BY id', id,
     ).map((c) => ({
       charge_id: c.id, product_id: c.product_id, label: c.label, quantity: c.quantity, unit_price: c.unit_price,
-      amount: c.amount, status: c.status, settled: c.settled,
+      amount: c.amount, discount: c.discount, price: c.amount + c.discount, lot: c.quantity * c.unit_price > c.amount + c.discount,
+      status: c.status, settled: c.settled,
     }));
+    const amount = lines.reduce((n, l) => n + l.amount, 0);
+    const discount = lines.reduce((n, l) => n + l.discount, 0);
     const pay = this.get('SELECT id, method, card_amount FROM payments WHERE shop_sale_id = ? ORDER BY id LIMIT 1', id);
     const buyer = buyerShown(s.buyer_kind, s);
     return {
       id: s.id, account: s.account, buyer_kind: s.buyer_kind, member_id: s.buyer_kind === 'journalier' ? null : s.member_id,
       member_name: buyer.name, member_no: buyer.no,
       payment_id: pay?.id ?? null, ticket_number: pay ? formatTicketNumber(pay.id) : null,
-      amount: lines.reduce((n, l) => n + l.amount, 0), card_amount: pay?.card_amount ?? 0,
+      amount, subtotal: amount + discount, discount, discount_kind: s.discount_kind ?? null, discount_value: s.discount_value ?? null,
+      card_amount: pay?.card_amount ?? 0,
       // A credit sale has no payment of its own: it shows « À crédit » where the method goes.
       on_credit: !!s.on_credit, method: s.on_credit ? CREDIT_LABEL : pay?.method ?? null,
       created_at: s.created_at, created_by_name: s.created_by_name ?? null,

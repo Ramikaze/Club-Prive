@@ -8,6 +8,7 @@ import { createApi } from '../worker/api.js';
 import { nodeDb } from '../worker/db-node.js';
 import { hashPassword } from '../worker/auth.js';
 import { routeApi } from '../worker/space.js';
+import { priceSale } from '../shared/pricing.js';
 
 export const UM = 100; // amounts are stored in hundredths
 export const ORIGIN = 'http://club.test';
@@ -142,3 +143,29 @@ export const ok = (r) => {
   assert.equal(r.status, 200, JSON.stringify(r.data));
   return r.data;
 };
+
+// A Boutique sale as the sale screen sends it (spec docs/superpowers/specs/2026-11-21-remise-prix-par-lot-design.md):
+// with the total the screen would show, priced by shared/pricing.js from the products as the server has them (the
+// manager's cap is the server's alone). A body it cannot price goes as it is: the server refuses it before the total.
+export async function postSale(client, body, headers) {
+  if (body && typeof body === 'object' && !Array.isArray(body) && body.expected_total === undefined) {
+    const expected = await shownTotal(client, body).catch(() => undefined);
+    if (expected !== undefined) body = { ...body, expected_total: expected };
+  }
+  return client.post('/api/shop/sales', body, headers);
+}
+
+async function shownTotal(client, body) {
+  const r = await client.get('/api/products?all=1');
+  if (r.status !== 200 || !Array.isArray(r.data) || !Array.isArray(body.lines) || !body.lines.length) return undefined;
+  const byId = new Map(r.data.map((p) => [p.id, p]));
+  // A product listed twice is one line, as on the server.
+  const merged = new Map();
+  for (const l of body.lines) {
+    const product = byId.get(Number(l?.product_id));
+    const quantity = Number(l?.quantity);
+    if (!product || !Number.isInteger(quantity) || quantity < 1) return undefined;
+    merged.set(product, (merged.get(product) ?? 0) + quantity);
+  }
+  return priceSale([...merged].map(([product, quantity]) => ({ product, quantity })), body.discount ?? null).total;
+}

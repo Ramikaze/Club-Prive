@@ -3,7 +3,7 @@
 // sales − purchase cost − gifts per caisse and per product, every undo on the day it happens.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { Server, Client, ok, UM, fundCaisse } from './harness.js';
+import { Server, Client, ok, UM, fundCaisse, postSale } from './harness.js';
 import { MIGRATIONS } from '../worker/schema.js';
 
 const server = new Server({}, { lenientTariffs: true });
@@ -41,7 +41,7 @@ before(async () => {
 });
 after(() => server.destroy());
 
-const sell = async (account, product_id, quantity) => ok(await ger.post('/api/shop/sales', {
+const sell = async (account, product_id, quantity) => ok(await postSale(ger, {
   account, buyer: { kind: 'journalier' }, lines: [{ product_id, quantity }], method: 'Espèces',
 }));
 const chargeOf = (sale) => server.club.get('SELECT * FROM charges WHERE shop_sale_id = ?', sale.sale.id);
@@ -170,7 +170,7 @@ test('annuler un règlement à crédit ne défait pas la vente', async () => {
   try {
     const client = ok(await ger.post('/api/clients', { first_name: 'awa', last_name: 'benefice', phone: '00 00 09 01' }));
     ok(await cha.put(`/api/clients/${client.id}/credit-limit`, { credit_limit: 100000 * UM }));
-    ok(await ger.post('/api/shop/sales', {
+    ok(await postSale(ger, {
       account: 'alcool', buyer: { kind: 'client', member_id: client.id }, lines: [{ product_id: CHP, quantity: 1 }], credit: true,
     }));
     const paid = ok(await ger.post(`/api/clients/${client.id}/settlements`, { amount: 20000 * UM, method: 'Espèces' }));

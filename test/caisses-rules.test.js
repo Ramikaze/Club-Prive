@@ -4,7 +4,7 @@
 // chosen; a purchase always pays from the caisse of its category.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { Server, Client, ok, UM, fundCaisse } from './harness.js';
+import { Server, Client, ok, UM, fundCaisse, postSale } from './harness.js';
 
 const server = new Server({}, { lenientTariffs: true });
 let admin;
@@ -38,7 +38,7 @@ before(async () => {
   categories = ok(await admin.get('/api/ledger/categories'));
   const CIG = ok(await admin.post('/api/products', { category: 'cigare', name: 'Cigare test', reference: 'CIG', price: 50000 * UM, initial_stock: 10 })).id;
   BTL = ok(await admin.post('/api/products', { category: 'bouteille', name: 'Champagne test', reference: 'BTL', price: 20000 * UM, initial_stock: 10 })).id;
-  ok(await ger.post('/api/shop/sales', { account: 'cigares', buyer: { kind: 'journalier' }, lines: [{ product_id: CIG, quantity: 1 }], method: 'Espèces' }));
+  ok(await postSale(ger, { account: 'cigares', buyer: { kind: 'journalier' }, lines: [{ product_id: CIG, quantity: 1 }], method: 'Espèces' }));
 });
 after(() => server.destroy());
 
@@ -67,7 +67,7 @@ test('apport dans la caisse choisie ; son annulation refusée une fois l’argen
 });
 
 test('remboursement refusé quand la caisse de la vente est vide', async () => {
-  const r = ok(await ger.post('/api/shop/sales', { account: 'alcool', buyer: { kind: 'journalier' }, lines: [{ product_id: BTL, quantity: 1 }], method: 'Espèces' }));
+  const r = ok(await postSale(ger, { account: 'alcool', buyer: { kind: 'journalier' }, lines: [{ product_id: BTL, quantity: 1 }], method: 'Espèces' }));
   const balance = (await caisses()).caisses.alcool.balance;
   ok(await cha.post('/api/caisses/retrait', { account: 'alcool', amount: balance, method: 'Espèces' }));
   const stock = stockOf(BTL);

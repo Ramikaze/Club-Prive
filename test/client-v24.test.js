@@ -2,7 +2,7 @@
 // subscriptions are kept, like the users).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Server, Client, ok, UM } from './harness.js';
+import { Server, Client, ok, UM, postSale } from './harness.js';
 import { MIGRATIONS } from '../worker/schema.js';
 
 const CLIENT_TABLES = [
@@ -30,7 +30,7 @@ test('effacer toutes les données vide les tables des clients', async () => {
     await a.login('admin', 'v24-admin-password');
     const member = ok(await a.post('/api/members', { first_name: 'jean', last_name: 'client', phone: '00 00 08 24' }));
     const product = ok(await a.post('/api/products', { category: 'bouteille', name: 'Bouteille v24', reference: 'B24', price: 100 * UM, initial_stock: 5 }));
-    const sale = ok(await a.post('/api/shop/sales', {
+    const sale = ok(await postSale(a, {
       account: 'alcool', buyer: { kind: 'journalier' }, lines: [{ product_id: product.id, quantity: 1 }], method: 'Espèces',
     }));
     const db = server.db;

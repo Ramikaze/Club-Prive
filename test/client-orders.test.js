@@ -2,7 +2,7 @@
 // it into the Boutique sale at the counter.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { Server, Client, ok, UM } from './harness.js';
+import { Server, Client, ok, UM, postSale } from './harness.js';
 
 const server = new Server({});
 const PASSWORD = 'mon-mot-de-passe-client';
@@ -132,13 +132,13 @@ test('encaisser une commande à deux rayons : deux ventes puis « Retirée »', 
   const a = await person();
   const o = ok(await order(a, [{ product_id: c.id, quantity: 2 }, { product_id: b.id, quantity: 1 }]));
   const buyer = { kind: 'client', member_id: a.member.id };
-  ok(await ger.post('/api/shop/sales', { account: 'cigares', buyer, lines: [{ product_id: c.id, quantity: 2 }], method: 'Espèces', order_id: o.id }));
+  ok(await postSale(ger, { account: 'cigares', buyer, lines: [{ product_id: c.id, quantity: 2 }], method: 'Espèces', order_id: o.id }));
   assert.equal(stockOf(c.id), 3);
   assert.equal(stockOf(b.id), 5);
   assert.equal(server.club.get('SELECT status FROM client_orders WHERE id = ?', o.id).status, 'en_attente');
   // The same rayon cannot be sold twice for one order.
-  refused(await ger.post('/api/shop/sales', { account: 'cigares', buyer, lines: [{ product_id: c.id, quantity: 1 }], method: 'Espèces', order_id: o.id }), 409, 'COMMANDE_DEJA_ENCAISSEE');
-  ok(await ger.post('/api/shop/sales', { account: 'alcool', buyer, lines: [{ product_id: b.id, quantity: 1 }], method: 'Espèces', order_id: o.id }));
+  refused(await postSale(ger, { account: 'cigares', buyer, lines: [{ product_id: c.id, quantity: 1 }], method: 'Espèces', order_id: o.id }), 409, 'COMMANDE_DEJA_ENCAISSEE');
+  ok(await postSale(ger, { account: 'alcool', buyer, lines: [{ product_id: b.id, quantity: 1 }], method: 'Espèces', order_id: o.id }));
   const row = server.club.get('SELECT * FROM client_orders WHERE id = ?', o.id);
   assert.equal(row.status, 'retiree');
   assert.ok(row.closed_at);
@@ -149,7 +149,7 @@ test('encaisser une commande à deux rayons : deux ventes puis « Retirée »', 
   assert.equal(mine.status, 'retiree');
   assert.deepEqual(mine.lines.map((l) => l.taken), [true, true]);
   // A sale on a closed order is refused.
-  refused(await ger.post('/api/shop/sales', { account: 'alcool', buyer, lines: [{ product_id: b.id, quantity: 1 }], method: 'Espèces', order_id: o.id }), 409, 'COMMANDE_CLOTUREE');
+  refused(await postSale(ger, { account: 'alcool', buyer, lines: [{ product_id: b.id, quantity: 1 }], method: 'Espèces', order_id: o.id }), 409, 'COMMANDE_CLOTUREE');
 });
 
 test('retrait partiel : clôturer après une seule vente libère le reste', async () => {
@@ -159,7 +159,7 @@ test('retrait partiel : clôturer après une seule vente libère le reste', asyn
   const o = ok(await order(a, [{ product_id: c.id, quantity: 1 }, { product_id: b.id, quantity: 2 }]));
   // No sale yet: nothing to close on.
   refused(await ger.post(`/api/orders/${o.id}/close`, {}), 409, 'AUCUNE_VENTE');
-  ok(await ger.post('/api/shop/sales', { account: 'cigares', buyer: { kind: 'client', member_id: a.member.id }, lines: [{ product_id: c.id, quantity: 1 }], method: 'Espèces', order_id: o.id }));
+  ok(await postSale(ger, { account: 'cigares', buyer: { kind: 'client', member_id: a.member.id }, lines: [{ product_id: c.id, quantity: 1 }], method: 'Espèces', order_id: o.id }));
   // A sale was made: the order cannot be cancelled any more, only closed.
   refused(await ger.post(`/api/orders/${o.id}/cancel`, { reason: 'Changement d’avis' }), 409, 'COMMANDE_DEJA_ENCAISSEE');
   assert.equal(server.club.heldQuantities().get(b.id), 2);
@@ -175,7 +175,7 @@ test('vente d’une commande pour un autre acheteur : refusée', async () => {
   const a = await person();
   const b = await person();
   const o = ok(await order(a, [{ product_id: CIG, quantity: 1 }]));
-  const sale = (buyer, account = 'cigares') => ger.post('/api/shop/sales', {
+  const sale = (buyer, account = 'cigares') => postSale(ger, {
     account, buyer, lines: [{ product_id: account === 'cigares' ? CIG : BTL, quantity: 1 }], method: 'Espèces', order_id: o.id,
   });
   const before = [count('shop_sales'), count('payments'), count('client_order_sales')];
@@ -183,7 +183,7 @@ test('vente d’une commande pour un autre acheteur : refusée', async () => {
   refused(await sale({ kind: 'journalier' }), 409, 'COMMANDE_AUTRE_ACHETEUR');
   // A rayon the order has no line in.
   refused(await sale({ kind: 'client', member_id: a.member.id }, 'alcool'), 409, 'COMMANDE_SANS_RAYON');
-  assert.equal((await ger.post('/api/shop/sales', { account: 'cigares', buyer: { kind: 'client', member_id: a.member.id }, lines: [{ product_id: CIG, quantity: 1 }], method: 'Espèces', order_id: 99999 })).status, 404);
+  assert.equal((await postSale(ger, { account: 'cigares', buyer: { kind: 'client', member_id: a.member.id }, lines: [{ product_id: CIG, quantity: 1 }], method: 'Espèces', order_id: 99999 })).status, 404);
   assert.deepEqual([count('shop_sales'), count('payments'), count('client_order_sales')], before);
   assert.equal(server.club.get('SELECT status FROM client_orders WHERE id = ?', o.id).status, 'en_attente');
 });
@@ -278,7 +278,7 @@ test('une commande à moitié encaissée : le rayon vendu ne retient plus de sto
   const other = await person();
   ok(await order(other, [{ product_id: c.id, quantity: 1 }]));
   const o = ok(await order(a, [{ product_id: c.id, quantity: 2 }, { product_id: b.id, quantity: 1 }]));
-  ok(await ger.post('/api/shop/sales', {
+  ok(await postSale(ger, {
     account: 'cigares', buyer: { kind: 'client', member_id: a.member.id }, lines: [{ product_id: c.id, quantity: 2 }], method: 'Espèces', order_id: o.id,
   }));
   assert.equal(stockOf(c.id), 3);
@@ -316,10 +316,10 @@ test('côté équipe : « encaissé » mène au ticket de la vente (son paiement
   const buyer = { kind: 'client', member_id: a.member.id };
   const both = [{ product_id: c.id, quantity: 1 }, { product_id: b.id, quantity: 1 }];
   const paid = ok(await order(a, both));
-  const cash = ok(await ger.post('/api/shop/sales', { account: 'cigares', buyer, lines: [{ product_id: c.id, quantity: 1 }], method: 'Espèces', order_id: paid.id }));
+  const cash = ok(await postSale(ger, { account: 'cigares', buyer, lines: [{ product_id: c.id, quantity: 1 }], method: 'Espèces', order_id: paid.id }));
   assert.notEqual(cash.payment.id, cash.sale.id);
   const onCredit = ok(await order(a, both));
-  const credit = ok(await ger.post('/api/shop/sales', { account: 'alcool', buyer, lines: [{ product_id: b.id, quantity: 1 }], credit: true, order_id: onCredit.id }));
+  const credit = ok(await postSale(ger, { account: 'alcool', buyer, lines: [{ product_id: b.id, quantity: 1 }], credit: true, order_id: onCredit.id }));
   assert.equal(credit.payment ?? null, null);
   const { orders } = ok(await ger.get('/api/orders'));
   const seen = (id) => orders.find((o) => o.id === id);
@@ -340,18 +340,30 @@ test('commande à moitié encaissée : côté client, rayon retiré et plus d’
   const before = await view();
   assert.equal(before.cancellable, true);
   assert.deepEqual(before.lines.map((l) => l.taken), [null, null]);
-  ok(await ger.post('/api/shop/sales', {
+  ok(await postSale(ger, {
     account: 'cigares', buyer: { kind: 'client', member_id: a.member.id }, lines: [{ product_id: c.id, quantity: 1 }], method: 'Espèces', order_id: o.id,
   }));
   const half = await view();
   assert.equal(half.status, 'en_attente');
   assert.equal(half.cancellable, false);
   assert.deepEqual(half.lines.map((l) => [l.account, l.taken]), [['cigares', true], ['alcool', null]]);
-  ok(await ger.post('/api/shop/sales', {
+  ok(await postSale(ger, {
     account: 'alcool', buyer: { kind: 'client', member_id: a.member.id }, lines: [{ product_id: b.id, quantity: 1 }], method: 'Espèces', order_id: o.id,
   }));
   const done = await view();
   assert.equal(done.status, 'retiree');
   assert.equal(done.cancellable, false);
   assert.deepEqual(done.lines.map((l) => l.taken), [true, true]);
+});
+
+test('commande avec prix par lot : le lot s’applique à l’encaissement', async () => {
+  const c = await newProduct('cigare', 10);
+  ok(await admin.put(`/api/products/${c.id}`, { lot_qty: 3, lot_price: 10000 * UM, extra_price: 3000 * UM }));
+  const a = await person();
+  const o = ok(await order(a, [{ product_id: c.id, quantity: 4 }]));
+  const r = ok(await postSale(ger, {
+    account: 'cigares', buyer: { kind: 'client', member_id: a.member.id }, lines: [{ product_id: c.id, quantity: 4 }], method: 'Espèces', order_id: o.id,
+  }));
+  assert.equal(r.sale.amount, 13000 * UM);
+  assert.equal(server.club.get('SELECT status FROM client_orders WHERE id = ?', o.id).status, 'retiree');
 });
